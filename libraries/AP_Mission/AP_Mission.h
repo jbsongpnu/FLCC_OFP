@@ -79,6 +79,7 @@ public:
         float turn_rate_dps;    // turn rate in degrees / second (0=use default)
         int8_t direction;       // -1 = ccw, +1 = cw
         uint8_t relative_angle; // 0 = absolute angle, 1 = relative angle
+        // uint8_t yaw_hold;       // 0 = Yaw-hold, 1 = yaw follows course angle // KAL
     };
 
     // change speed command structure

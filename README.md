@@ -1,3 +1,14 @@
+# Work Note for KAL FLCC
+
+1. PNU 23.11.06 - https://github.com/jbsongpnu/FLCC_OFP.git created
+- Branch "A0_KAL_HD_FC_Base4.3.6" is created from Copter-4.3.6 tag as a main working branch
+2. PNU 23.11.07 - Codes from "FLCC-V0.3.00REV001_20230818" is uploaded
+- See this version's history to locate difference from Copter-4.3.6
+  - Tested on CubeOrangePlus (use ./waf configure --board CubeOrangePlus)
+- "Forced Submodule File" folder is added to force upload that can't be uploaded due to .gitignore list
+  - See ReadMe.txt to copy common.xml to mavlink module folder
+  - If any of files in submodule needs a change, it should be copied to this folder before commiting(or it will be lost)
+
 # ArduPilot Project
 
 <a href="https://ardupilot.org/discord"><img src="https://img.shields.io/discord/674039678562861068.svg" alt="Discord">

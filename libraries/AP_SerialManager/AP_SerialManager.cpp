@@ -190,14 +190,21 @@ const AP_Param::GroupInfo AP_SerialManager::var_info[] = {
     // @CopyValuesFrom: SERIAL1_PROTOCOL
     // @User: Standard
     // @RebootRequired: True
-    AP_GROUPINFO("4_PROTOCOL",  7, AP_SerialManager, state[4].protocol, SERIAL4_PROTOCOL),
+    // AP_GROUPINFO("4_PROTOCOL",  7, AP_SerialManager, state[4].protocol, SERIAL4_PROTOCOL),
 
     // @Param: 4_BAUD
     // @DisplayName: Serial 4 Baud Rate
     // @Description: The baud rate used for Serial4. Most stm32-based boards can support rates of up to 1500. If you setup a rate you cannot support and then can't connect to your board you should load a firmware from a different vehicle type. That will reset all your parameters to defaults.
     // @CopyValuesFrom: SERIAL1_BAUD
     // @User: Standard
-    AP_GROUPINFO("4_BAUD", 8, AP_SerialManager, state[4].baud, AP_SERIALMANAGER_GPS_BAUD/1000),
+    // AP_GROUPINFO("4_BAUD", 8, AP_SerialManager, state[4].baud, AP_SERIALMANAGER_GPS_BAUD/1000),
+
+// ==================================================================================
+// KAL OFP Firmware version : OFP_Orange v1.99.1
+// Data  : 21/04/30 
+// ==================================================================================
+	AP_GROUPINFO("4_PROTOCOL",  7, AP_SerialManager, state[4].protocol, SerialProtocol_Q30),       // Configure the Serial 4 Protocol of for CAM Interface (KAL)
+	AP_GROUPINFO("4_BAUD",      8, AP_SerialManager, state[4].baud, AP_SERIALMANAGER_CONSOLE_BAUD/1000), // Configure the Serial 4 baudrate of for CAM Interface (KAL)
 #endif
 
 #if SERIALMANAGER_NUM_PORTS > 5
@@ -573,6 +580,13 @@ void AP_SerialManager::init()
                     // Note init is handled by AP_MSP
                     break;
 #endif
+                case SerialProtocol_Q30: // KAL
+                    state[i].baud.set_default(AP_SERIALMANAGER_Q30_BAUD/1000);
+                    uart->begin(state[i].baudrate(),
+                                         AP_SERIALMANAGER_Q30_BUFSIZE_RX,
+                                         AP_SERIALMANAGER_Q30_BUFSIZE_TX);
+                    break;
+
                 default:
                     uart->begin(state[i].baudrate());
             }

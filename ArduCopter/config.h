@@ -433,7 +433,11 @@
 # define LAND_DETECTOR_ACCEL_LPF_CUTOFF     1.0f    // frequency cutoff of land detector accelerometer filter
 #endif
 #ifndef LAND_DETECTOR_ACCEL_MAX
-# define LAND_DETECTOR_ACCEL_MAX            1.0f    // vehicle acceleration must be under 1m/s/s
+// ==================================================================================
+// KAL OFP Firmware version : UNCLASSIFIED
+// ==================================================================================
+# define LAND_DETECTOR_ACCEL_MAX            3.0f    // vehicle acceleration must be under 3m/s/s (KAL, LAND_DETECTOR_ACCEL_MAX increased to 3m/s/s)
+// # define LAND_DETECTOR_ACCEL_MAX            1.0f    // vehicle acceleration must be under 1m/s/s // REMOVED
 #endif
 
 //////////////////////////////////////////////////////////////////////////////

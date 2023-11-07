@@ -100,6 +100,7 @@ void CANSensor::init(uint8_t driver_index, bool enable_filters)
     _initialized = true;
 
     debug_can(AP_CANManager::LOG_INFO, "init done");
+    // gcs().send_text(MAV_SEVERITY_INFO, "[CAN] CANSensor Initialization"); // KAL
 }
 
 bool CANSensor::add_interface(AP_HAL::CANIface* can_iface)

@@ -1018,10 +1018,11 @@ MAV_MISSION_RESULT AP_Mission::mavlink_int_to_mission_cmd(const mavlink_mission_
         break;
 
     case MAV_CMD_CONDITION_YAW:                         // MAV ID: 115
-        cmd.content.yaw.angle_deg = packet.param1;      // target angle in degrees
-        cmd.content.yaw.turn_rate_dps = packet.param2;  // 0 = use default turn rate otherwise specific turn rate in deg/sec
-        cmd.content.yaw.direction = packet.param3;      // -1 = ccw, +1 = cw
-        cmd.content.yaw.relative_angle = packet.param4; // lng=0: absolute angle provided, lng=1: relative angle provided
+        cmd.content.yaw.angle_deg       = packet.param1;// target angle in degrees
+        cmd.content.yaw.turn_rate_dps   = packet.param2;// 0 = use default turn rate otherwise specific turn rate in deg/sec
+        cmd.content.yaw.direction       = packet.param3;// -1 = ccw, +1 = cw
+        cmd.content.yaw.relative_angle  = packet.param4;// lng=0: absolute angle provided, lng=1: relative angle provided
+        // cmd.content.yaw.yaw_hold        = packet.param7;// 0 = Yaw-hold, 1 = yaw follows course angle // KAL
         break;
 
     case MAV_CMD_DO_JUMP:                               // MAV ID: 177
@@ -1512,6 +1513,7 @@ bool AP_Mission::mission_cmd_to_mavlink_int(const AP_Mission::Mission_Command& c
         packet.param2 = cmd.content.yaw.turn_rate_dps;  // 0 = use default turn rate otherwise specific turn rate in deg/sec
         packet.param3 = cmd.content.yaw.direction;      // -1 = ccw, +1 = cw
         packet.param4 = cmd.content.yaw.relative_angle; // 0 = absolute angle provided, 1 = relative angle provided
+        // packet.param7 = cmd.content.yaw.yaw_hold;       // 0 = Yaw-hold, 1 = yaw follows course angle // KAL
         break;
 
     case MAV_CMD_DO_JUMP:                               // MAV ID: 177

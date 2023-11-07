@@ -115,6 +115,10 @@
 #define AP_SERIALMANAGER_MSP_BUFSIZE_TX     256
 #define AP_SERIALMANAGER_MSP_BAUD           115200
 
+// Q30 default baud rates and buffer sizes // KAL
+#define AP_SERIALMANAGER_Q30_BAUD           115200
+#define AP_SERIALMANAGER_Q30_BUFSIZE_RX     256
+#define AP_SERIALMANAGER_Q30_BUFSIZE_TX     256
 class AP_SerialManager {
 public:
     AP_SerialManager();
@@ -170,6 +174,7 @@ public:
         SerialProtocol_MSP_DisplayPort = 42,
         SerialProtocol_MAVLinkHL = 43,
         SerialProtocol_Tramp = 44,
+        SerialProtocol_Q30 = 50, // KAL
         SerialProtocol_NumProtocols                    // must be the last value
     };
 

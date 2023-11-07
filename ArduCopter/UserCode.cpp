@@ -5,6 +5,14 @@ void Copter::userhook_init()
 {
     // put your initialisation code here
     // this will be called once at start-up
+    if (1 == CAM_UART->is_initialized()) // byungwchoi
+    {
+        CAM_UART->end();
+    }
+
+    CAM_UART->begin(115200);
+    gcs().send_text(MAV_SEVERITY_INFO, "MAVLINK CAM UART Initialising OK.");
+
 }
 #endif
 
@@ -26,6 +34,7 @@ void Copter::userhook_50Hz()
 void Copter::userhook_MediumLoop()
 {
     // put your 10Hz code here
+    gcs().send_message(MSG_CAM_STATUS); // KAL : Send CAM Status with Mavlink
 }
 #endif
 

@@ -942,6 +942,9 @@ void NavEKF2_core::FuseVelPosNED()
 // select the height measurement to be fused from the available baro, range finder and GPS sources
 void NavEKF2_core::selectHeightForFusion()
 {
+    //Debug Send Message of Ground Effect Compensator state (KAL)
+    // static int8_t count = 0;
+    
     // Read range finder data and check for new data in the buffer
     // This data is used by both height and optical flow fusion processing
     readRangeFinder();
@@ -1093,6 +1096,18 @@ void NavEKF2_core::selectHeightForFusion()
         // reduce weighting (increase observation noise) on baro if we are likely to be in ground effect
         if (dal.get_takeoff_expected() || dal.get_touchdown_expected()) {
             posDownObsNoise *= frontend->gndEffectBaroScaler;
+
+             // 23.05.30 Complain : Too many prints
+            // Debug (KAL)
+            // count = count + 1;
+            // // Debug Send Message of Ground Effect Compensator state (KAL)
+            // if(count == 40){
+            //     bool tof = dal.get_takeoff_expected();
+            //     bool tdf = dal.get_touchdown_expected();
+            //     gcs().send_text(MAV_SEVERITY_DEBUG, "GEC on, TO : %d, TD : %d", tof, tdf);
+            //     count = 0;
+            // }
+
         }
         // If we are in takeoff mode, the height measurement is limited to be no less than the measurement at start of takeoff
         // This prevents negative baro disturbances due to copter downwash corrupting the EKF altitude during initial ascent

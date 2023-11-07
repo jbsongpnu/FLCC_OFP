@@ -29,6 +29,7 @@
 #include <AP_PiccoloCAN/AP_PiccoloCAN.h>
 #include <AP_EFI/AP_EFI_NWPMU.h>
 #include "AP_CANTester.h"
+#include <AP_PMUCAN/AP_PMUCAN.h>	//JBSong // KAL 23.05.23
 #include <GCS_MAVLink/GCS_MAVLink.h>
 #if CONFIG_HAL_BOARD == HAL_BOARD_LINUX
 #include <AP_HAL_Linux/CANSocketIface.h>
@@ -235,6 +236,24 @@ void AP_CANManager::init()
             }
             AP_Param::load_object_from_eeprom((CANTester*)_drivers[drv_num], CANTester::var_info);
 #endif
+// ==================================================================================
+// KAL OFP Firmware version : UNCLASSIFIED
+// ==================================================================================
+        // KAL START 23.05.23
+        } else if (drv_type[drv_num] == Driver_Type_PMUCAN) {
+        	//JBSong - Initialize PMUCAN Class
+        	_drivers[drv_num] = _drv_param[drv_num]._pmucan = new AP_PMUCAN;	//User class defined in <AP_PMUCAN/AP_PMUCAN.h>
+        	//For any error initializing PMUCAN class, driver pointer becomes null
+            if (_drivers[drv_num] == nullptr) {
+                AP_BoardConfig::config_error("Failed to allocate PMUCAN %d\n\r", drv_num + 1);
+                continue;
+            }
+            AP_Param::load_object_from_eeprom((AP_PMUCAN*)_drivers[drv_num], AP_PMUCAN::var_info);
+
+            //load object from eeprom => setup of standardized param
+            //1) AP_CANDriver.cpp is modified to add AP_SUBGROUPPTR for PMUCAN
+            //2) AP_PMUCAN.cpp has user parameter var_info with a simple example
+        // END KAL
         } else {
             continue;
         }
@@ -269,6 +288,8 @@ void AP_CANManager::init()
         // to find and reference protocol drivers
         _driver_type_cache[drv_num] = drv_type[drv_num];
     }
+    
+    // gcs().send_text(MAV_SEVERITY_INFO, "[CAN] CANManager Initialization"); // KAL
 }
 
 /*

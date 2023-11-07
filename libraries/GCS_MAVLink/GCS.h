@@ -33,6 +33,14 @@
 
 #define GCS_DEBUG_SEND_MESSAGE_TIMINGS 0
 
+// Define FCC OFP Version // KAL 23.05.23 BW
+//  Base ardupilot version of OFP v2.0.1 is 4.1.0-dev
+//  This NEW version is based on Ardupilot v4.3.6
+//  Therefore, BW chagned OFP Version.
+#define OFP_VER_MAIN        3
+#define OFP_VER_SUB         00
+#define OFP_VER_REV         00
+
 #ifndef HAL_HIGH_LATENCY2_ENABLED
 #define HAL_HIGH_LATENCY2_ENABLED !HAL_MINIMIZE_FEATURES
 #endif
@@ -92,6 +100,19 @@ void gcs_out_of_space_to_send(mavlink_channel_t chan);
 #define MAV_STREAM_TERMINATOR { (streams)0, nullptr, 0 }
 
 #define GCS_MAVLINK_NUM_STREAM_RATES 10
+
+// ==================================================================================
+// KAL OFP Firmware version : OFP_Orange v1.99.1
+// Data  : 21/04/30 
+// ==================================================================================
+// Define Parameters for CAM
+#define UART_TELEM2 hal.serial(2)
+#define UART_GPS2   hal.serial(4)
+// #define CAM_UART                        UART_TELEM2       // Serial Port for CAM Interface (KAL)
+#define CAM_UART                        hal.serial(4)       // Serial Port for CAM Interface (KAL)
+// #define CAM_UART_BUFFER_SIZE            128                  // Serial Buffer Size (KAL)
+// #define CAM_TRACK_UART_BUFFER_SIZE      48                  // Serial Buffer Size for Track (KAL)
+
 class GCS_MAVLINK_Parameters
 {
 public:
@@ -416,6 +437,14 @@ public:
 
     MAV_RESULT set_message_interval(uint32_t msg_id, int32_t interval_us);
 
+// ==================================================================================
+// KAL OFP Firmware version : UNCLASSIFIED
+// ==================================================================================
+    //KAL add for roi 21.11.8
+    Location _roi_target;
+    uint8_t roi_cnt = 0;
+
+    
 protected:
 
     bool mavlink_coordinate_frame_to_location_alt_frame(MAV_FRAME coordinate_frame,
@@ -584,6 +613,16 @@ protected:
     MAV_RESULT handle_command_do_fence_enable(const mavlink_command_long_t &packet);
     MAV_RESULT handle_command_debug_trap(const mavlink_command_long_t &packet);
     MAV_RESULT handle_command_set_ekf_source_set(const mavlink_command_long_t &packet);
+
+
+// ==================================================================================
+// KAL OFP Firmware version : OFP_Orange v1.99.1
+// Data  : 21/04/30 
+// ==================================================================================
+    // Declare Functions for Handling Mavlink Message
+    void handle_gcs_flcc_cam_cmd(const mavlink_message_t &msg);                 // Handle Message of 'gcs_flcc_cam_cmd' (KAL)
+    void handle_gcs_flcc_pmu_ctrl(const mavlink_message_t &msg);                // Handle Message of 'gcs_flcc_pmu_cmd' (KAL)
+    uint16_t iteration_cnt=0;
 
     /*
       handle MAV_CMD_CAN_FORWARD and CAN_FRAME messages for CAN over MAVLink
@@ -1001,6 +1040,22 @@ private:
     // true if we should NOT do MAVLink on this port (usually because
     // someone's doing SERIAL_CONTROL over mavlink)
     bool _locked;
+
+    
+// ==================================================================================
+// KAL OFP Firmware version : OFP_Orange v1.99.1
+// Data  : 21/04/30 
+// ==================================================================================
+    // -------------------------------------------------------------------------
+    // Declare Functions to Control CAM
+    void no_control_mode_operation(mavlink_sys_icd_gcs_flcc_cam_cmd_t cmd);             // Stop CAM & Stabilize (KAL)
+    void IR_operation(mavlink_sys_icd_gcs_flcc_cam_cmd_t cam_cmd);                      // Control IR Functions (KAL)
+
+    // -------------------------------------------------------------------------
+    // Declare Functions to parse data with CAM
+    void send_message_gcs_flcc_cam_status() const;                                      // Send CAM Status to GCS with Mavlink Message (KAL)
+    void send_message_gcs_flcc_pmu_status() const;                                      // Send PMU Status to GCS with Mavlink Message (KAL)
+    void send_message_gcs_flcc_pmu_ctrl_echo() const;                                   // Send PMU Command(Echo) to GCS with Mavlink Message (KAL)
 };
 
 /// @class GCS
@@ -1088,6 +1143,12 @@ public:
 #endif
     class MissionItemProtocol *get_prot_for_mission_type(const MAV_MISSION_TYPE mission_type) const;
     void try_send_queued_message_for_type(MAV_MISSION_TYPE type) const;
+
+// ==================================================================================
+// KAL OFP Firmware version : UNCLASSIFIED
+// ==================================================================================
+    mavlink_sys_icd_gcs_flcc_pmu_ctrl_t    PMU_Ctrl;                                        // MAVLINK Message for PMU Command (KAL)
+    uint8_t PMU_Ctrl_Seq;                                                                   // Sequence Number of PMU Control Command (KAL)
 
     void update_send();
     void update_receive();

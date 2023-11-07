@@ -554,6 +554,9 @@ void Copter::ten_hz_logging_loop()
         g2.winch.write_log();
     }
 #endif
+
+
+    failsafe_pmucan_check();        // CHeck PMU Failsafe Condition & Action (KAL)
 }
 
 // twentyfive_hz_logging - should be run at 25hz

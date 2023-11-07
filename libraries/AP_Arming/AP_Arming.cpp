@@ -1152,6 +1152,10 @@ bool AP_Arming::can_checks(bool report)
                 case AP_CANManager::Driver_Type_Scripting2:
                 case AP_CANManager::Driver_Type_Benewake:
                     break;
+                case AP_CANManager::Driver_Type_PMUCAN: // KAL 23.05.23
+                	//PMUCAN does not have prearm check yet.
+                    // gcs().send_text(MAV_SEVERITY_INFO, "[CAN] AP_Arming : PMUCAN");
+                	break;
             }
         }
     }
@@ -1753,6 +1757,7 @@ void AP_Arming::check_forced_logging(const AP_Arming::Method method)
         case Method::GCS_FAILSAFE_HOLDFAILED:
         case Method::PILOT_INPUT_FAILSAFE:
         case Method::DEADRECKON_FAILSAFE:
+        case Method::FAILSAFE_PMU: // KAL 23.05.23 
             // keep logging for longer if disarmed for a bad reason
             AP::logger().set_long_log_persist(true);
             return;

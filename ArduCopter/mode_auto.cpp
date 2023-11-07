@@ -1687,6 +1687,16 @@ void ModeAuto::do_within_distance(const AP_Mission::Mission_Command& cmd)
 
 void ModeAuto::do_yaw(const AP_Mission::Mission_Command& cmd)
 {
+    // KAL - 23.08.28
+    // MAV_CMD_CONDITION_YAW
+    // Yaw holding function
+    // START
+    // if(cmd.content.yaw.yaw_hold == 0){
+    //     _yaw_angle_cd = copter.attitude_control->get_att_target_euler_cd().z
+    //     cmd.content.yaw.angle_deg = ((float)_yaw_angle_cd) * 0.01f
+    // }
+    // END
+
     auto_yaw.set_fixed_yaw(
         cmd.content.yaw.angle_deg,
         cmd.content.yaw.turn_rate_dps,

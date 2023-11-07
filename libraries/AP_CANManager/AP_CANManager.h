@@ -53,19 +53,20 @@ public:
     };
 
     enum Driver_Type : uint8_t {
-        Driver_Type_None = 0,
-        Driver_Type_UAVCAN = 1,
+        Driver_Type_None                = 0,
+        Driver_Type_UAVCAN              = 1,
         // 2 was KDECAN -- do not re-use
         // 3 was ToshibaCAN -- do not re-use
-        Driver_Type_PiccoloCAN = 4,
-        Driver_Type_CANTester = 5,
-        Driver_Type_EFI_NWPMU = 6,
-        Driver_Type_USD1 = 7,
-        Driver_Type_KDECAN = 8,
+        Driver_Type_PiccoloCAN          = 4,
+        Driver_Type_CANTester           = 5,
+        Driver_Type_EFI_NWPMU           = 6,
+        Driver_Type_USD1                = 7,
+        Driver_Type_KDECAN              = 8,
         // 9 was Driver_Type_MPPT_PacketDigital
-        Driver_Type_Scripting = 10,
-        Driver_Type_Benewake = 11,
-        Driver_Type_Scripting2 = 12,
+        Driver_Type_Scripting           = 10,
+        Driver_Type_Benewake            = 11,
+        Driver_Type_Scripting2          = 12,
+		Driver_Type_PMUCAN              = 13,		// KAL 
     };
 
     void init(void);
@@ -155,6 +156,7 @@ private:
         AP_CANDriver* _uavcan;
         AP_CANDriver* _kdecan;
         AP_CANDriver* _piccolocan;
+        AP_CANDriver* _pmucan;		//JBSong AP_CANManager->CANDriver_Params._pmucan // KAL
     };
 
     CANIface_Params _interfaces[HAL_NUM_CAN_IFACES];

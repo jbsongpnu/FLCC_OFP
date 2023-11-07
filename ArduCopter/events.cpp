@@ -5,6 +5,14 @@
  *       boolean failsafe reflects the current state
  */
 
+// ==================================================================================
+// KAL OFP Firmware version : UNCLASSIFIED
+// ==================================================================================
+// -------------------------------------------------------------------------
+// Define variables for CAM & PMU (KAL)
+extern mavlink_sys_icd_gcs_flcc_pmu_ctrl_echo_t         PMU_Ctrl_Echo;      // MAVLINK Message for PMU Command ECHO (KAL)
+
+
 bool Copter::failsafe_option(FailsafeOption opt) const
 {
     return (g2.fs_options & (uint32_t)opt);
@@ -485,3 +493,63 @@ void Copter::do_failsafe_action(FailsafeAction action, ModeReason reason){
 #endif
 }
 
+
+// ==================================================================================
+// KAL OFP Firmware version : UNCLASSIFIED
+// ==================================================================================
+// -------------------------------------------------------------------------
+// PMU Failsafe Action
+// -------------------------------------------------------------------------
+void Copter::failsafe_pmucan_check()
+{
+    // Check PMU Failsafe Condition
+    if(PMU_Ctrl_Echo.PMUCAN_Fail == 2)
+    {
+        // Before Connection with PMU
+        // gcs().send_text(MAV_SEVERITY_INFO, "[CAN] AP_Arming : failsafe_pmucan_check - Before Connection with PMU"); // KAL
+        return;
+    }
+    else if(PMU_Ctrl_Echo.PMUCAN_Fail == 0)
+    {
+        // Normal Operation
+        // gcs().send_text(MAV_SEVERITY_INFO, "[CAN] AP_Arming : failsafe_pmucan_check - Normal"); //
+        return;
+    }
+
+    // Log Data
+    AP::logger().Write("CAN1","TimeUS,CANF","QB",
+                    AP_HAL::micros64(),
+                    PMU_Ctrl_Echo.PMUCAN_Fail);
+
+
+    // Check Condition : Already Failfe or Not Arming
+    if(failsafe.pmucan||!motors->armed())
+    {
+        return;
+    }
+
+    // Set Failsafe Flag
+    failsafe.pmucan = true;
+
+    // Log Data Error Code
+    AP::logger().Write_Error(LogErrorSubsystem::FAILSAFE_PMU,  LogErrorCode::FAILSAFE_OCCURRED);
+
+    // Log Data
+    AP::logger().Write("CAN2","TimeUS,PCFS,CANF","QBB",
+                        AP_HAL::micros64(),
+                        failsafe.pmucan,
+                        PMU_Ctrl_Echo.PMUCAN_Fail);
+
+
+    // Check Condition : Disarm
+    if(should_disarm_on_failsafe())
+    {
+        // Set Disarm
+        arming.disarm(AP_Arming::Method::FAILSAFE_PMU);
+    }
+    else
+    {
+        // Set RTL ot Land
+        set_mode_RTL_or_land_with_pause(ModeReason::FAILSAFE_PMU);
+    }
+}
