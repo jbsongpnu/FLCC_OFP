@@ -68,6 +68,7 @@ private:
 
     // -------------------------------------------------------------------------
     // Declare Functions to parse data with CAM
+    uint8_t get_cam_checksumX(uint8_t* buffer, int pos, int size);                      // New Checksum calculation for New Viewpro Protocol
     uint8_t get_cam_checksum(uint8_t* buffer, int pos, int size);                       // Calculate Checksum (KAL)
 
     float get_cam_angle_16(uint16_t* buffer) const;                                     // Decode CAM angle for 2byte buffer (KAL)

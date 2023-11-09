@@ -6514,12 +6514,17 @@ void GCS_MAVLINK::handle_gcs_flcc_cam_cmd(const mavlink_message_t &msg)
 
                 debug_cam_gimbal_cmd = 3U;      // debug //0: not sent, 1: rate, 2: angle, 3: fix, 4: ROI
             }
+            //Note : debug example : gcs().send_text(MAV_SEVERITY_NOTICE,"Spd P %d Y %d", cam_cmd.Pitch_Speed_CMD, cam_cmd.Yaw_Speed_CMD);//JBS 23.11.08
 
             break;
 
         case 2: // Angle Control
-
-            if((abs(cam_cmd.Roll_Angle_CMD*10  - CAM_ATTITUDE_STATUS.Roll_REL_ANG)  > 10)
+            // Due to error when checking roll/pitch/yaw state, send angle command directly - JBS 23.11.08
+            Q30->send_cmd_angle(cam_cmd);
+            debug_cam_gimbal_cmd = 2U;
+            //Note : debug example : gcs().send_text(MAV_SEVERITY_NOTICE,"Ang P %d Y %d", cam_cmd.Pitch_Angle_CMD, cam_cmd.Yaw_Angle_CMD);//JBS 23.11.08
+            //To Do : check previous code again after acquiring gimbal state is finished - JBS 23.11.08
+            /*if((abs(cam_cmd.Roll_Angle_CMD*10  - CAM_ATTITUDE_STATUS.Roll_REL_ANG)  > 10)
             || (abs(cam_cmd.Pitch_Angle_CMD*10 - CAM_ATTITUDE_STATUS.Pitch_REL_ANG) > 10)
             || (abs(cam_cmd.Yaw_Angle_CMD*10   - CAM_ATTITUDE_STATUS.Yaw_REL_ANG)   > 10))
             {
@@ -6534,7 +6539,7 @@ void GCS_MAVLINK::handle_gcs_flcc_cam_cmd(const mavlink_message_t &msg)
                 Q30->send_cmd_hold_angle();     // hold cam angle
 
                 debug_cam_gimbal_cmd = 3U;      // debug //0: not sent, 1: rate, 2: angle, 3: fix, 4: ROI
-            }
+            }*/
 
             break;
 

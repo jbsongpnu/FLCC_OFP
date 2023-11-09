@@ -50,77 +50,50 @@ void AP_Q30::send_cmd_angle(mavlink_sys_icd_gcs_flcc_cam_cmd_t cmd)
     // Declare Variables
     uint8_t buffer[CAM_UART_BUFFER_SIZE];
 
-    // Update Buffer (Header)
-    buffer[0] = 0xFF;
-    buffer[1] = 0x01;
-    buffer[2] = 0x0F;
-    buffer[3] = 0x10;
+    // Update Buffer  Header to Mode  - JBS 23.11.08
+    buffer[0] = 0x55;   //Header
+    buffer[1] = 0xAA;   //Header 
+    buffer[2] = 0xDC;   //Header
+    buffer[3] = 0x0C;   //Length
+    buffer[4] = 0x1A;   //ID : A1 Servo Control Common
+    buffer[5] = 0x0B;   //Mode : Absolute Angle mode 0x0B
 
     // Check Roll Status & Set Command
     if (PREV_CAM_CMD.Roll_Angle_CMD != cmd.Roll_Angle_CMD)
     {
         PREV_CAM_CMD.Roll_Angle_CMD = cmd.Roll_Angle_CMD;
-
-        buffer[4] = 0x05; // RM
+        //Note : Roll can't be controlled anymore - JBS 23.11.08
+        //Note : Remove unnecessary part here - JBS 23.11.08
     }
-    else if (0 == cmd.Roll_Angle_CMD)
-    {
-        buffer[4] = 0x05; // RM//19.5.20수정
-    }
-    else
-    {
-        buffer[4] = 0x05; // stop cam flow -> restore 0x05 20.08.10
-    }
-
+    
     // Check Pitch Status & Set Command
     if (PREV_CAM_CMD.Pitch_Angle_CMD  != cmd.Pitch_Angle_CMD)
     {
         PREV_CAM_CMD.Pitch_Angle_CMD = cmd.Pitch_Angle_CMD;
-
-        buffer[5] = 0x05; // PM
-    }
-    else if (0 == cmd.Pitch_Angle_CMD)
-    {
-        buffer[5] = 0x05; // PM//19.5.20수정
-    }
-    else
-    {
-        buffer[5] = 0x05; // stop cam flow -> restore 0x05 20.08.10
+        //Note : Remove unnecessary part here - JBS 23.11.08
     }
 
     // Check Yaw Status & Set Command
     if (PREV_CAM_CMD.Yaw_Angle_CMD  != cmd.Yaw_Angle_CMD)
     {
         PREV_CAM_CMD.Yaw_Angle_CMD = cmd.Yaw_Angle_CMD;
-
-        buffer[6] = 0x05; // YM
-    }
-    else if (0 == cmd.Yaw_Angle_CMD)
-    {
-        buffer[6] = 0x05; // YM//19.5.20수정
-    }
-    else
-    {
-        buffer[6] = 0x05; // stop cam flow -> restore 0x05 20.08.10
+        //Note : Remove unnecessary part here - JBS 23.11.08
     }
 
-    // Update Buffer
-    buffer[7] = 0x00;   // RSL
-    buffer[8] = 0x00;   // RSH
-    buffer[9] = get_cam_angle_byte_l(cmd.Roll_Angle_CMD);   // RAL
-    buffer[10] = get_cam_angle_byte_h(cmd.Roll_Angle_CMD);  // RAH
-    buffer[11] = 0x00;  // PSL
-    buffer[12] = 0x00;  // PSH
-    buffer[13] = get_cam_angle_byte_l(cmd.Pitch_Angle_CMD); // PAL
-    buffer[14] = get_cam_angle_byte_h(cmd.Pitch_Angle_CMD); // PAH
-    buffer[15] = 0x00;  // YSL
-    buffer[16] = 0x00;  // YSH
-    buffer[17] = get_cam_angle_byte_l(cmd.Yaw_Angle_CMD);   // YAL
-    buffer[18] = get_cam_angle_byte_h(cmd.Yaw_Angle_CMD);   // YAH
-    buffer[19] = get_cam_checksum(buffer, 4, 19);
+    // Update Buffer - with new protocol JBS 23.11.08
+    // Note : Big-endian is used instead of little-endian - JBS 23.11.08
+    buffer[6] = get_cam_angle_byte_h(cmd.Yaw_Angle_CMD);   // YAH
+    buffer[7] = get_cam_angle_byte_l(cmd.Yaw_Angle_CMD);   // YAL
+    buffer[8] = get_cam_angle_byte_h(cmd.Pitch_Angle_CMD); // PAH
+    buffer[9] = get_cam_angle_byte_l(cmd.Pitch_Angle_CMD); // PAL
+    buffer[10] = 0x00;  // dummy
+    buffer[11] = 0x00;  // dummy
+    buffer[12] = 0x00;  // dummy
+    buffer[13] = 0x00;  // dummy
+    buffer[14] = get_cam_checksumX(buffer, 3, 14); // New checksum rule - JBS 23.11.08
 
     // Send Buffer
-    CAM_UART->write(buffer, 20);
+    CAM_UART->write(buffer, 15);    //Size changed from 20 to 15 - JBS 23.11.08
 }
 
 
@@ -132,77 +105,50 @@ void AP_Q30::send_cmd_speed(mavlink_sys_icd_gcs_flcc_cam_cmd_t cmd)
     // Declare Variables
     uint8_t buffer[CAM_UART_BUFFER_SIZE];
 
-    // Update Buffer (Header)
-    buffer[0] = 0xFF;
-    buffer[1] = 0x01;
-    buffer[2] = 0x0F;
-    buffer[3] = 0x10;
+    // Update Buffer  Header to Mode  - JBS 23.11.08
+    buffer[0] = 0x55;   //Header
+    buffer[1] = 0xAA;   //Header
+    buffer[2] = 0xDC;   //Header
+    buffer[3] = 0x0C;   //Length
+    buffer[4] = 0x1A;   //ID : A1 Servo Control Common
+    buffer[5] = 0x01;   //Mode : Speed mode 0x01
 
     // Check Roll Status & Set Command
     if (PREV_CAM_CMD.Roll_Speed_CMD != cmd.Roll_Speed_CMD)
     {
         PREV_CAM_CMD.Roll_Speed_CMD = cmd.Roll_Speed_CMD;
-
-        buffer[4] = 0x01; // RM
-    }
-    else if (0 == cmd.Roll_Speed_CMD)
-    {
-        buffer[4] = 0x01; // RM//19.5.20수정
-    }
-    else
-    {
-        buffer[4] = 0x01; // RM//19.5.20수정
+        //Note : Roll can't be controlled anymore - JBS 23.11.08
+        //Note : Remove unnecessary part here - JBS 23.11.08
     }
 
     // Check Pitch Status & Set Command
     if (PREV_CAM_CMD.Pitch_Speed_CMD != cmd.Pitch_Speed_CMD)
     {
         PREV_CAM_CMD.Pitch_Speed_CMD = cmd.Pitch_Speed_CMD;
-
-        buffer[5] = 0x01; // PM
-    }
-    else if (0 == cmd.Pitch_Speed_CMD)
-    {
-        buffer[5] = 0x01; // PM//19.5.20수정
-    }
-    else
-    {
-        buffer[5] = 0x01; // PM//19.5.20수정
+        //Note : Remove unnecessary part here - JBS 23.11.08
     }
 
     // Check Yaw Status & Set Command
     if (PREV_CAM_CMD.Yaw_Speed_CMD != cmd.Yaw_Speed_CMD)
     {
         PREV_CAM_CMD.Yaw_Speed_CMD = cmd.Yaw_Speed_CMD;
-
-        buffer[6] = 0x01; // YM
-    }
-    else if (0 == cmd.Yaw_Speed_CMD)
-    {
-        buffer[6] = 0x01; // YM//19.5.20수정
-    }
-    else
-    {
-        buffer[6] = 0x01; // YM//19.5.20수정
+        //Note : Remove unnecessary part here - JBS 23.11.08
     }
 
-    // Update Buffer
-    buffer[7] = get_cam_speed_byte_l(cmd.Roll_Speed_CMD);   // RSL
-    buffer[8] = get_cam_speed_byte_h(cmd.Roll_Speed_CMD);   // RSH
-    buffer[9] = 0x00;   // RAL
-    buffer[10] = 0x00;  // RAH
-    buffer[11] = get_cam_speed_byte_l(cmd.Pitch_Speed_CMD); // PSL
-    buffer[12] = get_cam_speed_byte_h(cmd.Pitch_Speed_CMD); // PSH
-    buffer[13] = 0x00;  // PAL
-    buffer[14] = 0x00;  // PAH
-    buffer[15] = get_cam_speed_byte_l(cmd.Yaw_Speed_CMD);   // YSL
-    buffer[16] = get_cam_speed_byte_h(cmd.Yaw_Speed_CMD);   // YSH//19.5.13 수정 iajo l->h
-    buffer[17] = 0x00;  // YAL
-    buffer[18] = 0x00;  // YAH
-    buffer[19] = get_cam_checksum(buffer, 4, 19);
+    // Update Buffer - with new protocol JBS 23.11.08
+    // Note : Big-endian is used instead of little-endian - JBS 23.11.08
+    buffer[6] = get_cam_speed_byte_h(cmd.Yaw_Speed_CMD);   // YSH
+    buffer[7] = get_cam_speed_byte_l(cmd.Yaw_Speed_CMD);   // YSL
+    buffer[8] = get_cam_speed_byte_h(cmd.Pitch_Speed_CMD); // PSH
+    buffer[9] = get_cam_speed_byte_l(cmd.Pitch_Speed_CMD); // PSL
+    buffer[10] = 0x00;  // dummy
+    buffer[11] = 0x00;  // dummy
+    buffer[12] = 0x00;  // dummy
+    buffer[13] = 0x00;  // dummy
+    buffer[14] = get_cam_checksumX(buffer, 3, 14);  // New checksum rule - JBS 23.11.08
 
     // Send Buffer
-    CAM_UART->write(buffer, 20);
+    CAM_UART->write(buffer, 15);    //Size changed from 20 to 15 - JBS 23.11.08
 }
 
 
@@ -438,34 +384,25 @@ void AP_Q30::send_cmd_hold_angle(void)
     // Declare Variables
     uint8_t buffer[CAM_UART_BUFFER_SIZE];
 
-    // Update Buffer
-    buffer[0] = 0xFF;   //header
-    buffer[1] = 0x01;   //header
-    buffer[2] = 0x0F;   //header
-    buffer[3] = 0x10;   //header
-
-    buffer[4] = 0x00;   //Angel ref frame control mode
-    buffer[5] = 0x00;   //Pitch ref frame control mode
-    buffer[6] = 0x00;   //Yaw ref frame control mode
-
-
-    buffer[7] = 0x00; // RSL    //Roll_rate
-    buffer[8] = 0x00; // RSH
-    buffer[9] = 0x00;
-    buffer[10] = 0x00;
-    buffer[11] = 0x00; // PSL   //Pitch_rate
-    buffer[12] = 0x00; // PSH
-
-    buffer[13] = 0x00;
-    buffer[14] = 0x00;
-    buffer[15] = 0x00; // YSL   //Yaw_rate
-    buffer[16] = 0x00; // YSH
-    buffer[17] = 0x00;
-    buffer[18] = 0x00;
-    buffer[19] = get_cam_checksum(buffer, 4, 19);
+    // Update Buffer with new protocol - JBS 23.11.08
+    buffer[0] = 0x55;   //header
+    buffer[1] = 0xAA;   //header
+    buffer[2] = 0xDC;   //header
+    buffer[3] = 0x0C;   //Length
+    buffer[4] = 0x1A;   //ID : A1 Servo Control Common
+    buffer[5] = 0x01;   //Mode : Speed mode 0x01
+    buffer[6] = 0x00;   //YSH
+    buffer[7] = 0x00;   // YSL
+    buffer[8] = 0x00;   // PSH
+    buffer[9] = 0x00;   // PSL
+    buffer[10] = 0x00;  // dummy
+    buffer[11] = 0x00;  // dummy
+    buffer[12] = 0x00;  // dummy
+    buffer[13] = 0x00;  // dummy
+    buffer[14] = get_cam_checksumX(buffer, 3, 14); // New checksum rule - JBS 23.11.08
 
     // Send Buffer
-    CAM_UART->write(buffer, 20);
+    CAM_UART->write(buffer, 15); //Size changed from 20 to 15 - JBS 23.11.08
 }
 
 
@@ -732,6 +669,20 @@ uint8_t AP_Q30::get_cam_checksum(uint8_t* buffer, int pos, int size)
     return checksum;
 }
 
+// -------------------------------------------------------------------------
+// Calculate Checksum for new Viewpro protocol - JBS 23.11.08
+// -------------------------------------------------------------------------
+uint8_t AP_Q30::get_cam_checksumX(uint8_t* buffer, int pos, int size)
+{
+    uint8_t checksum = buffer[pos]; //This should be the length
+
+    for (int i = (pos+1); i < size; i++)
+    {
+        checksum = (uint8_t)(checksum ^ buffer[i]); //bit-wise add(=XOR)
+    }
+
+    return checksum;
+}
 
  // -------------------------------------------------------------------------
  // Parse the "angle" Data from CAM
@@ -979,9 +930,13 @@ float AP_Q30::get_cam_angle_32(uint16_t* buffer) const
 // -------------------------------------------------------------------------
 // Encode angle to lower byte
 // -------------------------------------------------------------------------
+//  Changed by JBS - 23.11.08
+//  int16_t angle : deg unit, just -180 ~ 180 deg 
+//  For new protocol, 1bit = 360/65536 deg, and 65536/360 = 182.04444...
 uint8_t AP_Q30::get_cam_angle_byte_l(int16_t angle)
 {
-    angle = (int16_t)(angle / 0.02197F);
+    //angle = (int16_t)(angle / 0.02197F);
+    angle = (int16_t)(angle * 182.044F);
     uint8_t byte = (uint8_t)(angle & 0x00FF) ;
 
     return byte;
@@ -991,9 +946,11 @@ uint8_t AP_Q30::get_cam_angle_byte_l(int16_t angle)
 // -------------------------------------------------------------------------
 // Encode angle to upper byte
 // -------------------------------------------------------------------------
+//  Changed by JBS - 23.11.08
 uint8_t AP_Q30::get_cam_angle_byte_h(int16_t angle)
 {
-    angle = (int16_t)(angle / 0.02197F);
+    //angle = (int16_t)(angle / 0.02197F);
+    angle = (int16_t)(angle * 182.044F);
     uint8_t byte = (uint8_t)((angle >> 8) & 0x00FF);
 
     return byte;
@@ -1003,9 +960,11 @@ uint8_t AP_Q30::get_cam_angle_byte_h(int16_t angle)
 // -------------------------------------------------------------------------
 // Encode speed to lower byte
 // -------------------------------------------------------------------------
+//  Changed by JBS - 23.11.08
 uint8_t AP_Q30::get_cam_speed_byte_l(int16_t speed)
 {
-    speed = (int16_t)(speed / 0.122F);
+    //speed = (int16_t)(speed / 0.122F);
+    speed = speed * 100;    //For new protocol, 1bit = 0.01 deg/s
     uint8_t byte = (uint8_t)(speed & 0x00FF) ;
 
     return byte;
@@ -1015,9 +974,11 @@ uint8_t AP_Q30::get_cam_speed_byte_l(int16_t speed)
 // -------------------------------------------------------------------------
 // Encode speed to upper byte
 // -------------------------------------------------------------------------
+//  Changed by JBS - 23.11.08
 uint8_t AP_Q30::get_cam_speed_byte_h(int16_t speed)
 {
-    speed = (int16_t)(speed / 0.122F);
+    //speed = (int16_t)(speed / 0.122F);
+    speed = speed * 100;    //For new protocol, 1bit = 0.01 deg/s
     uint8_t byte = (uint8_t)((speed >> 8) & 0x00FF);
 
     return byte;

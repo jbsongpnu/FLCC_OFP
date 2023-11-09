@@ -8,7 +8,12 @@
 - "Forced Submodule File" folder is added to force upload that can't be uploaded due to .gitignore list
   - See ReadMe.txt to copy common.xml to mavlink module folder
   - If any of files in submodule needs a change, it should be copied to this folder before commiting(or it will be lost)
-
+3. PNU 23.11.08 - Missing files for FLCC-V0.3.00REV001_20230818 is uploaded
+- Now, the code is equivalent to FLCC-V0.3.00REV001_20230818 original version 
+4. PNU 23.11.09 - Camera pitch and yaw control for Viewpro 
+- Due to changes of Viewpro serial protocol 3.4.4, pitch and yaw control had to be fixed
+  - Only pitch and yaw speed/angle commands are change - other commands still work, roll command is not provided anymore 
+  - To Do : First, acquiring gimbal pitch/yaw state is required, then all other commands should be changed later
 # ArduPilot Project
 
 <a href="https://ardupilot.org/discord"><img src="https://img.shields.io/discord/674039678562861068.svg" alt="Discord">
