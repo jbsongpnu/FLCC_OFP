@@ -14,6 +14,10 @@
 - Due to changes of Viewpro serial protocol 3.4.4, pitch and yaw control had to be fixed
   - Only pitch and yaw speed/angle commands are change - other commands still work, roll command is not provided anymore 
   - To Do : First, acquiring gimbal pitch/yaw state is required, then all other commands should be changed later
+5. PNU 23.11.09-2 - GPS NMEA Output code is changed to send GPGGA and GPVTG (For Jeju application)
+  - GPRMC is temporarily disabled, and GPGGA also sends Drone ID number
+  - Set serial protocol to  20(serial4_protocol=20) to take effect
+  - If geo-tagging requires NMEA data to Viewpro camera, use POSITION_INT with mavlink1 option instead : So, NMEA output is not needed in usual cases
 # ArduPilot Project
 
 <a href="https://ardupilot.org/discord"><img src="https://img.shields.io/discord/674039678562861068.svg" alt="Discord">

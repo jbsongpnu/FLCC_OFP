@@ -35,7 +35,8 @@ extern const AP_HAL::HAL& hal;
 #endif
 
 #ifndef HAL_SERIAL3_PROTOCOL
-#define SERIAL3_PROTOCOL SerialProtocol_GPS
+//Serial3(GPS1-CubeOrange) is NMEAOutput as default, GPS with CAN should be used - JBS - 23.11.09
+#define SERIAL3_PROTOCOL SerialProtocol_NMEAOutput
 #else
 #define SERIAL3_PROTOCOL HAL_SERIAL3_PROTOCOL
 #endif

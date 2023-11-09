@@ -38,8 +38,8 @@
 //  This NEW version is based on Ardupilot v4.3.6
 //  Therefore, BW chagned OFP Version.
 #define OFP_VER_MAIN        3
-#define OFP_VER_SUB         00
-#define OFP_VER_REV         00
+#define OFP_VER_SUB         01
+#define OFP_VER_REV         01
 
 #ifndef HAL_HIGH_LATENCY2_ENABLED
 #define HAL_HIGH_LATENCY2_ENABLED !HAL_MINIMIZE_FEATURES

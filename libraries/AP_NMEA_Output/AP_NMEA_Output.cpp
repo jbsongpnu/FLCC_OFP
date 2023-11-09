@@ -17,7 +17,7 @@
 
  */
 #define ALLOW_DOUBLE_MATH_FUNCTIONS
-
+#define NMEA_UPDATE_RATE_HZ		1   // JBS - 23.11.09
 #include "AP_NMEA_Output.h"
 
 #if HAL_NMEA_OUTPUT_ENABLED
@@ -26,6 +26,7 @@
 #include <AP_RTC/AP_RTC.h>
 #include <AP_AHRS/AP_AHRS.h>
 #include <AP_SerialManager/AP_SerialManager.h>
+#include <AP_GPS/AP_GPS.h> // JBS - 23.11.09
 
 #include <stdio.h>
 #include <time.h>
@@ -69,9 +70,11 @@ uint8_t AP_NMEA_Output::_nmea_checksum(const char *str)
 void AP_NMEA_Output::update()
 {
     const uint32_t now_ms = AP_HAL::millis();
+    AP_GPS *gps = AP_GPS::get_singleton();  //Prepare GPS class, 
+    if(gps == nullptr)return;               //return if GPS is not available - JBS - 23.11.09
 
-    // only send at 10Hz
-    if ((now_ms - _last_run_ms) < 100) {
+    // only send at NMEA_UPDATE_RATE_HZ - JBS - 23.11.09
+    if ((now_ms - _last_run_ms) < (1000/NMEA_UPDATE_RATE_HZ)) { //JBS - 23.11.09
         return;
     }
     _last_run_ms = now_ms;
@@ -111,7 +114,6 @@ void AP_NMEA_Output::update()
              min_dec,
              loc.lat < 0 ? 'S' : 'N');
 
-
     // format longitude
     char lng_string[14];
     deg = fabs(loc.lng * 1.0e-7f);
@@ -123,16 +125,19 @@ void AP_NMEA_Output::update()
              min_dec,
              loc.lng < 0 ? 'W' : 'E');
 
-    // format GGA message
+    // format GGA message with real data and Drone ID - JBS - 23.11.09
     char* gga = nullptr;
+    uint16_t HDOP = gps->get_hdop();	//get HDOP in cm - JBS - 23.11.09
+    uint16_t NoSV = gps->num_sats();	//get number of satellites in view - JBS - 23.11.09
     int16_t gga_res = asprintf(&gga,
-                               "$GPGGA,%s,%s,%s,%01d,%02d,%04.1f,%07.2f,M,0.0,M,,",
+                               "$GPGGA,%s,%s,%s,%01d,%d,%d.%02d,%.2f,M,0.0,M,,PNUDRONE,", //Drone ID : Embed C4NM0008084 or C4NM0008820 for Jeju
                                tstring,
                                lat_string,
                                lng_string,
                                pos_valid ? 1 : 0,
-                               pos_valid ? 6 : 3,
-                               2.0,
+                               NoSV,
+                               HDOP/100,
+                               HDOP%100,
                                loc.alt * 0.01f);
     if (gga_res == -1) {
         return;
@@ -140,30 +145,31 @@ void AP_NMEA_Output::update()
     char gga_end[6];
     snprintf(gga_end, sizeof(gga_end), "*%02X\r\n", (unsigned) _nmea_checksum(gga));
 
-    // get speed
+    // get speed and heading
     Vector2f speed = ahrs.groundspeed_vector();
-    float speed_knots = speed.length() * M_PER_SEC_TO_KNOTS;
-    float heading = wrap_360(degrees(atan2f(speed.x, speed.y)));
+    float speed_mps = norm(speed.x, speed.y);//get speed in m/sec - JBS - 23.11.09
+    float speed_kph = speed_mps * 3.6;//convert speed to km/hour - JBS - 23.11.09
+    float speed_knots = speed_mps * M_PER_SEC_TO_KNOTS;//convert speed to knots - JBS - 23.11.09
+    float course_heading = wrap_360(degrees(atan2f(speed.x, speed.y)));//get course heading - JBS - 23.11.09
+    float mag_heading = wrap_360(degrees(ahrs.get_yaw()));//get magnetic heading - JBS - 23.11.09
 
-    // format RMC message
-    char* rmc = nullptr;
-    int16_t rmc_res = asprintf(&rmc,
-                               "$GPRMC,%s,%c,%s,%s,%.2f,%.2f,%s,,",
+    // format VTG message instead of RMC - JBS - 23.11.09
+    char* vtg = nullptr;
+    int16_t vtg_res = asprintf(&vtg,
+                               "$GPVTG,%s,%.1f,T,%.1f,M,%.1f,N,%.1f,K,",
                                tstring,
-                               pos_valid ? 'A' : 'V',
-                               lat_string,
-                               lng_string,
+                               course_heading,
+                               mag_heading,
                                speed_knots,
-                               heading,
-                               dstring);
-    if (rmc_res == -1) {
+                               speed_kph);
+    if (vtg_res == -1) {    //JBS - 23.11.09
         free(gga);
         return;
     }
-    char rmc_end[6];
-    snprintf(rmc_end, sizeof(rmc_end), "*%02X\r\n", (unsigned) _nmea_checksum(rmc));
+    char vtg_end[6];    //JBS - 23.11.09
+    snprintf(vtg_end, sizeof(vtg_end), "*%02X\r\n", (unsigned) _nmea_checksum(vtg)); //JBS - 23.11.09
 
-    const uint32_t space_required = strlen(gga) + strlen(gga_end) + strlen(rmc) + strlen(rmc_end);
+    const uint32_t space_required = strlen(gga) + strlen(gga_end) + strlen(vtg) + strlen(vtg_end); //JBS - 23.11.09
 
     // send to all NMEA output ports
     for (uint8_t i = 0; i < _num_outputs; i++) {
@@ -174,12 +180,12 @@ void AP_NMEA_Output::update()
         _uart[i]->write(gga);
         _uart[i]->write(gga_end);
 
-        _uart[i]->write(rmc);
-        _uart[i]->write(rmc_end);
+        _uart[i]->write(vtg);       //JBS - 23.11.09
+        _uart[i]->write(vtg_end);   //JBS - 23.11.09
     }
 
     free(gga);
-    free(rmc);
+    free(vtg);  //JBS - 23.11.09
 }
 
 #endif  // HAL_NMEA_OUTPUT_ENABLED
