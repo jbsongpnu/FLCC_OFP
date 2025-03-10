@@ -223,6 +223,10 @@ void AP_CANManager::init()
             AP_Param::load_object_from_eeprom((AP_PiccoloCAN*)_drivers[drv_num], AP_PiccoloCAN::var_info);
         } else
 #endif
+        if (drv_type[drv_num] == AP_CAN::Protocol::CoaxCAN)
+        {
+            continue; //250310 JBSong : Put initialize code here...
+        } else
         {
             continue;
         }

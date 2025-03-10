@@ -22,6 +22,7 @@
 #include <AP_DroneCAN/AP_DroneCAN.h>
 #include <AP_PiccoloCAN/AP_PiccoloCAN.h>
 #include <AP_KDECAN/AP_KDECAN.h>
+#include <AP_CoaxCAN/AP_CoaxCAN.h>          // 250310 JBSong : Added for Coaxial Helicopter
 
 
 // table of user settable CAN bus parameters
@@ -51,6 +52,11 @@ const AP_Param::GroupInfo AP_CANManager::CANDriver_Params::var_info[] = {
     AP_SUBGROUPPTR(_piccolocan, "PC_", 5, AP_CANManager::CANDriver_Params, AP_PiccoloCAN),
 #endif
 
+	// 250310 JBSong - add info for CoaxCAN
+    // @Group: Coax_
+    // @Path: ../AP_CoaxCAN/AP_CoaxCAN.cpp
+	AP_SUBGROUPPTR(_coaxcan, "Coax_", 15, AP_CANManager::CANDriver_Params, AP_COAXCAN),
+	
     // @Param: PROTOCOL2
     // @DisplayName: Secondary protocol with 11 bit CAN addressing
     // @Description: Secondary protocol with 11 bit CAN addressing

@@ -72,6 +72,7 @@
 #include <AC_PrecLand/AC_PrecLand_config.h>
 #include <AP_OpticalFlow/AP_OpticalFlow.h>
 #include <AP_Winch/AP_Winch_config.h>
+#include <AP_CoaxCAN/AP_CoaxCAN.h>          // 250310 JBSong : Added for Coaxial Helicopter
 
 // Configuration
 #include "defines.h"
