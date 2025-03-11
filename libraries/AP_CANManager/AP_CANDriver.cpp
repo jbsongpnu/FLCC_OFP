@@ -23,6 +23,7 @@
 #include <AP_PiccoloCAN/AP_PiccoloCAN.h>
 #include "AP_CANTester.h"
 #include <AP_KDECAN/AP_KDECAN.h>
+#include <AP_CoaxCAN1/AP_CoaxCAN1.h>          // 250310 JBSong : Added for Coaxial Helicopter
 
 
 // table of user settable CAN bus parameters
@@ -57,6 +58,10 @@ const AP_Param::GroupInfo AP_CANManager::CANDriver_Params::var_info[] = {
     // @Path: ../AP_PiccoloCAN/AP_PiccoloCAN.cpp
     AP_SUBGROUPPTR(_piccolocan, "PC_", 5, AP_CANManager::CANDriver_Params, AP_PiccoloCAN),
 #endif
+	// 250311 JBSong - add info for CoaxCAN1
+    // @Group: Coax1_
+    // @Path: ../AP_CoaxCAN/AP_CoaxCAN1.cpp
+	AP_SUBGROUPPTR(_coaxcan1, "Coax1_", 15, AP_CANManager::CANDriver_Params, AP_COAXCAN1),
 
     AP_GROUPEND
 };

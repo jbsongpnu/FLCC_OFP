@@ -244,6 +244,17 @@ void AP_CANManager::init()
             }
             AP_Param::load_object_from_eeprom((CANTester*)_drivers[drv_num], CANTester::var_info);
 #endif
+        // 250311 JBSong : Initialize CoaxCAN1
+        } else if (drv_type[drv_num] == Driver_Type_CoaxCAN1) {
+/*        	_drivers[drv_num] = _drv_param[drv_num]._coaxcan1 = new AP_COAXCAN1;	//User class defined in <AP_CoaxCAN1/AP_CoaxCAN1.h>
+        	//For any error initializing the class, driver pointer becomes null
+            if (_drivers[drv_num] == nullptr) {
+                AP_BoardConfig::allocation_error("Failed to allocate CoaxCAN1 %d\n\r", drv_num + 1);
+                continue;
+            }
+            AP_Param::load_object_from_eeprom((AP_COAXCAN1*)_drivers[drv_num], AP_CoaxCAN1::var_info);
+*/
+        // END JBSong
         } else {
             continue;
         }

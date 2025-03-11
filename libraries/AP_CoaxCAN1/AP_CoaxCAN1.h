@@ -12,6 +12,11 @@ public:
     AP_COAXCAN1();
     ~AP_COAXCAN1();
 
+    static const struct AP_Param::GroupInfo var_info[];
+
+    // Return coaxcan1 from @driver_index or nullptr if it's not ready or doesn't exist
+    static AP_COAXCAN1 *get_coaxcan1(uint8_t driver_index);	
+
 private:
 
 

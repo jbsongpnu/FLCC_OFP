@@ -4,8 +4,9 @@
 
 ## Version History
 
-- V0.01.01 Creating new project with 4.4.2 version
+- V0.01.03 Starting to link AP_CoaxCAN1 to CAN Manager
 - V0.01.02 A new structure for AP_CoaxCAN1 library has been added
+- V0.01.01 Creating new project with 4.4.2 version
 
 ***
 <a href="https://ardupilot.org/discord"><img src="https://img.shields.io/discord/674039678562861068.svg" alt="Discord">
