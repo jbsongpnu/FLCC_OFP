@@ -71,6 +71,7 @@
 #include <AP_Proximity/AP_Proximity.h>      // ArduPilot proximity sensor library
 #include <AP_OpticalFlow/AP_OpticalFlow.h>
 #include <AP_Winch/AP_Winch_config.h>
+#include <AP_CoaxCAN1/AP_CoaxCAN1.h>          // 250310 JBSong : Added for Coaxial Helicopter
 
 // Configuration
 #include "defines.h"
