@@ -4,6 +4,7 @@
 
 ## Version History
 
+- V0.01.04 Added required codes for AP_CANManager::init() to initialize AP_COAXCAN1 class
 - V0.01.03 Starting to link AP_CoaxCAN1 to CAN Manager
 - V0.01.02 A new structure for AP_CoaxCAN1 library has been added
 - V0.01.01 Creating new project with 4.4.2 version
