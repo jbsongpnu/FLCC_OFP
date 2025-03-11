@@ -29,6 +29,7 @@
 #include <AP_SerialManager/AP_SerialManager.h>
 #include <AP_PiccoloCAN/AP_PiccoloCAN.h>
 #include <AP_EFI/AP_EFI_NWPMU.h>
+#include <AP_CoaxCAN1/AP_CoaxCAN1.h>          // 250311 JBSong : Added for Coaxial Helicopter
 #include "AP_CANTester.h"
 #include <GCS_MAVLink/GCS.h>
 #if CONFIG_HAL_BOARD == HAL_BOARD_LINUX
@@ -246,14 +247,14 @@ void AP_CANManager::init()
 #endif
         // 250311 JBSong : Initialize CoaxCAN1
         } else if (drv_type[drv_num] == Driver_Type_CoaxCAN1) {
-/*        	_drivers[drv_num] = _drv_param[drv_num]._coaxcan1 = new AP_COAXCAN1;	//User class defined in <AP_CoaxCAN1/AP_CoaxCAN1.h>
+        	_drivers[drv_num] = _drv_param[drv_num]._coaxcan1 = new AP_COAXCAN1;	//User class defined in <AP_CoaxCAN1/AP_CoaxCAN1.h>
         	//For any error initializing the class, driver pointer becomes null
             if (_drivers[drv_num] == nullptr) {
                 AP_BoardConfig::allocation_error("Failed to allocate CoaxCAN1 %d\n\r", drv_num + 1);
                 continue;
             }
-            AP_Param::load_object_from_eeprom((AP_COAXCAN1*)_drivers[drv_num], AP_CoaxCAN1::var_info);
-*/
+            AP_Param::load_object_from_eeprom((AP_COAXCAN1*)_drivers[drv_num], AP_COAXCAN1::var_info);
+
         // END JBSong
         } else {
             continue;
