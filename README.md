@@ -4,6 +4,7 @@
 
 ## Version History
 
+- V0.01.05 Adding preliminary loop and run code with receive and transmit an example CAN frame
 - V0.01.04 Added required codes for AP_CANManager::init() to initialize AP_COAXCAN1 class
 - V0.01.03 Starting to link AP_CoaxCAN1 to CAN Manager
 - V0.01.02 A new structure for AP_CoaxCAN1 library has been added

@@ -5,6 +5,25 @@
 #include <AP_CANManager/AP_CANDriver.h>
 #include <AP_HAL/Semaphores.h>
 #include <AP_Param/AP_Param.h>
+#include "CoaxCAN_driver.hpp"
+
+#define COAXCAN1_LOOP_HZ              (100U)      // 100Hz 10ms
+#define COAXCAN1_MINOR_INTERVAL       (2U)        // 50Hz  10ms*2=20ms
+#define COAXCAN1_MALVINK_INTERVAL     (10U)       // 10Hz  10ms*10=100ms
+#define COAXCAN1_ONRUNNING_INTERVAL   (100U)      // 1Hz   10ms*100=1000ms
+
+class COAX1_CTRL_CMD
+{
+public:
+	COAX1_CTRL_CMD()
+	{
+        EX1 = 0;
+        EX2 = 84;
+	}
+
+	uint32_t EX1;
+	uint32_t EX2;
+};
 
 class AP_COAXCAN1 : public AP_CANDriver {
 public:
@@ -25,6 +44,10 @@ public:
     static AP_COAXCAN1 *get_coaxcan1(uint8_t driver_index);	
 
     void loop(void);
+    void run(void);
+    void RXspin(void);
+    int TXspin(void);
+    void handleFrame(const AP_HAL::CANFrame& can_rxframe);
 
 private:
 
@@ -35,8 +58,63 @@ private:
                                                                     // '_can_iface' is acquired from new add_interface() function
     HAL_EventHandle _event_handle;                                  // JBSong
 
-    //pmucan::ICanIface* _iface;                                      // igpark
+    coaxcan::ICanIface* _iface;
+
+    //Receive ID definition
+    static constexpr unsigned RX_ID_EX1 = 0x00000001;  //example 1
+    static constexpr unsigned RX_ID_EX2 = 0x00000002;  //example 2
+    static constexpr unsigned RX_ID_NUM = 3U;   //Number of RX_ID
+
+    //Command ID definition class
+    class CMD_ID
+	{
+    public:
+        static constexpr unsigned CMD_ID_EX1 = 0U; //example 1
+        static constexpr unsigned CMD_ID_EX2 = 1U; //example 2
+        static constexpr unsigned CMD_ID_NUM = 2U; //Number of CMD_ID
+	};
+
+    //example data state
+    uint16_t _rx_ex1_data1;
+    uint16_t _rx_ex1_data2;
+
+    uint32_t _cmd_id[CMD_ID::CMD_ID_NUM];
+    uint32_t _rx_id[RX_ID_NUM];
+
+    uint32_t RX_MSG;   //Received message
+    uint32_t _rx_idx;  //Received message index
+    uint32_t _cmd_idx;  //Command index
+
+    COAX1_CTRL_CMD _coax1_ctrl_cmd;
+    COAX1_CTRL_CMD _coax1_ctrl_cmd_prv;
+
+    uint32_t _handleFrame_cnt;
+	uint32_t _rtr_tx_cnt;
+	uint32_t _cmd_tx_cnt;
+	uint32_t _rtr_tx_err;
+	uint32_t _cmd_tx_err;
+
+    uint32_t _coaxcan1_last_send_us;
+
+    uint64_t _AP_COAXCAN1_loop_cnt = 0;
+    uint32_t coaxcan1_period_us;
+
     AP_Int8 _examp;
+    static const uint16_t COAXCAN1_SEND_TIMEOUT_US = 500;
+
+    enum COAXCAN1_STATUS : uint8_t{ // Status Manage
+        CONNECTED               = 0,
+        COMMUNICATION_ERROR     = 1,
+        CONNECTION_FAILURE      = 2,
+        VALUE_END               = 255,
+    };
+    enum COAXCAN1_STATUS COAXCAN1_Fail_Status;
+    enum COAXCAN1_STATUS COAXCAN1_Fail_Status_prev;
+    
+    uint16_t COAXCAN1_ErrCnt;
+    uint16_t COAXCAN1_RcvrCnt;
+
+    uint8_t  COAXCAN1_Ctrl_Seq;
 };
 
 #endif

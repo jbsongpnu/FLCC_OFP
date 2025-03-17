@@ -3,6 +3,7 @@
 #include "AP_CoaxCAN1.h"
 #include <AP_Scheduler/AP_Scheduler.h>
 #include <AP_CANManager/AP_CANManager.h>
+#include <AP_Math/AP_Math.h>
 
 extern const AP_HAL::HAL& hal;
 
@@ -30,6 +31,10 @@ AP_COAXCAN1::AP_COAXCAN1()
     _examp.set_default(0);
 
     _initialized    = false;
+    _iface                  = nullptr;
+
+    _rx_ex1_data1 = 0;
+    _rx_ex1_data2 = 0;
     
 }
 
@@ -110,7 +115,7 @@ void AP_COAXCAN1::init(uint8_t driver_index, bool enable_filters)
 // -------------------------------------------------------------------------
 void AP_COAXCAN1::loop(void)
 {
-   /* while (true)
+    while (true)
     {
         if (!_initialized)
         {
@@ -118,23 +123,214 @@ void AP_COAXCAN1::loop(void)
             continue;
         }
 
-        hal.scheduler->delay_microseconds(pmucan_period_us);    // 10ms period loop
+        hal.scheduler->delay_microseconds(coaxcan1_period_us);    // 10ms period loop
 
-        if(_AP_COAXCAN1_loop_cnt%COAXCAN_MINOR_INTERVAL==0)        // 20ms period run
+        if(_AP_COAXCAN1_loop_cnt%COAXCAN1_MINOR_INTERVAL==0)        // 20ms period run
             run();
             
-        if(_AP_COAXCAN1_loop_cnt%COAXCAN_MALVINK_INTERVAL==0)      // 100ms period send2ppc
+        if(_AP_COAXCAN1_loop_cnt%COAXCAN1_MALVINK_INTERVAL==0)      // 100ms period send2ppc
         {
-            send2gcs();     // Send COAX Data to GCS
+            //send2gcs();     // Send COAX Data to GCS
             // gcs().send_text(MAV_SEVERITY_INFO, "[COAX] send2gcs"); // KAL
         }
 
-        if(_AP_COAXCAN1_loop_cnt%COAXCAN_ONRUNNING_INTERVAL==0)      // 2 sec period KAL
+        _AP_COAXCAN1_loop_cnt++;                                  // 10ms period increase
+    }
+}
+
+// -------------------------------------------------------------------------
+// Run
+// -------------------------------------------------------------------------
+void AP_COAXCAN1::run(void)
+{
+    //Receive
+	RXspin();
+
+	//Transmit
+	TXspin();
+}
+
+// -------------------------------------------------------------------------
+// JBSong - return type changed to void
+// -------------------------------------------------------------------------
+void AP_COAXCAN1::RXspin()
+{
+    uint64_t time, timeout;
+    int res = 0;
+
+    const uint32_t timeout_us = MIN(AP::scheduler().get_loop_period_us(), COAXCAN1_SEND_TIMEOUT_US);
+    AP_HAL::CANIface::CanIOFlags flags = 0;
+    AP_HAL::CANFrame frame;                     // receive frame
+
+    // wait for space in buffer to read
+    bool read_select    = true; 
+    bool write_select   = false;    //Read-only
+    timeout = timeout_us + AP_HAL::micros64();
+
+    //'Root/AP_HAL_ChibiOS/CanIface.cpp',
+    // bool CANIface::select(bool &read, bool &write, const AP_HAL::CANFrame* pending_tx, uint64_t blocking_deadline)
+    int ret = _can_iface->select(read_select, write_select, nullptr, timeout);
+    if (!ret) {
+        // return if no data is available to read
+        if(COAXCAN1_Fail_Status==COAXCAN1_STATUS::CONNECTION_FAILURE)
         {
-        //     gcs().send_text(MAV_SEVERITY_INFO, "[COAX] %8ld V%5d %5d", COAX_Status.Date, COAX_Status.System_Voltage*100, COAX_Status.COAX_Status); // KAL
-            sendchanges();
+            COAXCAN1_Fail_Status = COAXCAN1_STATUS::CONNECTION_FAILURE;
+        }
+        else
+        {
+            COAXCAN1_Fail_Status = COAXCAN1_STATUS::COMMUNICATION_ERROR;
         }
 
-        _AP_COAXCAN1_loop_cnt++;                                  // 10ms period increase
-    }*/
+        return;
+    }
+
+
+    if(COAXCAN1_Fail_Status == COAXCAN1_STATUS::CONNECTED)     // Normal Connection with PMU
+    {
+        res = _can_iface->receive(frame, time, flags);
+
+        if(res > 0) // Data Received Normaly
+        {
+            if(COAXCAN1_ErrCnt > 0) // Check Error Count
+            {
+                COAXCAN1_ErrCnt = COAXCAN1_ErrCnt - 1;    // Decrease Error Count
+            }
+
+            while(res > 0)
+            {
+                if (flags & coaxcan::CanIOFlagLoopback)
+                {
+                    //Not Used
+                }
+                else
+                {
+                    handleFrame(frame);
+                }
+
+                res = _can_iface->receive(frame, time, flags);     // Try Receive
+            }
+        }
+        else        // Data Not Received
+        {
+            // hal.util->perf_count(_perf_rcv_err_cnt); // KAL 23.05.23 -- REMOVED 
+            COAXCAN1_ErrCnt = COAXCAN1_ErrCnt + 1;          // Increase Error Count
+
+            if(COAXCAN1_ErrCnt == 5) // Check Max Err Count
+            {
+                COAXCAN1_Fail_Status  = COAXCAN1_STATUS::COMMUNICATION_ERROR; // Set Communication Error Flag with PMU
+                COAXCAN1_ErrCnt       = 0; // Reset Error Count
+            }
+        }
+    }
+    else                            // Abnormal Connection with PMU
+    {
+        res = _can_iface->receive(frame, time, flags);
+
+        if(res > 0) // Data Received Normaly
+        {
+            COAXCAN1_RcvrCnt = COAXCAN1_RcvrCnt + 1;    // Increase Receive Count
+
+            if(COAXCAN1_RcvrCnt == 5) // Check Max Recv Count
+            {
+                COAXCAN1_Fail_Status  = COAXCAN1_STATUS::CONNECTED; // Clear Communication Error Flag 
+                COAXCAN1_RcvrCnt      = 0; // Reset Error Count
+            }
+
+            while(res > 0)
+            {
+                if (flags & coaxcan::CanIOFlagLoopback)
+                {
+//                    Not Used
+                }
+                else
+                {
+                    // hal.util->perf_count(_perf_rcv_num_cnt); // KAL 23.05.23 -- REMOVED 
+                    handleFrame(frame);
+                }
+
+                res = _can_iface->receive(frame, time, flags);     // Try Receive
+            }
+
+        }
+        else        // Data Not Received
+        {
+            // hal.util->perf_count(_perf_rcv_err_cnt); // KAL 23.05.23 -- REMOVED 
+
+            if((COAXCAN1_RcvrCnt > 0) & (res < 0)) // Check Receive Count
+            {
+                COAXCAN1_RcvrCnt = COAXCAN1_RcvrCnt - 1;    // Decrease Receive Count
+            }
+        }
+
+    }
+
 }
+
+// -------------------------------------------------------------------------
+// Handle Frame : process each CAN frame
+// -------------------------------------------------------------------------
+void AP_COAXCAN1::handleFrame(const AP_HAL::CANFrame& can_rxframe)
+{
+    uint16_t    uint16_temp = 0U;
+
+    int16_t int16_temp = 0U;
+
+    switch(can_rxframe.id&can_rxframe.MaskExtID)
+    {
+        case RX_ID_EX1:
+            // Parse Example 1
+            memcpy(&uint16_temp, &can_rxframe.data[0], 2);//copy two bytes 
+            _rx_ex1_data1 = uint16_temp;
+
+            // Parse Example 2
+            memcpy(&int16_temp, &can_rxframe.data[2], 2);
+            _rx_ex1_data2 = int16_temp;
+
+            _handleFrame_cnt++;
+
+            break;
+
+        case RX_ID_EX2:
+
+            // Parse Example 1
+            memcpy(&uint16_temp, &can_rxframe.data[0], 2);//copy two bytes 
+            _rx_ex1_data2 = uint16_temp;
+
+            // Parse Example 2
+            memcpy(&int16_temp, &can_rxframe.data[2], 2);
+            _rx_ex1_data1 = int16_temp;
+
+            _handleFrame_cnt++;
+
+            break;
+
+        default:
+
+            break;
+    }
+}
+
+// -------------------------------------------------------------------------
+// Transmit data
+// -------------------------------------------------------------------------
+int AP_COAXCAN1::TXspin()
+{
+    int cmd_send_res    = 0;
+    uint8_t can_data[8] = {0,0,0,0,0,0,0,0};
+    uint8_t msgdlc = 4;
+    uint32_t can_id = 1;
+
+    can_data[0] = _rx_ex1_data1 & 0x00FF;
+    can_data[1] = (_rx_ex1_data1 & 0xFF) >> 8;
+    can_data[2] = _rx_ex1_data2 & 0x00FF;
+    can_data[3] = (_rx_ex1_data2 & 0xFF) >> 8;
+
+    AP_HAL::CANFrame out_frame;
+    uint64_t timeout = AP_HAL::native_micros64() + COAXCAN1_SEND_TIMEOUT_US; 
+    
+    out_frame = {can_id, can_data, msgdlc};
+    cmd_send_res    = _can_iface->send(out_frame, timeout, AP_HAL::CANIface::AbortOnError);
+
+	return cmd_send_res;//dummy_res;
+}
+
