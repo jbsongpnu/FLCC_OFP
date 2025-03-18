@@ -60,8 +60,8 @@ const AP_Param::GroupInfo AP_CANManager::CANDriver_Params::var_info[] = {
 #endif
 	// 250311 JBSong - add info for CoaxCAN1
     // @Group: Coax1_
-    // @Path: ../AP_CoaxCAN/AP_CoaxCAN1.cpp
-	AP_SUBGROUPPTR(_coaxcan1, "Coax1_", 15, AP_CANManager::CANDriver_Params, AP_COAXCAN1),
+    // @Path: ../AP_CoaxCAN1/AP_CoaxCAN1.cpp
+	AP_SUBGROUPPTR(_coaxcan1, "Coax1_", 13, AP_CANManager::CANDriver_Params, AP_COAXCAN1),
 
     AP_GROUPEND
 };

@@ -4,6 +4,7 @@
 
 ## Version History
 
+- V0.01.06 Error in AP_CoaxCAN1.cpp is fixed. "Examp" was too long for AP_Param to initialize
 - V0.01.05 Adding preliminary loop and run code with receive and transmit an example CAN frame
 - V0.01.04 Added required codes for AP_CANManager::init() to initialize AP_COAXCAN1 class
 - V0.01.03 Starting to link AP_CoaxCAN1 to CAN Manager

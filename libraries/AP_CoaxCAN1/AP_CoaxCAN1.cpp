@@ -7,19 +7,19 @@
 
 extern const AP_HAL::HAL& hal;
 
-#define TEMP_EXP_INITVAL 0		//Initial value
+#define TEMP_EXP 0		//Initial value
 
 // Table of user settable CAN bus parameters
 const AP_Param::GroupInfo AP_COAXCAN1::var_info[] = {
     // @Param: example
     // @DisplayName: User example
     // @Description: Example for user
-    AP_GROUPINFO("Examp", 1, AP_COAXCAN1, _examp, TEMP_EXP_INITVAL),
-    //AP_GROUPINFO("Examp", 1, AP_COAXCAN, TEMP_EXP_INITVAL, TEMP_EXP_INITVAL),
-    // AP_GROUPINFO("PARAM1", 1, AP_COAXCAN, _pmu_param1, TEMP_EXP_INITVAL),
-    // AP_GROUPINFO("PARAM2", 2, AP_COAXCAN, _pmu_param2, TEMP_EXP_INITVAL),
-    // AP_GROUPINFO("PARAM3", 3, AP_COAXCAN, _pmu_param3, TEMP_EXP_INITVAL),
-    // AP_GROUPINFO("PARAM4", 4, AP_COAXCAN, _pmu_param4, TEMP_EXP_INITVAL),
+    AP_GROUPINFO("Ex", 1, AP_COAXCAN1, _examp, TEMP_EXP),
+    //AP_GROUPINFO("Examp", 1, AP_COAXCAN, TEMP_EXP, TEMP_EXP),
+    // AP_GROUPINFO("PARAM1", 1, AP_COAXCAN, _pmu_param1, TEMP_EXP),
+    // AP_GROUPINFO("PARAM2", 2, AP_COAXCAN, _pmu_param2, TEMP_EXP),
+    // AP_GROUPINFO("PARAM3", 3, AP_COAXCAN, _pmu_param3, TEMP_EXP),
+    // AP_GROUPINFO("PARAM4", 4, AP_COAXCAN, _pmu_param4, TEMP_EXP),
 
     AP_GROUPEND
 };
@@ -35,6 +35,10 @@ AP_COAXCAN1::AP_COAXCAN1()
 
     _rx_ex1_data1 = 0;
     _rx_ex1_data2 = 0;
+
+    _coaxcan1_last_send_us = 0;
+
+    coaxcan1_period_us = 1000000UL / COAXCAN1_LOOP_HZ;
     
 }
 
