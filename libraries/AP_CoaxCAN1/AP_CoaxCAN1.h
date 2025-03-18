@@ -62,9 +62,9 @@ private:
     coaxcan::ICanIface* _iface;
 
     //Receive ID definition
-    static constexpr unsigned RX_ID_EX1 = 0x00000001;  //example 1
-    static constexpr unsigned RX_ID_EX2 = 0x00000002;  //example 2
-    static constexpr unsigned RX_ID_NUM = 3U;   //Number of RX_ID
+    static constexpr unsigned RX_ID_CCB1 = 0x00000001;  //CCB1 message
+    static constexpr unsigned RX_ID_CCB2 = 0x00000002;  //CCB2 message
+    static constexpr unsigned RX_ID_NUM = 2U;   //Number of RX_ID
 
     //Command ID definition class
     class CMD_ID
@@ -78,6 +78,16 @@ private:
     //example data state
     uint16_t _rx_ex1_data1;
     uint16_t _rx_ex1_data2;
+    //Receive data for Cooling Control Board by NextFoam
+    uint16_t _rx_raw_thermist1; //Thermist 1 temperature x10 deg 0~10,237 deg
+    uint16_t _rx_raw_thermist2; //Thermist 2 temperature x10 deg 0~10,237 deg
+    uint16_t _rx_raw_thermist3; //Thermist 3 temperature x10 deg 0~10,237 deg
+    uint16_t _rx_raw_thermist4; //Thermist 4 temperature x10 deg 0~10,237 deg
+    uint16_t _rx_raw_thermocp1; //Thermocouple 1 temperature x10 deg 0~10,237 deg
+    uint16_t _rx_raw_thermocp2; //Thermocouple 2 temperature x10 deg 0~10,237 deg
+    uint16_t _rx_raw_wflow;     //(Water)Flow sensor 0~30,000 mL/min 
+    uint16_t _rx_raw_bdtemp;    //Board temperature 0~99 deg
+    uint16_t _rx_raw_state;     //Cooling controller state
 
     uint32_t _cmd_id[CMD_ID::CMD_ID_NUM];
     uint32_t _rx_id[RX_ID_NUM];

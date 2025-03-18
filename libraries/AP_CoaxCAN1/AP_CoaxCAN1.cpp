@@ -157,7 +157,7 @@ void AP_COAXCAN1::run(void)
 }
 
 // -------------------------------------------------------------------------
-// JBSong - return type changed to void
+// RX 
 // -------------------------------------------------------------------------
 void AP_COAXCAN1::RXspin()
 {
@@ -191,7 +191,7 @@ void AP_COAXCAN1::RXspin()
     }
 
 
-    if(COAXCAN1_Fail_Status == COAXCAN1_STATUS::CONNECTED)     // Normal Connection with PMU
+    if(COAXCAN1_Fail_Status == COAXCAN1_STATUS::CONNECTED)     // Normal Connection 
     {
         res = _can_iface->receive(frame, time, flags);
 
@@ -218,17 +218,16 @@ void AP_COAXCAN1::RXspin()
         }
         else        // Data Not Received
         {
-            // hal.util->perf_count(_perf_rcv_err_cnt); // KAL 23.05.23 -- REMOVED 
             COAXCAN1_ErrCnt = COAXCAN1_ErrCnt + 1;          // Increase Error Count
 
             if(COAXCAN1_ErrCnt == 5) // Check Max Err Count
             {
-                COAXCAN1_Fail_Status  = COAXCAN1_STATUS::COMMUNICATION_ERROR; // Set Communication Error Flag with PMU
+                COAXCAN1_Fail_Status  = COAXCAN1_STATUS::COMMUNICATION_ERROR; // Set Communication Error Flag 
                 COAXCAN1_ErrCnt       = 0; // Reset Error Count
             }
         }
     }
-    else                            // Abnormal Connection with PMU
+    else                            // Abnormal Connection 
     {
         res = _can_iface->receive(frame, time, flags);
 
@@ -281,30 +280,43 @@ void AP_COAXCAN1::handleFrame(const AP_HAL::CANFrame& can_rxframe)
 
     int16_t int16_temp = 0U;
 
-    switch(can_rxframe.id&can_rxframe.MaskExtID)
+    switch(can_rxframe.id&can_rxframe.MaskStdID)
     {
-        case RX_ID_EX1:
-            // Parse Example 1
+        case RX_ID_CCB1:
+            //Thermist 1 temperature
             memcpy(&uint16_temp, &can_rxframe.data[0], 2);//copy two bytes 
-            _rx_ex1_data1 = uint16_temp;
-
-            // Parse Example 2
+            _rx_raw_thermist1 = uint16_temp;
+            //Thermist 2 temperature
             memcpy(&int16_temp, &can_rxframe.data[2], 2);
-            _rx_ex1_data2 = int16_temp;
-
+            _rx_raw_thermist2 = int16_temp;
+            //Thermist 3 temperature
+            memcpy(&int16_temp, &can_rxframe.data[4], 2);
+            _rx_raw_thermist3 = int16_temp;
+            //Thermist 4 temperature
+            memcpy(&int16_temp, &can_rxframe.data[6], 2);
+            _rx_raw_thermist4 = int16_temp;
+            
+            gcs().send_text(MAV_SEVERITY_INFO, "CCB1 %d,%d,%d,%d", _rx_raw_thermist1, _rx_raw_thermist2, _rx_raw_thermist3, _rx_raw_thermist4); // For test
             _handleFrame_cnt++;
 
             break;
 
-        case RX_ID_EX2:
+        case RX_ID_CCB2:
 
-            // Parse Example 1
+            //Thermocouple 1 temperature
             memcpy(&uint16_temp, &can_rxframe.data[0], 2);//copy two bytes 
-            _rx_ex1_data2 = uint16_temp;
-
-            // Parse Example 2
+            _rx_raw_thermocp1 = uint16_temp;
+            //Thermocouple 2 temperature
             memcpy(&int16_temp, &can_rxframe.data[2], 2);
-            _rx_ex1_data1 = int16_temp;
+            _rx_raw_thermocp2 = int16_temp;
+            //(Water)Flow sensor
+            memcpy(&int16_temp, &can_rxframe.data[4], 2);
+            _rx_raw_wflow = int16_temp;
+            //Board temperature
+            _rx_raw_bdtemp = can_rxframe.data[6];
+            //Cooling controller state
+            _rx_raw_state = can_rxframe.data[7];
+            gcs().send_text(MAV_SEVERITY_INFO, "CCB2 %d,%d,%d,%d", _rx_raw_thermocp1, _rx_raw_thermocp2, _rx_raw_wflow, _rx_raw_state); // For test
 
             _handleFrame_cnt++;
 
