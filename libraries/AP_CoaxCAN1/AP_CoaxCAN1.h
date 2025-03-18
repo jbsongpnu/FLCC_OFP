@@ -2,6 +2,7 @@
 #define AP_COAXCAN1_H_
 
 #include <AP_Common/AP_Common.h>
+#include <GCS_MAVLink/GCS_MAVLink.h>
 #include <AP_CANManager/AP_CANDriver.h>
 #include <AP_HAL/Semaphores.h>
 #include <AP_Param/AP_Param.h>

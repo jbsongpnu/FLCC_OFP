@@ -2,6 +2,7 @@
 #include <AP_HAL/AP_HAL.h>
 #include "AP_CoaxCAN1.h"
 #include <AP_Scheduler/AP_Scheduler.h>
+#include <GCS_MAVLink/GCS.h>
 #include <AP_CANManager/AP_CANManager.h>
 #include <AP_Math/AP_Math.h>
 
@@ -102,8 +103,6 @@ void AP_COAXCAN1::init(uint8_t driver_index, bool enable_filters)
         return;
     }
 
-    //snprintf(_thread_name, sizeof(_thread_name), "pmucan");
-
     if (!hal.scheduler->thread_create(FUNCTOR_BIND_MEMBER(&AP_COAXCAN1::loop, void), _thread_name, 2048, AP_HAL::Scheduler::PRIORITY_CAN, 0)) {
         return;
     }
@@ -111,7 +110,7 @@ void AP_COAXCAN1::init(uint8_t driver_index, bool enable_filters)
     _initialized = true;
 
 
-    // gcs().send_text(MAV_SEVERITY_INFO, "[COAX] Initialized");
+    //gcs().send_text(MAV_SEVERITY_INFO, "[COAX] Initialized");
 }
 
 // -------------------------------------------------------------------------
@@ -130,12 +129,15 @@ void AP_COAXCAN1::loop(void)
         hal.scheduler->delay_microseconds(coaxcan1_period_us);    // 10ms period loop
 
         if(_AP_COAXCAN1_loop_cnt%COAXCAN1_MINOR_INTERVAL==0)        // 20ms period run
+        {    
             run();
+            //gcs().send_text(MAV_SEVERITY_INFO, "[COAX] run"); // For test
+        }
             
         if(_AP_COAXCAN1_loop_cnt%COAXCAN1_MALVINK_INTERVAL==0)      // 100ms period send2ppc
         {
             //send2gcs();     // Send COAX Data to GCS
-            // gcs().send_text(MAV_SEVERITY_INFO, "[COAX] send2gcs"); // KAL
+            //gcs().send_text(MAV_SEVERITY_INFO, "[COAX] send2gcs"); // For test
         }
 
         _AP_COAXCAN1_loop_cnt++;                                  // 10ms period increase
@@ -321,19 +323,28 @@ int AP_COAXCAN1::TXspin()
 {
     int cmd_send_res    = 0;
     uint8_t can_data[8] = {0,0,0,0,0,0,0,0};
-    uint8_t msgdlc = 4;
-    uint32_t can_id = 1;
+    uint8_t msgdlc = 8;
+    uint32_t can_id = 255;
 
     can_data[0] = _rx_ex1_data1 & 0x00FF;
-    can_data[1] = (_rx_ex1_data1 & 0xFF) >> 8;
+    can_data[1] = (_rx_ex1_data1 >> 8) & 0x00FF;
     can_data[2] = _rx_ex1_data2 & 0x00FF;
-    can_data[3] = (_rx_ex1_data2 & 0xFF) >> 8;
+    can_data[3] = (_rx_ex1_data2 >> 8) & 0x00FF;
+    can_data[4] = _rx_ex1_data1 & 0x00FF;
+    can_data[5] = (_rx_ex1_data1 >> 8) & 0x00FF;
+    can_data[6] = _rx_ex1_data2 & 0x00FF;
+    can_data[7] = (_rx_ex1_data2 >> 8) & 0x00FF;
 
     AP_HAL::CANFrame out_frame;
     uint64_t timeout = AP_HAL::native_micros64() + COAXCAN1_SEND_TIMEOUT_US; 
     
     out_frame = {can_id, can_data, msgdlc};
     cmd_send_res    = _can_iface->send(out_frame, timeout, AP_HAL::CANIface::AbortOnError);
+
+    //if(cmd_send_res==1)
+    //{
+    //    gcs().send_text(MAV_SEVERITY_INFO, "CAN TX OK");
+    //}
 
 	return cmd_send_res;//dummy_res;
 }
