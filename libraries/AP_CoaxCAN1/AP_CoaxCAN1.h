@@ -9,8 +9,8 @@
 #include "CoaxCAN_driver.hpp"
 
 #define COAXCAN1_LOOP_HZ              (100U)      // 100Hz 10ms
-#define COAXCAN1_MINOR_INTERVAL       (2U)        // 50Hz  10ms*2=20ms
-#define COAXCAN1_MALVINK_INTERVAL     (10U)       // 10Hz  10ms*10=100ms
+#define COAXCAN1_MINOR_INTERVAL       (50U)      //(2U)        // 50Hz  10ms*2=20ms
+#define COAXCAN1_MALVINK_INTERVAL     (100U)       // 10Hz  10ms*10=100ms
 #define COAXCAN1_ONRUNNING_INTERVAL   (100U)      // 1Hz   10ms*100=1000ms
 
 class COAX1_CTRL_CMD
@@ -63,7 +63,7 @@ private:
 
     //Receive ID definition
     static constexpr unsigned RX_ID_CCB1 = 0x00000001;  //CCB1 message
-    static constexpr unsigned RX_ID_CCB2 = 0x00000002;  //CCB2 message
+    static constexpr unsigned RX_ID_CCB2 = 0x00000010;  //CCB2 message
     static constexpr unsigned RX_ID_NUM = 2U;   //Number of RX_ID
 
     //Command ID definition class

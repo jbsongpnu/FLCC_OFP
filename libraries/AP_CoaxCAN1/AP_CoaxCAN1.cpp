@@ -36,6 +36,7 @@ AP_COAXCAN1::AP_COAXCAN1()
 
     _rx_ex1_data1 = 0;
     _rx_ex1_data2 = 0;
+    _rtr_tx_cnt = 0;
 
     _coaxcan1_last_send_us = 0;
 
@@ -137,7 +138,12 @@ void AP_COAXCAN1::loop(void)
         if(_AP_COAXCAN1_loop_cnt%COAXCAN1_MALVINK_INTERVAL==0)      // 100ms period send2ppc
         {
             //send2gcs();     // Send COAX Data to GCS
-            //gcs().send_text(MAV_SEVERITY_INFO, "[COAX] send2gcs"); // For test
+            if(COAXCAN1_Fail_Status == COAXCAN1_STATUS::CONNECTED)
+            {
+                gcs().send_text(MAV_SEVERITY_INFO, "CCB1 %d,%d,%d,%d", _rx_raw_thermist1, _rx_raw_thermist2, _rx_raw_thermist3, _rx_raw_thermist4); // For test
+                gcs().send_text(MAV_SEVERITY_INFO, "CCB2 %d,%d,%d,%d,%d", _rx_raw_thermocp1, _rx_raw_thermocp2, _rx_raw_wflow, _rx_raw_bdtemp, _rx_raw_state); // For test
+                gcs().send_text(MAV_SEVERITY_INFO, "TX %d RX %d",(uint16_t)(_rtr_tx_cnt & 0xFFFF),(uint16_t)(_handleFrame_cnt & 0xFFFF));
+            }
         }
 
         _AP_COAXCAN1_loop_cnt++;                                  // 10ms period increase
@@ -153,7 +159,11 @@ void AP_COAXCAN1::run(void)
 	RXspin();
 
 	//Transmit
-	TXspin();
+	if(TXspin())
+    {
+        _rtr_tx_cnt++;
+    }
+
 }
 
 // -------------------------------------------------------------------------
@@ -177,15 +187,18 @@ void AP_COAXCAN1::RXspin()
     // bool CANIface::select(bool &read, bool &write, const AP_HAL::CANFrame* pending_tx, uint64_t blocking_deadline)
     int ret = _can_iface->select(read_select, write_select, nullptr, timeout);
     if (!ret) {
+        gcs().send_text(MAV_SEVERITY_INFO, "CoaxCAN1 COMMUNICATION_ERROR");
         // return if no data is available to read
-        if(COAXCAN1_Fail_Status==COAXCAN1_STATUS::CONNECTION_FAILURE)
-        {
-            COAXCAN1_Fail_Status = COAXCAN1_STATUS::CONNECTION_FAILURE;
-        }
-        else
-        {
-            COAXCAN1_Fail_Status = COAXCAN1_STATUS::COMMUNICATION_ERROR;
-        }
+        // if(COAXCAN1_Fail_Status==COAXCAN1_STATUS::CONNECTION_FAILURE)
+        // {
+        //     COAXCAN1_Fail_Status = COAXCAN1_STATUS::CONNECTION_FAILURE;
+        //     gcs().send_text(MAV_SEVERITY_INFO, "CoaxCAN1 CONNECTION_FAILURE");
+        // }
+        // else
+        // {
+        //     COAXCAN1_Fail_Status = COAXCAN1_STATUS::COMMUNICATION_ERROR;
+        //     gcs().send_text(MAV_SEVERITY_INFO, "CoaxCAN1 COMMUNICATION_ERROR");
+        // }
 
         return;
     }
@@ -204,15 +217,7 @@ void AP_COAXCAN1::RXspin()
 
             while(res > 0)
             {
-                if (flags & coaxcan::CanIOFlagLoopback)
-                {
-                    //Not Used
-                }
-                else
-                {
-                    handleFrame(frame);
-                }
-
+                handleFrame(frame);
                 res = _can_iface->receive(frame, time, flags);     // Try Receive
             }
         }
@@ -220,9 +225,10 @@ void AP_COAXCAN1::RXspin()
         {
             COAXCAN1_ErrCnt = COAXCAN1_ErrCnt + 1;          // Increase Error Count
 
-            if(COAXCAN1_ErrCnt == 5) // Check Max Err Count
+            if(COAXCAN1_ErrCnt == 10) // Check Max Err Count
             {
                 COAXCAN1_Fail_Status  = COAXCAN1_STATUS::COMMUNICATION_ERROR; // Set Communication Error Flag 
+                gcs().send_text(MAV_SEVERITY_INFO, "CoaxCAN1 COMMUNICATION_ERROR ErrCnt10");
                 COAXCAN1_ErrCnt       = 0; // Reset Error Count
             }
         }
@@ -239,28 +245,18 @@ void AP_COAXCAN1::RXspin()
             {
                 COAXCAN1_Fail_Status  = COAXCAN1_STATUS::CONNECTED; // Clear Communication Error Flag 
                 COAXCAN1_RcvrCnt      = 0; // Reset Error Count
+                gcs().send_text(MAV_SEVERITY_INFO, "CoaxCAN1 Connected Err %d", COAXCAN1_ErrCnt);
             }
 
             while(res > 0)
             {
-                if (flags & coaxcan::CanIOFlagLoopback)
-                {
-//                    Not Used
-                }
-                else
-                {
-                    // hal.util->perf_count(_perf_rcv_num_cnt); // KAL 23.05.23 -- REMOVED 
-                    handleFrame(frame);
-                }
-
-                res = _can_iface->receive(frame, time, flags);     // Try Receive
+                handleFrame(frame);
+                res = _can_iface->receive(frame, time, flags);     // Receive again
             }
 
         }
         else        // Data Not Received
         {
-            // hal.util->perf_count(_perf_rcv_err_cnt); // KAL 23.05.23 -- REMOVED 
-
             if((COAXCAN1_RcvrCnt > 0) & (res < 0)) // Check Receive Count
             {
                 COAXCAN1_RcvrCnt = COAXCAN1_RcvrCnt - 1;    // Decrease Receive Count
@@ -278,25 +274,24 @@ void AP_COAXCAN1::handleFrame(const AP_HAL::CANFrame& can_rxframe)
 {
     uint16_t    uint16_temp = 0U;
 
-    int16_t int16_temp = 0U;
+//    int16_t int16_temp = 0U;
 
     switch(can_rxframe.id&can_rxframe.MaskStdID)
     {
         case RX_ID_CCB1:
             //Thermist 1 temperature
-            memcpy(&uint16_temp, &can_rxframe.data[0], 2);//copy two bytes 
-            _rx_raw_thermist1 = uint16_temp;
+            uint16_temp = can_rxframe.data[0];
+            _rx_raw_thermist1 = uint16_temp * 256 + can_rxframe.data[1];
             //Thermist 2 temperature
-            memcpy(&int16_temp, &can_rxframe.data[2], 2);
-            _rx_raw_thermist2 = int16_temp;
+            uint16_temp = can_rxframe.data[2];
+            _rx_raw_thermist2 = uint16_temp * 256 + can_rxframe.data[3];
             //Thermist 3 temperature
-            memcpy(&int16_temp, &can_rxframe.data[4], 2);
-            _rx_raw_thermist3 = int16_temp;
+            uint16_temp = can_rxframe.data[4];
+            _rx_raw_thermist3 = uint16_temp * 256 + can_rxframe.data[5];
             //Thermist 4 temperature
-            memcpy(&int16_temp, &can_rxframe.data[6], 2);
-            _rx_raw_thermist4 = int16_temp;
+            uint16_temp = can_rxframe.data[6];
+            _rx_raw_thermist4 = uint16_temp * 256 + can_rxframe.data[7];
             
-            gcs().send_text(MAV_SEVERITY_INFO, "CCB1 %d,%d,%d,%d", _rx_raw_thermist1, _rx_raw_thermist2, _rx_raw_thermist3, _rx_raw_thermist4); // For test
             _handleFrame_cnt++;
 
             break;
@@ -304,19 +299,18 @@ void AP_COAXCAN1::handleFrame(const AP_HAL::CANFrame& can_rxframe)
         case RX_ID_CCB2:
 
             //Thermocouple 1 temperature
-            memcpy(&uint16_temp, &can_rxframe.data[0], 2);//copy two bytes 
-            _rx_raw_thermocp1 = uint16_temp;
+            uint16_temp = can_rxframe.data[0];
+            _rx_raw_thermocp1 = uint16_temp * 256 + can_rxframe.data[1];
             //Thermocouple 2 temperature
-            memcpy(&int16_temp, &can_rxframe.data[2], 2);
-            _rx_raw_thermocp2 = int16_temp;
+            uint16_temp = can_rxframe.data[2];
+            _rx_raw_thermocp2 = uint16_temp * 256 + can_rxframe.data[3];
             //(Water)Flow sensor
-            memcpy(&int16_temp, &can_rxframe.data[4], 2);
-            _rx_raw_wflow = int16_temp;
+            uint16_temp = can_rxframe.data[4];
+            _rx_raw_wflow = uint16_temp * 256 + can_rxframe.data[5];
             //Board temperature
             _rx_raw_bdtemp = can_rxframe.data[6];
             //Cooling controller state
             _rx_raw_state = can_rxframe.data[7];
-            gcs().send_text(MAV_SEVERITY_INFO, "CCB2 %d,%d,%d,%d", _rx_raw_thermocp1, _rx_raw_thermocp2, _rx_raw_wflow, _rx_raw_state); // For test
 
             _handleFrame_cnt++;
 
@@ -336,16 +330,9 @@ int AP_COAXCAN1::TXspin()
     int cmd_send_res    = 0;
     uint8_t can_data[8] = {0,0,0,0,0,0,0,0};
     uint8_t msgdlc = 8;
-    uint32_t can_id = 255;
+    uint32_t can_id = 0xFE;
 
-    can_data[0] = _rx_ex1_data1 & 0x00FF;
-    can_data[1] = (_rx_ex1_data1 >> 8) & 0x00FF;
-    can_data[2] = _rx_ex1_data2 & 0x00FF;
-    can_data[3] = (_rx_ex1_data2 >> 8) & 0x00FF;
-    can_data[4] = _rx_ex1_data1 & 0x00FF;
-    can_data[5] = (_rx_ex1_data1 >> 8) & 0x00FF;
-    can_data[6] = _rx_ex1_data2 & 0x00FF;
-    can_data[7] = (_rx_ex1_data2 >> 8) & 0x00FF;
+    can_data[0] = 5;
 
     AP_HAL::CANFrame out_frame;
     uint64_t timeout = AP_HAL::native_micros64() + COAXCAN1_SEND_TIMEOUT_US; 
@@ -358,6 +345,6 @@ int AP_COAXCAN1::TXspin()
     //    gcs().send_text(MAV_SEVERITY_INFO, "CAN TX OK");
     //}
 
-	return cmd_send_res;//dummy_res;
+	return cmd_send_res;
 }
 
