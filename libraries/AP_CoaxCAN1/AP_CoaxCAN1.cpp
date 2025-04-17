@@ -48,6 +48,42 @@ AP_COAXCAN1::AP_COAXCAN1()
     _FCC_FcThrottle = 0;
     _FCC_FcThrottlePrdct = 0;
 
+    _IFCU1.PpCur = 0;
+    _IFCU1.PpCurLim = 0;
+    _IFCU1.PpH2Sof = 0;
+    _IFCU1.PpVlt = 0;
+    _IFCU1.reserved = 0;
+
+    _IFCU2.DTC = 0;
+    _IFCU2.FltSts = 0;
+    _IFCU2.H2LkLmp = 0;
+    _IFCU2.State = 0;
+    _IFCU2.SvmlsoRVlu = 0;
+
+    _IFCU3.FcNetCur = 0;
+    _IFCU3.FcNetVlt = 0;
+    _IFCU3.LdcCur = 0;
+    _IFCU3.LdcVlt = 0;
+
+    _IFCU4.AmbTemp = 0;
+    _IFCU4.FcInClntTmp = 0;
+    _IFCU4.H2TnkFillCnt = 0;
+    _IFCU4.H2TnkTmp = 0;
+    _IFCU4.H2TnkPrs = 0;
+    _IFCU4.RoomTemp = 0;
+
+    _IFCU5.ExWtrTrpFill = 0;
+    _IFCU5.HvBsaCur = 0;
+    _IFCU5.HvBsaSoC = 0;
+    _IFCU5.HvBsaSoH = 0;
+    _IFCU5.HvBsaVlt = 0;
+
+    _IFCU6.FcClntFiltChk = 0;
+    _IFCU6.FcClntSplChk = 0;
+    _IFCU6.FcMxCurLim = 0;
+    _IFCU6.FcNetCustCurLim = 0;
+    _IFCU6.H2MidPrs = 0;
+    
     coaxcan1_period_us = 1000000UL / COAXCAN1_LOOP_HZ;
     
 }
@@ -137,11 +173,11 @@ void AP_COAXCAN1::loop(void)
 
         hal.scheduler->delay_microseconds(coaxcan1_period_us);    // 5ms period loop
 
-        if(_AP_COAXCAN1_loop_cnt%COAXCAN1_MINOR_INTERVAL==0)        // 10ms period run
-        {    
+        //if(_AP_COAXCAN1_loop_cnt%COAXCAN1_MINOR_INTERVAL==0)        // 10ms period run
+        //{    
             run();
             //gcs().send_text(MAV_SEVERITY_INFO, "[COAX] run"); // For test
-        }
+        //}
             
         if(_AP_COAXCAN1_loop_cnt%COAXCAN1_MALVINK_INTERVAL==0)      // 100ms period send2ppc
         {
@@ -160,26 +196,26 @@ void AP_COAXCAN1::loop(void)
 }
 
 // -------------------------------------------------------------------------
-// Run : 100Hz
+// Run : 200Hz
+// [_AP_COAXCAN1_loop_cnt] is increased from loop() at every 5ms(200Hz)
 // -------------------------------------------------------------------------
 void AP_COAXCAN1::run(void)
 {
     //Receive
 	RXspin();
 
-    if(_AP_COAXCAN1_loop_cnt%10==0)
+    if(_AP_COAXCAN1_loop_cnt%20==0)
     // if(_AP_COAXCAN1_loop_cnt%100==0)
     {
         TX_FCC1_MSG();
+        _rtr_tx_cnt++;
+    }
+    else if(_AP_COAXCAN1_loop_cnt%20 == 5)
+    // // else if(_AP_COAXCAN1_loop_cnt%100 == 50)
+    {
         TX_FCC2_MSG();
         _rtr_tx_cnt++;
     }
-    // else if(_AP_COAXCAN1_loop_cnt%10 == 5)
-    // // else if(_AP_COAXCAN1_loop_cnt%100 == 50)
-    // {
-    //     TX_FCC1_MSG();
-    //     _rtr_tx_cnt++;
-    // }
     // else
     // {
     //     TXspin();//Transmit unscheduled messages : command from GCS
@@ -267,7 +303,7 @@ void AP_COAXCAN1::RXspin()
             if(COAXCAN1_RcvrCnt == 5) // Check Max Recv Count
             {
                 COAXCAN1_Fail_Status  = COAXCAN1_STATUS::CONNECTED; // Clear Communication Error Flag 
-                COAXCAN1_RcvrCnt      = 0; // Reset Error Count
+                COAXCAN1_RcvrCnt      = 0; // Reset Receive Count
                 gcs().send_text(MAV_SEVERITY_INFO, "CoaxCAN1 Connected Err %d", COAXCAN1_ErrCnt);
             }
 
@@ -295,12 +331,90 @@ void AP_COAXCAN1::RXspin()
 // -------------------------------------------------------------------------
 void AP_COAXCAN1::handleFrame(const AP_HAL::CANFrame& can_rxframe)
 {
-    uint16_t    uint16_temp = 0U;
+    uint16_t    uint16_temp = 0;
+    uint16_t    uint16_temp1 = 0;
+    uint16_t    uint16_temp2 = 0;
+    uint8_t     uint8_temp = 0;
 
 //    int16_t int16_temp = 0U;
 
     switch(can_rxframe.id&can_rxframe.MaskStdID)
     {
+        case RX_ID_IFCU1 :
+            uint16_temp1 = can_rxframe.data[0];
+            uint16_temp2 = can_rxframe.data[1];
+            _IFCU1.PpVlt = uint16_temp2 * 256 + uint16_temp1;
+            uint16_temp1 = can_rxframe.data[2];
+            uint16_temp2 = can_rxframe.data[3];
+            _IFCU1.PpCur = uint16_temp2 * 256 + uint16_temp1;
+            uint16_temp1 = can_rxframe.data[4];
+            uint16_temp2 = can_rxframe.data[5];
+            _IFCU1.PpCurLim = uint16_temp2 * 256 + uint16_temp1;
+            _IFCU1.PpH2Sof = can_rxframe.data[6];
+            // _IFCU1.reserved = can_rxframe.data[7];
+            gcs().send_text(MAV_SEVERITY_INFO, "IFCU1 : %d, %d, %d, %d", _IFCU1.PpVlt, _IFCU1.PpCur, _IFCU1.PpCurLim, _IFCU1.PpH2Sof);
+            break;
+        case RX_ID_IFCU2 :
+            _IFCU2.State = can_rxframe.data[0];
+            _IFCU2.FltSts = can_rxframe.data[1]; 
+            _IFCU2.DTC = can_rxframe.data[2];
+            _IFCU2.H2LkLmp = can_rxframe.data[3];
+            uint16_temp1 = can_rxframe.data[4];
+            uint16_temp2 = can_rxframe.data[5];
+            _IFCU2.SvmlsoRVlu = uint16_temp2 * 256 + uint16_temp1;
+            gcs().send_text(MAV_SEVERITY_INFO, "IFCU2 : %d, %d, %d, %d, %d", _IFCU2.State, _IFCU2.FltSts, _IFCU2.DTC, _IFCU2.H2LkLmp, _IFCU2.SvmlsoRVlu);
+            break;
+        case RX_ID_IFCU3 :
+            uint16_temp1 = can_rxframe.data[0];
+            uint16_temp2 = can_rxframe.data[1];
+            _IFCU3.FcNetVlt = uint16_temp2 * 256 + uint16_temp1;
+            uint16_temp1 = can_rxframe.data[2];
+            uint16_temp2 = can_rxframe.data[3];
+            _IFCU3.FcNetCur = uint16_temp2 * 256 + uint16_temp1;
+            uint16_temp1 = can_rxframe.data[4];
+            uint16_temp2 = can_rxframe.data[5];
+            _IFCU3.LdcVlt = uint16_temp2 * 256 + uint16_temp1;
+            uint16_temp1 = can_rxframe.data[6];
+            uint16_temp2 = can_rxframe.data[7];
+            _IFCU3.LdcCur = uint16_temp2 * 256 + uint16_temp1;
+            gcs().send_text(MAV_SEVERITY_INFO, "IFCU3 : %d, %d, %d, %d", _IFCU3.FcNetVlt, _IFCU3.FcNetCur, _IFCU3.LdcVlt, _IFCU3.LdcCur);
+            break;
+        case RX_ID_IFCU4 :
+            _IFCU4.FcInClntTmp = (int8_t)can_rxframe.data[0];
+            _IFCU4.AmbTemp = (int8_t)can_rxframe.data[1];
+            _IFCU4.RoomTemp = (int8_t)can_rxframe.data[2];
+            _IFCU4.H2TnkPrs = can_rxframe.data[3];
+            _IFCU4.H2TnkTmp = can_rxframe.data[4];
+            uint16_temp1 = can_rxframe.data[5];
+            uint16_temp2 = can_rxframe.data[6];
+            _IFCU4.H2TnkFillCnt = uint16_temp2 * 256 + uint16_temp1;
+            gcs().send_text(MAV_SEVERITY_INFO, "IFCU4 : %d, %d, %d, %u, %u, %u", _IFCU4.FcInClntTmp, _IFCU4.AmbTemp, _IFCU4.RoomTemp, _IFCU4.H2TnkPrs, _IFCU4.H2TnkTmp, _IFCU4.H2TnkFillCnt);
+            break;
+        case RX_ID_IFCU5 :
+            uint16_temp1 = can_rxframe.data[0];
+            uint16_temp2 = can_rxframe.data[1];
+            _IFCU5.HvBsaVlt = uint16_temp2 * 256 + uint16_temp1;
+            uint16_temp1 = can_rxframe.data[2];
+            uint16_temp2 = can_rxframe.data[3];
+            _IFCU5.HvBsaCur = uint16_temp2 * 256 + uint16_temp1;
+            _IFCU5.HvBsaSoC = can_rxframe.data[4];
+            _IFCU5.HvBsaSoH = can_rxframe.data[5];
+            _IFCU5.ExWtrTrpFill = can_rxframe.data[6] & 0x01;
+            gcs().send_text(MAV_SEVERITY_INFO, "IFCU5 : %d, %d, %d, %d, %d", _IFCU5.HvBsaVlt, _IFCU5.HvBsaCur, _IFCU5.HvBsaSoC, _IFCU5.HvBsaSoH, _IFCU5.ExWtrTrpFill);
+            break;
+        case RX_ID_IFCU6 :
+            uint16_temp1 = can_rxframe.data[0];
+            uint16_temp2 = can_rxframe.data[1];
+            _IFCU6.FcMxCurLim = uint16_temp2 * 256 + uint16_temp1;
+            uint16_temp1 = can_rxframe.data[2];
+            uint16_temp2 = can_rxframe.data[3];
+            _IFCU6.FcNetCustCurLim = uint16_temp2 * 256 + uint16_temp1;
+            _IFCU6.H2MidPrs = can_rxframe.data[4];
+            uint8_temp = can_rxframe.data[5];
+            _IFCU6.FcClntFiltChk = uint8_temp & 0x01;
+            _IFCU6.FcClntSplChk = (uint8_temp >> 1) & 0x01;
+            gcs().send_text(MAV_SEVERITY_INFO, "IFCU6 : %d, %d, %d, %d, %d", _IFCU6.FcMxCurLim, _IFCU6.FcNetCustCurLim, _IFCU6.H2MidPrs, _IFCU6.FcClntFiltChk, _IFCU6.FcClntSplChk);
+            break;
         case RX_ID_CCB1:
             //Thermist 1 temperature
             uint16_temp = can_rxframe.data[0];
