@@ -39,6 +39,14 @@ AP_COAXCAN1::AP_COAXCAN1()
     _rtr_tx_cnt = 0;
 
     _coaxcan1_last_send_us = 0;
+    _FCC_AlivCnt = 0;
+    _FCC_CmdFcRunStop = 0;
+    _FCC_CmdPmsBatCut = 0;
+    _FCC_Ready = 0;
+    _FCC_Reserved1 = 0;
+    _FCC_FcPwrReq = 0;
+    _FCC_FcThrottle = 0;
+    _FCC_FcThrottlePrdct = 0;
 
     coaxcan1_period_us = 1000000UL / COAXCAN1_LOOP_HZ;
     
@@ -127,9 +135,9 @@ void AP_COAXCAN1::loop(void)
             continue;
         }
 
-        hal.scheduler->delay_microseconds(coaxcan1_period_us);    // 10ms period loop
+        hal.scheduler->delay_microseconds(coaxcan1_period_us);    // 5ms period loop
 
-        if(_AP_COAXCAN1_loop_cnt%COAXCAN1_MINOR_INTERVAL==0)        // 20ms period run
+        if(_AP_COAXCAN1_loop_cnt%COAXCAN1_MINOR_INTERVAL==0)        // 10ms period run
         {    
             run();
             //gcs().send_text(MAV_SEVERITY_INFO, "[COAX] run"); // For test
@@ -138,31 +146,46 @@ void AP_COAXCAN1::loop(void)
         if(_AP_COAXCAN1_loop_cnt%COAXCAN1_MALVINK_INTERVAL==0)      // 100ms period send2ppc
         {
             //send2gcs();     // Send COAX Data to GCS
-            if(COAXCAN1_Fail_Status == COAXCAN1_STATUS::CONNECTED)
-            {
-                gcs().send_text(MAV_SEVERITY_INFO, "CCB1 %d,%d,%d,%d", _rx_raw_thermist1, _rx_raw_thermist2, _rx_raw_thermist3, _rx_raw_thermist4); // For test
-                gcs().send_text(MAV_SEVERITY_INFO, "CCB2 %d,%d,%d,%d,%d", _rx_raw_thermocp1, _rx_raw_thermocp2, _rx_raw_wflow, _rx_raw_bdtemp, _rx_raw_state); // For test
-                gcs().send_text(MAV_SEVERITY_INFO, "TX %d RX %d",(uint16_t)(_rtr_tx_cnt & 0xFFFF),(uint16_t)(_handleFrame_cnt & 0xFFFF));
-            }
+            //if(COAXCAN1_Fail_Status == COAXCAN1_STATUS::CONNECTED)
+            //{
+            //    gcs().send_text(MAV_SEVERITY_INFO, "CCB1 %d,%d,%d,%d", _rx_raw_thermist1, _rx_raw_thermist2, _rx_raw_thermist3, _rx_raw_thermist4); // For test
+            //    gcs().send_text(MAV_SEVERITY_INFO, "CCB2 %d,%d,%d,%d,%d", _rx_raw_thermocp1, _rx_raw_thermocp2, _rx_raw_wflow, _rx_raw_bdtemp, _rx_raw_state); // For test
+            //    gcs().send_text(MAV_SEVERITY_INFO, "TX %d RX %d",(uint16_t)(_rtr_tx_cnt & 0xFFFF),(uint16_t)(_handleFrame_cnt & 0xFFFF));
+            //}
         }
 
-        _AP_COAXCAN1_loop_cnt++;                                  // 10ms period increase
+        _AP_COAXCAN1_loop_cnt++;                                  // 5ms period increase
+        //_AP_COAXCAN1_loop_cnt = _AP_COAXCAN1_loop_cnt%COAXCAN1_LOOP_HZ; //Looping 0~200
     }
 }
 
 // -------------------------------------------------------------------------
-// Run
+// Run : 100Hz
 // -------------------------------------------------------------------------
 void AP_COAXCAN1::run(void)
 {
     //Receive
 	RXspin();
 
-	//Transmit
-	if(TXspin())
+    if(_AP_COAXCAN1_loop_cnt%10==0)
+    // if(_AP_COAXCAN1_loop_cnt%100==0)
     {
+        TX_FCC1_MSG();
+        TX_FCC2_MSG();
         _rtr_tx_cnt++;
     }
+    // else if(_AP_COAXCAN1_loop_cnt%10 == 5)
+    // // else if(_AP_COAXCAN1_loop_cnt%100 == 50)
+    // {
+    //     TX_FCC1_MSG();
+    //     _rtr_tx_cnt++;
+    // }
+    // else
+    // {
+    //     TXspin();//Transmit unscheduled messages : command from GCS
+    //     _rtr_tx_cnt++;
+    // }
+    //
 
 }
 
@@ -187,7 +210,7 @@ void AP_COAXCAN1::RXspin()
     // bool CANIface::select(bool &read, bool &write, const AP_HAL::CANFrame* pending_tx, uint64_t blocking_deadline)
     int ret = _can_iface->select(read_select, write_select, nullptr, timeout);
     if (!ret) {
-        gcs().send_text(MAV_SEVERITY_INFO, "CoaxCAN1 COMMUNICATION_ERROR");
+        //gcs().send_text(MAV_SEVERITY_INFO, "CoaxCAN1 COMMUNICATION_ERROR");
         // return if no data is available to read
         // if(COAXCAN1_Fail_Status==COAXCAN1_STATUS::CONNECTION_FAILURE)
         // {
@@ -348,3 +371,87 @@ int AP_COAXCAN1::TXspin()
 	return cmd_send_res;
 }
 
+// -------------------------------------------------------------------------
+// Transmit data
+// -------------------------------------------------------------------------
+int  AP_COAXCAN1::CAN_TX_std(uint16_t can_id, uint8_t data_cmd[], uint8_t msgdlc)
+{
+    int cmd_send_res    = 0;
+    uint8_t can_data[8] = {0,0,0,0,0,0,0,0};
+
+    memcpy(can_data, data_cmd, msgdlc);
+
+    AP_HAL::CANFrame out_frame;
+    uint64_t timeout = AP_HAL::native_micros64() + COAXCAN1_SEND_TIMEOUT_US;                      // Should have timeout value
+
+    out_frame       = {can_id, can_data, msgdlc};                                               // id, data[8], dlc
+    cmd_send_res    = _can_iface->send(out_frame, timeout, AP_HAL::CANIface::AbortOnError);
+
+    if(cmd_send_res==1)
+	{
+		//success
+	    _cmd_tx_cnt++;
+	}
+	else if(cmd_send_res==0)
+	{
+		_cmd_tx_err++;
+		//CMD TX buffer full
+	}
+	else
+	{
+		_cmd_tx_err++;
+		//CMD TX error
+	}
+
+    return cmd_send_res;
+    
+}
+// -------------------------------------------------------------------------
+// 
+// -------------------------------------------------------------------------
+void AP_COAXCAN1::TX_FCC1_MSG(void)
+{
+    uint8_t temp_data[8] = {0} ;
+    uint8_t tempjoin = 0;
+
+    //_FCC_AlivCnt : looping 0~15
+    _FCC_CmdFcRunStop = 1;
+    _FCC_CmdPmsBatCut = 0;
+    //_FCC_Ready : set by GCS
+    _FCC_Reserved1 = 0;
+
+    _FCC_Ready = 1;//Temp debugging
+
+    tempjoin = _FCC_AlivCnt + ((_FCC_CmdFcRunStop & 0x01) << 4) 
+            + ((_FCC_CmdPmsBatCut & 0x01) << 5) + ((_FCC_Ready & 0x01) << 6)
+            + ((_FCC_Reserved1 & 0x01) << 7);
+
+    temp_data[0] = tempjoin;
+
+    CAN_TX_std(CMD_ID::CMD_ID_FCC1, temp_data, 1);
+
+    _FCC_AlivCnt++;
+    _FCC_AlivCnt = _FCC_AlivCnt%16;
+}
+
+// -------------------------------------------------------------------------
+// 
+// -------------------------------------------------------------------------
+void AP_COAXCAN1::TX_FCC2_MSG(void)
+{
+    uint8_t temp_data[8] = {0,0,0,0,0,0,0,0} ;
+
+    _FCC_FcPwrReq = 35000;
+    _FCC_FcThrottle = 100;
+    _FCC_FcThrottlePrdct = 100;
+
+    temp_data[0] = _FCC_FcPwrReq & 0x00FF;
+    temp_data[1] = (_FCC_FcPwrReq >> 8) & 0x00FF;
+    temp_data[2] = _FCC_FcThrottle & 0x00FF;
+    temp_data[3] = (_FCC_FcThrottle >> 8) & 0x00FF;
+    temp_data[4] = _FCC_FcThrottlePrdct & 0x00FF;
+    temp_data[5] = (_FCC_FcThrottlePrdct >> 8) & 0x00FF;
+
+    CAN_TX_std(CMD_ID::CMD_ID_FCC2, temp_data, 6);
+
+}

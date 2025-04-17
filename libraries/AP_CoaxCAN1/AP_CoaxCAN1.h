@@ -8,10 +8,10 @@
 #include <AP_Param/AP_Param.h>
 #include "CoaxCAN_driver.hpp"
 
-#define COAXCAN1_LOOP_HZ              (100U)      // 100Hz 10ms
-#define COAXCAN1_MINOR_INTERVAL       (50U)      //(2U)        // 50Hz  10ms*2=20ms
-#define COAXCAN1_MALVINK_INTERVAL     (100U)       // 10Hz  10ms*10=100ms
-#define COAXCAN1_ONRUNNING_INTERVAL   (100U)      // 1Hz   10ms*100=1000ms
+#define COAXCAN1_LOOP_HZ              (200U)      // 200Hz 5ms
+#define COAXCAN1_MINOR_INTERVAL       (2U)      //(2U)        // 100Hz  5ms*2=10ms
+#define COAXCAN1_MALVINK_INTERVAL     (20U)       // 10Hz  5ms*20=100ms
+#define COAXCAN1_ONRUNNING_INTERVAL   (200U)      // 1Hz   5ms*200=1000ms
 
 class COAX1_CTRL_CMD
 {
@@ -49,6 +49,10 @@ public:
     void RXspin(void);
     int TXspin(void);
     void handleFrame(const AP_HAL::CANFrame& can_rxframe);
+    //TX Function to Devices
+    int  CAN_TX_std(uint16_t can_id, uint8_t data_cmd[], uint8_t msgdlc);    //send with standard ID
+    void TX_FCC1_MSG(void); //0x720
+    void TX_FCC2_MSG(void); //0x721
 
 private:
 
@@ -61,17 +65,31 @@ private:
 
     coaxcan::ICanIface* _iface;
 
-    //Receive ID definition
-    static constexpr unsigned RX_ID_CCB1 = 0x00000001;  //CCB1 message
-    static constexpr unsigned RX_ID_CCB2 = 0x00000010;  //CCB2 message
-    static constexpr unsigned RX_ID_NUM = 2U;   //Number of RX_ID
+    //-----Receive ID definition-----
+    //CCB Test
+    static constexpr unsigned RX_ID_CCB1  = 0x00000001;  //CCB1 message
+    static constexpr unsigned RX_ID_CCB2  = 0x00000010;  //CCB2 message
+    //Receive ID for IFCU
+    static constexpr unsigned RX_ID_IFCU1 = 0x000001F0;     //IFCU Voltage-out, Current-out, CurrentLimit, H-tank
+    static constexpr unsigned RX_ID_IFCU2 = 0x000002F0;     //IFCU State, Fault-state, What's Fault, 
+    static constexpr unsigned RX_ID_IFCU3 = 0x000002F1;
+    static constexpr unsigned RX_ID_IFCU4 = 0x000003F0;
+    static constexpr unsigned RX_ID_IFCU5 = 0x000004F0;
+    static constexpr unsigned RX_ID_IFCU6 = 0x000005F0;
+    static constexpr unsigned RX_ID_NUM = 8U;   //Number of RX_ID
+    //End of---Receive ID definition-----
 
     //Command ID definition class
     class CMD_ID
 	{
     public:
+        //CCB Test
         static constexpr unsigned CMD_ID_EX1 = 0U; //example 1
         static constexpr unsigned CMD_ID_EX2 = 1U; //example 2
+        //IFCU 
+        static constexpr unsigned CMD_ID_FCC1 = 0x720;  //FCC Alive, Ready, RunStop, CurrentReq
+        static constexpr unsigned CMD_ID_FCC2 = 0x721;  //PowerReqruied, ThrottleNow, ThrottleFuture
+        static constexpr unsigned CMD_ID_FCC3 = 0x720;  //Reserved
         static constexpr unsigned CMD_ID_NUM = 2U; //Number of CMD_ID
 	};
 
@@ -125,7 +143,17 @@ private:
     uint16_t COAXCAN1_ErrCnt;
     uint16_t COAXCAN1_RcvrCnt;
 
-    uint8_t  COAXCAN1_Ctrl_Seq;
+    uint8_t COAXCAN1_Ctrl_Seq;
+    //CAN ICD
+    uint8_t _FCC_AlivCnt;
+    uint8_t _FCC_CmdFcRunStop;
+    uint8_t _FCC_CmdPmsBatCut;
+    uint8_t _FCC_Ready;
+    uint8_t _FCC_Reserved1;
+    uint16_t _FCC_FcPwrReq;
+    uint16_t _FCC_FcThrottle;
+    uint16_t _FCC_FcThrottlePrdct;
+
 };
 
 #endif
