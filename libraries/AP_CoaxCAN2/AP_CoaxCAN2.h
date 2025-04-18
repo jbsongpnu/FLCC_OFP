@@ -7,6 +7,7 @@
 #include <AP_HAL/Semaphores.h>
 #include <AP_Param/AP_Param.h>
 #include "CoaxCAN_driver.hpp"
+#include <AP_CoaxCAN2/AP_CoaxCAN_msg_List.h>
 
 #define COAXCAN2_LOOP_HZ              (200U)      // 200Hz 5ms
 #define COAXCAN2_MINOR_INTERVAL       (2U)      //(2U)        // 100Hz  5ms*2=10ms
@@ -54,60 +55,19 @@ public:
     void TX_FCC1_MSG(void); //0x720
     void TX_FCC2_MSG(void); //0x721
 
-    struct IFCU1_msg {
-        uint16_t PpVlt;
-        uint16_t PpCur;
-        uint16_t PpCurLim;
-        uint8_t  PpH2Sof;
-        uint8_t  reserved;
-    };
     IFCU1_msg _IFCU1;
-
-    struct IFCU2_msg {
-        uint8_t State;
-        uint8_t FltSts;
-        uint8_t DTC;
-        uint8_t H2LkLmp;
-        uint8_t SvmlsoRVlu;
-    };
     IFCU2_msg _IFCU2;
-
-    struct IFCU3_msg {
-        uint16_t FcNetVlt;
-        uint16_t FcNetCur;
-        uint16_t LdcVlt;
-        uint16_t LdcCur;
-    };
     IFCU3_msg _IFCU3;
-
-    struct IFCU4_msg {
-        int8_t FcInClntTmp;
-        int8_t AmbTemp;
-        int8_t RoomTemp;
-        uint8_t H2TnkPrs;
-        uint8_t H2TnkTmp;
-        uint16_t H2TnkFillCnt;
-    };
     IFCU4_msg _IFCU4;
-
-    struct IFCU5_msg {
-        uint16_t HvBsaVlt;
-        uint16_t HvBsaCur;
-        uint8_t HvBsaSoC;
-        uint8_t HvBsaSoH;
-        uint8_t ExWtrTrpFill;
-    };
     IFCU5_msg _IFCU5;
-
-    struct IFCU6_msg {
-        uint16_t FcMxCurLim;
-        uint16_t FcNetCustCurLim;
-        uint8_t H2MidPrs;
-        uint8_t FcClntFiltChk;
-        uint8_t FcClntSplChk;
-    };
     IFCU6_msg _IFCU6;
-
+    PMS1_msg _PMS1;
+    PMS2_msg _PMS2;
+    PMS3_msg _PMS3;
+    FDC1_msg _FDC1;
+    FDC2_msg _FDC2;
+    VCUFDC1_msg _VCUFDC1;
+    
 private:
 
     char _thread_name[9];
