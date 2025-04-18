@@ -71,6 +71,8 @@ public:
         Driver_Type_Benewake = 11,
         Driver_Type_Scripting2 = 12,
         Driver_Type_CoaxCAN1 = 13,      //250311 JBSong
+        Driver_Type_CoaxCAN2 = 14,      //250417 JBSong
+
     };
 
     void init(void);
@@ -161,6 +163,7 @@ private:
         AP_CANDriver* _kdecan;
         AP_CANDriver* _piccolocan;
         AP_CANDriver* _coaxcan1;
+        AP_CANDriver* _coaxcan2;
     };
 
     CANIface_Params _interfaces[HAL_NUM_CAN_IFACES];

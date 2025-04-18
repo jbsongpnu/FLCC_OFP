@@ -2,8 +2,8 @@
  * Copyright (C) 2014 Pavel Kirienko <pavel.kirienko@gmail.com>
  */
 
-#ifndef COAXCAN_BUILD_CONFIG_HPP_INCLUDED
-#define COAXCAN_BUILD_CONFIG_HPP_INCLUDED
+#ifndef COAXCAN2_BUILD_CONFIG_HPP_INCLUDED
+#define COAXCAN2_BUILD_CONFIG_HPP_INCLUDED
 
 /**
  * COAXCAN version definition
@@ -201,7 +201,7 @@
 # endif
 #endif
 
-namespace coaxcan1
+namespace coaxcan2
 {
 /**
  * Memory pool block size.
@@ -255,4 +255,4 @@ struct COAXCAN_EXPORT IsDynamicallyAllocatable
 
 }
 
-#endif // COAXCAN_BUILD_CONFIG_HPP_INCLUDED
+#endif // COAXCAN2_BUILD_CONFIG_HPP_INCLUDED

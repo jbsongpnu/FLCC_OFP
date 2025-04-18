@@ -2,10 +2,10 @@
  * Copyright (C) 2014 Pavel Kirienko <pavel.kirienko@gmail.com>
  */
 
-#ifndef COAXCAN_STD_HPP_INCLUDED
-#define COAXCAN_STD_HPP_INCLUDED
+#ifndef COAXCAN2_STD_HPP_INCLUDED
+#define COAXCAN2_STD_HPP_INCLUDED
 
-#include <AP_CoaxCAN1/coaxcan_build_config.hpp> //#include <uavcan/build_config.hpp>
+#include <AP_CoaxCAN2/coaxcan_build_config.hpp> //#include <uavcan/build_config.hpp>
 #include <cstdarg>
 #include <cstddef>
 
@@ -18,7 +18,7 @@
 # include <cstdint>
 # include <cstdio>
 
-namespace coaxcan1
+namespace coaxcan2
 {
 
 typedef std::uint8_t uint8_t;
@@ -38,7 +38,7 @@ typedef std::int64_t int64_t;
 # include <stdint.h>  // Standard integer types from C library
 # include <stdio.h>   // vsnprintf() from the C library
 
-namespace coaxcan1
+namespace coaxcan2
 {
 
 typedef ::uint8_t uint8_t;
@@ -55,7 +55,7 @@ typedef ::int64_t int64_t;
 
 #endif
 
-namespace coaxcan1
+namespace coaxcan2
 {
 /**
  * Wrapper over the standard snprintf(). This wrapper is needed because different standards and different
@@ -83,4 +83,4 @@ inline int snprintf(char* out, std::size_t maxlen, const char* format, ...)
 
 }
 
-#endif // COAXCAN_STD_HPP_INCLUDED
+#endif // COAXCAN2_STD_HPP_INCLUDED

@@ -1,10 +1,10 @@
-#ifndef COAXCAN_UTIL_TEMPLATES_HPP_INCLUDED
-#define COAXCAN_UTIL_TEMPLATES_HPP_INCLUDED
+#ifndef COAXCAN2_UTIL_TEMPLATES_HPP_INCLUDED
+#define COAXCAN2_UTIL_TEMPLATES_HPP_INCLUDED
 
 #include <climits>
 #include <cstddef>
 #include <cmath>
-#include <AP_CoaxCAN1/coaxcan_build_config.hpp> //#include <uavcan/build_config.hpp>
+#include <AP_CoaxCAN2/coaxcan_build_config.hpp> //#include <uavcan/build_config.hpp>
 
 #ifndef COAXCAN_CPP_VERSION
 # error COAXCAN_CPP_VERSION
@@ -16,7 +16,7 @@
 # include <cfloat>       // C++11 mode assumes that all standard headers are available
 #endif
 
-namespace coaxcan1
+namespace coaxcan2
 {
 /**
  * Usage:
@@ -554,4 +554,4 @@ inline bool getSignBit(T arg)
 
 }
 
-#endif // COAXCAN_UTIL_TEMPLATES_HPP_INCLUDED
+#endif // COAXCAN2_UTIL_TEMPLATES_HPP_INCLUDED

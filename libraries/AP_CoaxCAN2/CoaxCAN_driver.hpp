@@ -3,17 +3,17 @@
  * Copyright (C) 2014 Pavel Kirienko <pavel.kirienko@gmail.com>
  */
 
-#ifndef COAXCAN_DRIVER_CAN_HPP_INCLUDED
-#define COAXCAN_DRIVER_CAN_HPP_INCLUDED
+#ifndef COAXCAN2_DRIVER_CAN_HPP_INCLUDED
+#define COAXCAN2_DRIVER_CAN_HPP_INCLUDED
 
 #include <cassert>
-#include <AP_CoaxCAN1/coaxcan_std.hpp> //#include <uavcan/std.hpp>
-#include <AP_CoaxCAN1/coaxcan_build_config.hpp> //#include <uavcan/build_config.hpp>
-#include <AP_CoaxCAN1/coaxcan_templates.hpp>	//#include <uavcan/driver/system_clock.hpp> --> time.hpp --> templates.hpp
+#include <AP_CoaxCAN2/coaxcan_std.hpp> //#include <uavcan/std.hpp>
+#include <AP_CoaxCAN2/coaxcan_build_config.hpp> //#include <uavcan/build_config.hpp>
+#include <AP_CoaxCAN2/coaxcan_templates.hpp>	//#include <uavcan/driver/system_clock.hpp> --> time.hpp --> templates.hpp
 
 //from coaxcan_templates.hpp
 #if 0
-namespace coaxcan1
+namespace coaxcan2
 {
 /**
  * Replacement for std::fill(..)
@@ -90,7 +90,7 @@ const T& max(const T& a, const T& b)
 }
 #endif
 
-namespace coaxcan1
+namespace coaxcan2
 {
 /**
  * This limit is defined by the specification.
@@ -257,7 +257,7 @@ public:
     //commented by igpark
 //    virtual int16_t receive(CanFrame& out_frame, MonotonicTime& out_ts_monotonic, UtcTime& out_ts_utc,
 //                            CanIOFlags& out_flags) = 0;
-    virtual int16_t receive(coaxcan1::CanFrame& out_frame, coaxcan1::CanIOFlags& out_flags);
+    virtual int16_t receive(coaxcan2::CanFrame& out_frame, coaxcan2::CanIOFlags& out_flags);
     /**
      * Configure the hardware CAN filters. @ref CanFilterConfig.
      *
@@ -328,9 +328,9 @@ public:
 
     //commented by igpark
     virtual int16_t TXselect(CanSelectMasks& inout_masks, const CanFrame* (& pending_tx)[MaxCanIfaces]) = 0;
-    virtual int16_t RXselect(coaxcan1::CanSelectMasks& inout_masks) = 0;	//igpark
+    virtual int16_t RXselect(coaxcan2::CanSelectMasks& inout_masks) = 0;	//igpark
 };
 
 }
 
-#endif // COAXCAN_DRIVER_CAN_HPP_INCLUDED
+#endif // COAXCAN2_DRIVER_CAN_HPP_INCLUDED

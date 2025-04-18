@@ -3,6 +3,7 @@
 ***
 
 ## Version History
+- V0.01.12 Adding New CoaxCAN2, moving CoaxCAN1's IFCU code to CoaxCAN2
 - V0.01.11 Adding CAN Protocol for IFCU - 2. RX (Testing codes)
 - V0.01.10 Adding CAN Protocol for IFCU - 1. TX (Testing codes)
 - V0.01.09 Test code for Cooling Control Board RX with TX polling message

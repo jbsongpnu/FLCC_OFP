@@ -72,6 +72,7 @@
 #include <AP_OpticalFlow/AP_OpticalFlow.h>
 #include <AP_Winch/AP_Winch_config.h>
 #include <AP_CoaxCAN1/AP_CoaxCAN1.h>          // 250310 JBSong : Added for Coaxial Helicopter
+#include <AP_CoaxCAN2/AP_CoaxCAN2.h>          // 250417 JBSong : Added for Coaxial Helicopter
 
 // Configuration
 #include "defines.h"

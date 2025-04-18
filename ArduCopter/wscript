@@ -32,6 +32,7 @@ def build(bld):
             'AC_AutoTune',
             'AP_KDECAN',
             'AP_CoaxCAN1',
+            'AP_CoaxCAN2',
         ],
     )
 

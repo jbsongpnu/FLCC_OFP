@@ -1190,7 +1190,8 @@ bool AP_Arming::can_checks(bool report)
                 case AP_CANManager::Driver_Type_Scripting:
                 case AP_CANManager::Driver_Type_Scripting2:
                 case AP_CANManager::Driver_Type_Benewake:
-                case AP_CANManager::Driver_Type_CoaxCAN1: // 250311 JBSong : Not parameter check yet
+                case AP_CANManager::Driver_Type_CoaxCAN1: // 250311 JBSong : No parameter check yet
+                case AP_CANManager::Driver_Type_CoaxCAN2: // 250417 JBSong : No parameter check yet
                     break;
             }
         }

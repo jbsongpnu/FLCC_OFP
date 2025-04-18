@@ -1,5 +1,5 @@
-#ifndef AP_COAXCAN1_H_
-#define AP_COAXCAN1_H_
+#ifndef AP_COAXCAN2_H_
+#define AP_COAXCAN2_H_
 
 #include <AP_Common/AP_Common.h>
 #include <GCS_MAVLink/GCS_MAVLink.h>
@@ -8,15 +8,15 @@
 #include <AP_Param/AP_Param.h>
 #include "CoaxCAN_driver.hpp"
 
-#define COAXCAN1_LOOP_HZ              (200U)      // 200Hz 5ms
-#define COAXCAN1_MINOR_INTERVAL       (2U)      //(2U)        // 100Hz  5ms*2=10ms
-#define COAXCAN1_MALVINK_INTERVAL     (20U)       // 10Hz  5ms*20=100ms
-#define COAXCAN1_ONRUNNING_INTERVAL   (200U)      // 1Hz   5ms*200=1000ms
+#define COAXCAN2_LOOP_HZ              (200U)      // 200Hz 5ms
+#define COAXCAN2_MINOR_INTERVAL       (2U)      //(2U)        // 100Hz  5ms*2=10ms
+#define COAXCAN2_MALVINK_INTERVAL     (20U)       // 10Hz  5ms*20=100ms
+#define COAXCAN2_ONRUNNING_INTERVAL   (200U)      // 1Hz   5ms*200=1000ms
 
-class COAX1_CTRL_CMD
+class COAX2_CTRL_CMD
 {
 public:
-	COAX1_CTRL_CMD()
+	COAX2_CTRL_CMD()
 	{
         EX1 = 0;
         EX2 = 84;
@@ -26,23 +26,23 @@ public:
 	uint32_t EX2;
 };
 
-class AP_COAXCAN1 : public AP_CANDriver {
+class AP_COAXCAN2 : public AP_CANDriver {
 public:
 
-    AP_COAXCAN1();
-    ~AP_COAXCAN1();
+    AP_COAXCAN2();
+    ~AP_COAXCAN2();
 
     static const struct AP_Param::GroupInfo var_info[];
 
     /* Do not allow copies */
-    AP_COAXCAN1(const AP_COAXCAN1 &other) = delete;
-    AP_COAXCAN1 &operator=(const AP_COAXCAN1&) = delete;
+    AP_COAXCAN2(const AP_COAXCAN2 &other) = delete;
+    AP_COAXCAN2 &operator=(const AP_COAXCAN2&) = delete;
 
     void init(uint8_t driver_index, bool enable_filters) override;
     bool add_interface(AP_HAL::CANIface* can_iface) override;
 
-    // Return coaxcan1 from @driver_index or nullptr if it's not ready or doesn't exist
-    static AP_COAXCAN1 *get_coaxcan1(uint8_t driver_index);	
+    // Return coaxcan2 from @driver_index or nullptr if it's not ready or doesn't exist
+    static AP_COAXCAN2 *get_coaxcan2(uint8_t driver_index);	
 
     void loop(void);
     void run(void);
@@ -117,7 +117,7 @@ private:
                                                                     // '_can_iface' is acquired from new add_interface() function
     HAL_EventHandle _event_handle;                                  // JBSong
 
-    coaxcan1::ICanIface* _iface;
+    coaxcan2::ICanIface* _iface;
 
     //-----Receive ID definition-----
     //CCB Test
@@ -168,8 +168,8 @@ private:
     uint32_t _rx_idx;  //Received message index
     uint32_t _cmd_idx;  //Command index
 
-    COAX1_CTRL_CMD _coax1_ctrl_cmd;
-    COAX1_CTRL_CMD _coax1_ctrl_cmd_prv;
+    COAX2_CTRL_CMD _coax2_ctrl_cmd;
+    COAX2_CTRL_CMD _coax2_ctrl_cmd_prv;
 
     uint32_t _handleFrame_cnt;
 	uint32_t _rtr_tx_cnt;
@@ -177,27 +177,27 @@ private:
 	uint32_t _rtr_tx_err;
 	uint32_t _cmd_tx_err;
 
-    uint32_t _coaxcan1_last_send_us;
+    uint32_t _coaxcan2_last_send_us;
 
-    uint64_t _AP_COAXCAN1_loop_cnt = 0;
-    uint32_t coaxcan1_period_us;
+    uint64_t _AP_COAXCAN2_loop_cnt = 0;
+    uint32_t coaxcan2_period_us;
 
     AP_Int8 _examp;
-    static const uint16_t COAXCAN1_SEND_TIMEOUT_US = 500;
+    static const uint16_t COAXCAN2_SEND_TIMEOUT_US = 500;
 
-    enum COAXCAN1_STATUS : uint8_t{ // Status Manage
+    enum COAXCAN2_STATUS : uint8_t{ // Status Manage
         CONNECTED               = 0,
         COMMUNICATION_ERROR     = 1,
         CONNECTION_FAILURE      = 2,
         VALUE_END               = 255,
     };
-    enum COAXCAN1_STATUS COAXCAN1_Fail_Status;
-    enum COAXCAN1_STATUS COAXCAN1_Fail_Status_prev;
+    enum COAXCAN2_STATUS COAXCAN2_Fail_Status;
+    enum COAXCAN2_STATUS COAXCAN2_Fail_Status_prev;
     
-    uint16_t COAXCAN1_ErrCnt;
-    uint16_t COAXCAN1_RcvrCnt;
+    uint16_t COAXCAN2_ErrCnt;
+    uint16_t COAXCAN2_RcvrCnt;
 
-    uint8_t COAXCAN1_Ctrl_Seq;
+    uint8_t COAXCAN2_Ctrl_Seq;
     //CAN ICD
     uint8_t _FCC_AlivCnt;
     uint8_t _FCC_CmdFcRunStop;

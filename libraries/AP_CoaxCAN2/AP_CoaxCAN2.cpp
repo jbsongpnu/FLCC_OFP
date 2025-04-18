@@ -1,6 +1,6 @@
 #include <AP_Common/AP_Common.h>
 #include <AP_HAL/AP_HAL.h>
-#include "AP_CoaxCAN1.h"
+#include "AP_CoaxCAN2.h"
 #include <AP_Scheduler/AP_Scheduler.h>
 #include <GCS_MAVLink/GCS.h>
 #include <AP_CANManager/AP_CANManager.h>
@@ -11,11 +11,11 @@ extern const AP_HAL::HAL& hal;
 #define TEMP_EXP 0		//Initial value
 
 // Table of user settable CAN bus parameters
-const AP_Param::GroupInfo AP_COAXCAN1::var_info[] = {
+const AP_Param::GroupInfo AP_COAXCAN2::var_info[] = {
     // @Param: example
     // @DisplayName: User example
     // @Description: Example for user
-    AP_GROUPINFO("Ex", 1, AP_COAXCAN1, _examp, TEMP_EXP),
+    AP_GROUPINFO("Ex", 1, AP_COAXCAN2, _examp, TEMP_EXP),
     //AP_GROUPINFO("Examp", 1, AP_COAXCAN, TEMP_EXP, TEMP_EXP),
     // AP_GROUPINFO("PARAM1", 1, AP_COAXCAN, _pmu_param1, TEMP_EXP),
     // AP_GROUPINFO("PARAM2", 2, AP_COAXCAN, _pmu_param2, TEMP_EXP),
@@ -25,7 +25,7 @@ const AP_Param::GroupInfo AP_COAXCAN1::var_info[] = {
     AP_GROUPEND
 };
 
-AP_COAXCAN1::AP_COAXCAN1()
+AP_COAXCAN2::AP_COAXCAN2()
 {
     AP_Param::setup_object_defaults(this, var_info);
     
@@ -38,7 +38,7 @@ AP_COAXCAN1::AP_COAXCAN1()
     _rx_ex1_data2 = 0;
     _rtr_tx_cnt = 0;
 
-    _coaxcan1_last_send_us = 0;
+    _coaxcan2_last_send_us = 0;
     _FCC_AlivCnt = 0;
     _FCC_CmdFcRunStop = 0;
     _FCC_CmdPmsBatCut = 0;
@@ -84,50 +84,50 @@ AP_COAXCAN1::AP_COAXCAN1()
     _IFCU6.FcNetCustCurLim = 0;
     _IFCU6.H2MidPrs = 0;
     
-    coaxcan1_period_us = 1000000UL / COAXCAN1_LOOP_HZ;
+    coaxcan2_period_us = 1000000UL / COAXCAN2_LOOP_HZ;
     
 }
 
-AP_COAXCAN1::~AP_COAXCAN1()
+AP_COAXCAN2::~AP_COAXCAN2()
 {    
 }
 
-AP_COAXCAN1 *AP_COAXCAN1::get_coaxcan1(uint8_t driver_index)
+AP_COAXCAN2 *AP_COAXCAN2::get_coaxcan2(uint8_t driver_index)
 {
     if (driver_index >= AP::can().get_num_drivers() ||
-        AP::can().get_driver_type(driver_index) != AP_CANManager::Driver_Type_CoaxCAN1) {
+        AP::can().get_driver_type(driver_index) != AP_CANManager::Driver_Type_CoaxCAN2) {
         return nullptr;
     }
-    return static_cast<AP_COAXCAN1*>(AP::can().get_driver(driver_index));
+    return static_cast<AP_COAXCAN2*>(AP::can().get_driver(driver_index));
 }
 
 // -------------------------------------------------------------------------
 //
 // -------------------------------------------------------------------------
-bool AP_COAXCAN1::add_interface(AP_HAL::CANIface* can_iface) {
+bool AP_COAXCAN2::add_interface(AP_HAL::CANIface* can_iface) {
 
     if (_can_iface != nullptr) {
-    	hal.console->printf("COAXCAN: Multiple Interface not supported\n\r");
+    	hal.console->printf("COAXCAN2: Multiple Interface not supported\n\r");
         return false;
     }
 
     _can_iface = can_iface;
 
     if (_can_iface == nullptr) {
-    	hal.console->printf("COAXCAN: CAN driver not found\n\r");
-        //gcs().send_text(MAV_SEVERITY_WARNING, "COAXCAN: CAN driver not found");
+    	hal.console->printf("COAXCAN2: CAN driver not found\n\r");
+        //gcs().send_text(MAV_SEVERITY_WARNING, "COAXCAN2: CAN driver not found");
         return false;
     }
 
     if (!_can_iface->is_initialized()) {
-    	hal.console->printf("COAXCAN: Driver not initialized\n\r");
-        //gcs().send_text(MAV_SEVERITY_WARNING, "COAXCAN: Driver not initialized");
+    	hal.console->printf("COAXCAN2: Driver not initialized\n\r");
+        //gcs().send_text(MAV_SEVERITY_WARNING, "COAXCAN2: Driver not initialized");
         return false;
     }
 
     if (!_can_iface->set_event_handle(&_event_handle)) {
-    	hal.console->printf("COAXCAN: Cannot add event handle\n\r");
-        //gcs().send_text(MAV_SEVERITY_WARNING, "COAXCAN: Cannot add event handle");
+    	hal.console->printf("COAXCAN2: Cannot add event handle\n\r");
+        //gcs().send_text(MAV_SEVERITY_WARNING, "COAXCAN2: Cannot add event handle");
         return false;
     }
     return true;
@@ -136,7 +136,7 @@ bool AP_COAXCAN1::add_interface(AP_HAL::CANIface* can_iface) {
 // -------------------------------------------------------------------------
 // Initialize COAXCAN bus
 // -------------------------------------------------------------------------
-void AP_COAXCAN1::init(uint8_t driver_index, bool enable_filters)
+void AP_COAXCAN2::init(uint8_t driver_index, bool enable_filters)
 {
 	_driver_index = driver_index;
 
@@ -148,7 +148,7 @@ void AP_COAXCAN1::init(uint8_t driver_index, bool enable_filters)
         return;
     }
 
-    if (!hal.scheduler->thread_create(FUNCTOR_BIND_MEMBER(&AP_COAXCAN1::loop, void), _thread_name, 2048, AP_HAL::Scheduler::PRIORITY_CAN, 0)) {
+    if (!hal.scheduler->thread_create(FUNCTOR_BIND_MEMBER(&AP_COAXCAN2::loop, void), _thread_name, 2048, AP_HAL::Scheduler::PRIORITY_CAN, 0)) {
         return;
     }
 
@@ -161,7 +161,7 @@ void AP_COAXCAN1::init(uint8_t driver_index, bool enable_filters)
 // -------------------------------------------------------------------------
 // Task
 // -------------------------------------------------------------------------
-void AP_COAXCAN1::loop(void)
+void AP_COAXCAN2::loop(void)
 {
     while (true)
     {
@@ -171,14 +171,14 @@ void AP_COAXCAN1::loop(void)
             continue;
         }
 
-        hal.scheduler->delay_microseconds(coaxcan1_period_us);    // 5ms period loop
+        hal.scheduler->delay_microseconds(coaxcan2_period_us);    // 5ms period loop
 
         run();
                     
-        if(_AP_COAXCAN1_loop_cnt%COAXCAN1_MALVINK_INTERVAL==0)      // 100ms period send2ppc
+        if(_AP_COAXCAN2_loop_cnt%COAXCAN2_MALVINK_INTERVAL==0)      // 100ms period send2ppc
         {
             //send2gcs();     // Send COAX Data to GCS
-            //if(COAXCAN1_Fail_Status == COAXCAN1_STATUS::CONNECTED)
+            //if(COAXCAN2_Fail_Status == COAXCAN2_STATUS::CONNECTED)
             //{
             //    gcs().send_text(MAV_SEVERITY_INFO, "CCB1 %d,%d,%d,%d", _rx_raw_thermist1, _rx_raw_thermist2, _rx_raw_thermist3, _rx_raw_thermist4); // For test
             //    gcs().send_text(MAV_SEVERITY_INFO, "CCB2 %d,%d,%d,%d,%d", _rx_raw_thermocp1, _rx_raw_thermocp2, _rx_raw_wflow, _rx_raw_bdtemp, _rx_raw_state); // For test
@@ -186,29 +186,29 @@ void AP_COAXCAN1::loop(void)
             //}
         }
 
-        _AP_COAXCAN1_loop_cnt++;                                  // 5ms period increase
+        _AP_COAXCAN2_loop_cnt++;                                  // 5ms period increase
     }
 }
 
 // -------------------------------------------------------------------------
 // Run : 200Hz
-// [_AP_COAXCAN1_loop_cnt] is increased from loop() at every 5ms(200Hz)
+// [_AP_COAXCAN2_loop_cnt] is increased from loop() at every 5ms(200Hz)
 // -------------------------------------------------------------------------
-void AP_COAXCAN1::run(void)
+void AP_COAXCAN2::run(void)
 {
     //Receive
-	//RXspin();
+	RXspin();
 
-    if(_AP_COAXCAN1_loop_cnt%20==0)
-    // if(_AP_COAXCAN1_loop_cnt%100==0)
+    if(_AP_COAXCAN2_loop_cnt%20==0)
+    // if(_AP_COAXCAN2_loop_cnt%100==0)
     {
-        //TX_FCC1_MSG();
+        TX_FCC1_MSG();
         _rtr_tx_cnt++;
     }
-    else if(_AP_COAXCAN1_loop_cnt%20 == 5)
-    // // else if(_AP_COAXCAN1_loop_cnt%100 == 50)
+    else if(_AP_COAXCAN2_loop_cnt%20 == 5)
+    // // else if(_AP_COAXCAN2_loop_cnt%100 == 50)
     {
-        //TX_FCC2_MSG();
+        TX_FCC2_MSG();
         _rtr_tx_cnt++;
     }
     // else
@@ -223,12 +223,12 @@ void AP_COAXCAN1::run(void)
 // -------------------------------------------------------------------------
 // RX 
 // -------------------------------------------------------------------------
-void AP_COAXCAN1::RXspin()
+void AP_COAXCAN2::RXspin()
 {
     uint64_t time, timeout;
     int res = 0;
 
-    const uint32_t timeout_us = MIN(AP::scheduler().get_loop_period_us(), COAXCAN1_SEND_TIMEOUT_US);
+    const uint32_t timeout_us = MIN(AP::scheduler().get_loop_period_us(), COAXCAN2_SEND_TIMEOUT_US);
     AP_HAL::CANIface::CanIOFlags flags = 0;
     AP_HAL::CANFrame frame;                     // receive frame
 
@@ -241,32 +241,32 @@ void AP_COAXCAN1::RXspin()
     // bool CANIface::select(bool &read, bool &write, const AP_HAL::CANFrame* pending_tx, uint64_t blocking_deadline)
     int ret = _can_iface->select(read_select, write_select, nullptr, timeout);
     if (!ret) {
-        //gcs().send_text(MAV_SEVERITY_INFO, "CoaxCAN1 COMMUNICATION_ERROR");
+        //gcs().send_text(MAV_SEVERITY_INFO, "COAXCAN2 COMMUNICATION_ERROR");
         // return if no data is available to read
-        // if(COAXCAN1_Fail_Status==COAXCAN1_STATUS::CONNECTION_FAILURE)
+        // if(COAXCAN2_Fail_Status==COAXCAN2_STATUS::CONNECTION_FAILURE)
         // {
-        //     COAXCAN1_Fail_Status = COAXCAN1_STATUS::CONNECTION_FAILURE;
-        //     gcs().send_text(MAV_SEVERITY_INFO, "CoaxCAN1 CONNECTION_FAILURE");
+        //     COAXCAN2_Fail_Status = COAXCAN2_STATUS::CONNECTION_FAILURE;
+        //     gcs().send_text(MAV_SEVERITY_INFO, "COAXCAN2 CONNECTION_FAILURE");
         // }
         // else
         // {
-        //     COAXCAN1_Fail_Status = COAXCAN1_STATUS::COMMUNICATION_ERROR;
-        //     gcs().send_text(MAV_SEVERITY_INFO, "CoaxCAN1 COMMUNICATION_ERROR");
+        //     COAXCAN2_Fail_Status = COAXCAN2_STATUS::COMMUNICATION_ERROR;
+        //     gcs().send_text(MAV_SEVERITY_INFO, "COAXCAN2 COMMUNICATION_ERROR");
         // }
 
         return;
     }
 
 
-    if(COAXCAN1_Fail_Status == COAXCAN1_STATUS::CONNECTED)     // Normal Connection 
+    if(COAXCAN2_Fail_Status == COAXCAN2_STATUS::CONNECTED)     // Normal Connection 
     {
         res = _can_iface->receive(frame, time, flags);
 
         if(res > 0) // Data Received Normaly
         {
-            if(COAXCAN1_ErrCnt > 0) // Check Error Count
+            if(COAXCAN2_ErrCnt > 0) // Check Error Count
             {
-                COAXCAN1_ErrCnt = COAXCAN1_ErrCnt - 1;    // Decrease Error Count
+                COAXCAN2_ErrCnt = COAXCAN2_ErrCnt - 1;    // Decrease Error Count
             }
 
             while(res > 0)
@@ -277,13 +277,13 @@ void AP_COAXCAN1::RXspin()
         }
         else        // Data Not Received
         {
-            COAXCAN1_ErrCnt = COAXCAN1_ErrCnt + 1;          // Increase Error Count
+            COAXCAN2_ErrCnt = COAXCAN2_ErrCnt + 1;          // Increase Error Count
 
-            if(COAXCAN1_ErrCnt == 10) // Check Max Err Count
+            if(COAXCAN2_ErrCnt == 10) // Check Max Err Count
             {
-                COAXCAN1_Fail_Status  = COAXCAN1_STATUS::COMMUNICATION_ERROR; // Set Communication Error Flag 
-                gcs().send_text(MAV_SEVERITY_INFO, "CoaxCAN1 COMMUNICATION_ERROR ErrCnt10");
-                COAXCAN1_ErrCnt       = 0; // Reset Error Count
+                COAXCAN2_Fail_Status  = COAXCAN2_STATUS::COMMUNICATION_ERROR; // Set Communication Error Flag 
+                gcs().send_text(MAV_SEVERITY_INFO, "CoaxCAN2 COMMUNICATION_ERROR ErrCnt10");
+                COAXCAN2_ErrCnt       = 0; // Reset Error Count
             }
         }
     }
@@ -293,13 +293,13 @@ void AP_COAXCAN1::RXspin()
 
         if(res > 0) // Data Received Normaly
         {
-            COAXCAN1_RcvrCnt = COAXCAN1_RcvrCnt + 1;    // Increase Receive Count
+            COAXCAN2_RcvrCnt = COAXCAN2_RcvrCnt + 1;    // Increase Receive Count
 
-            if(COAXCAN1_RcvrCnt == 5) // Check Max Recv Count
+            if(COAXCAN2_RcvrCnt == 5) // Check Max Recv Count
             {
-                COAXCAN1_Fail_Status  = COAXCAN1_STATUS::CONNECTED; // Clear Communication Error Flag 
-                COAXCAN1_RcvrCnt      = 0; // Reset Receive Count
-                gcs().send_text(MAV_SEVERITY_INFO, "CoaxCAN1 Connected Err %d", COAXCAN1_ErrCnt);
+                COAXCAN2_Fail_Status  = COAXCAN2_STATUS::CONNECTED; // Clear Communication Error Flag 
+                COAXCAN2_RcvrCnt      = 0; // Reset Receive Count
+                gcs().send_text(MAV_SEVERITY_INFO, "CoaxCAN2 Connected Err %d", COAXCAN2_ErrCnt);
             }
 
             while(res > 0)
@@ -311,9 +311,9 @@ void AP_COAXCAN1::RXspin()
         }
         else        // Data Not Received
         {
-            if((COAXCAN1_RcvrCnt > 0) & (res < 0)) // Check Receive Count
+            if((COAXCAN2_RcvrCnt > 0) & (res < 0)) // Check Receive Count
             {
-                COAXCAN1_RcvrCnt = COAXCAN1_RcvrCnt - 1;    // Decrease Receive Count
+                COAXCAN2_RcvrCnt = COAXCAN2_RcvrCnt - 1;    // Decrease Receive Count
             }
         }
 
@@ -324,7 +324,7 @@ void AP_COAXCAN1::RXspin()
 // -------------------------------------------------------------------------
 // Handle Frame : process each CAN frame
 // -------------------------------------------------------------------------
-void AP_COAXCAN1::handleFrame(const AP_HAL::CANFrame& can_rxframe)
+void AP_COAXCAN2::handleFrame(const AP_HAL::CANFrame& can_rxframe)
 {
     uint16_t    uint16_temp = 0;
     uint16_t    uint16_temp1 = 0;
@@ -457,7 +457,7 @@ void AP_COAXCAN1::handleFrame(const AP_HAL::CANFrame& can_rxframe)
 // -------------------------------------------------------------------------
 // Transmit data
 // -------------------------------------------------------------------------
-int AP_COAXCAN1::TXspin()
+int AP_COAXCAN2::TXspin()
 {
     int cmd_send_res    = 0;
     uint8_t can_data[8] = {0,0,0,0,0,0,0,0};
@@ -467,7 +467,7 @@ int AP_COAXCAN1::TXspin()
     can_data[0] = 5;
 
     AP_HAL::CANFrame out_frame;
-    uint64_t timeout = AP_HAL::native_micros64() + COAXCAN1_SEND_TIMEOUT_US; 
+    uint64_t timeout = AP_HAL::native_micros64() + COAXCAN2_SEND_TIMEOUT_US; 
     
     out_frame = {can_id, can_data, msgdlc};
     cmd_send_res    = _can_iface->send(out_frame, timeout, AP_HAL::CANIface::AbortOnError);
@@ -483,7 +483,7 @@ int AP_COAXCAN1::TXspin()
 // -------------------------------------------------------------------------
 // Transmit data
 // -------------------------------------------------------------------------
-int  AP_COAXCAN1::CAN_TX_std(uint16_t can_id, uint8_t data_cmd[], uint8_t msgdlc)
+int  AP_COAXCAN2::CAN_TX_std(uint16_t can_id, uint8_t data_cmd[], uint8_t msgdlc)
 {
     int cmd_send_res    = 0;
     uint8_t can_data[8] = {0,0,0,0,0,0,0,0};
@@ -491,7 +491,7 @@ int  AP_COAXCAN1::CAN_TX_std(uint16_t can_id, uint8_t data_cmd[], uint8_t msgdlc
     memcpy(can_data, data_cmd, msgdlc);
 
     AP_HAL::CANFrame out_frame;
-    uint64_t timeout = AP_HAL::native_micros64() + COAXCAN1_SEND_TIMEOUT_US;                      // Should have timeout value
+    uint64_t timeout = AP_HAL::native_micros64() + COAXCAN2_SEND_TIMEOUT_US;                      // Should have timeout value
 
     out_frame       = {can_id, can_data, msgdlc};                                               // id, data[8], dlc
     cmd_send_res    = _can_iface->send(out_frame, timeout, AP_HAL::CANIface::AbortOnError);
@@ -518,7 +518,7 @@ int  AP_COAXCAN1::CAN_TX_std(uint16_t can_id, uint8_t data_cmd[], uint8_t msgdlc
 // -------------------------------------------------------------------------
 // 
 // -------------------------------------------------------------------------
-void AP_COAXCAN1::TX_FCC1_MSG(void)
+void AP_COAXCAN2::TX_FCC1_MSG(void)
 {
     uint8_t temp_data[8] = {0} ;
     uint8_t tempjoin = 0;
@@ -546,7 +546,7 @@ void AP_COAXCAN1::TX_FCC1_MSG(void)
 // -------------------------------------------------------------------------
 // 
 // -------------------------------------------------------------------------
-void AP_COAXCAN1::TX_FCC2_MSG(void)
+void AP_COAXCAN2::TX_FCC2_MSG(void)
 {
     uint8_t temp_data[8] = {0,0,0,0,0,0,0,0} ;
 
