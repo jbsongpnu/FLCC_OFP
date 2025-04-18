@@ -67,7 +67,7 @@ public:
     FDC1_msg _FDC1;
     FDC2_msg _FDC2;
     VCUFDC1_msg _VCUFDC1;
-    
+
 private:
 
     char _thread_name[9];
@@ -80,17 +80,21 @@ private:
     coaxcan2::ICanIface* _iface;
 
     //-----Receive ID definition-----
-    //CCB Test
-    static constexpr unsigned RX_ID_CCB1  = 0x00000001;  //CCB1 message
-    static constexpr unsigned RX_ID_CCB2  = 0x00000010;  //CCB2 message
     //Receive ID for IFCU
-    static constexpr unsigned RX_ID_IFCU1 = 0x000001F0;     //IFCU Voltage-out, Current-out, CurrentLimit, H-tank
-    static constexpr unsigned RX_ID_IFCU2 = 0x000002F0;     //IFCU State, Fault-state, What's Fault, 
+    static constexpr unsigned RX_ID_IFCU1 = 0x000001F0;
+    static constexpr unsigned RX_ID_IFCU2 = 0x000002F0;
     static constexpr unsigned RX_ID_IFCU3 = 0x000002F1;
     static constexpr unsigned RX_ID_IFCU4 = 0x000003F0;
     static constexpr unsigned RX_ID_IFCU5 = 0x000004F0;
     static constexpr unsigned RX_ID_IFCU6 = 0x000005F0;
-    static constexpr unsigned RX_ID_NUM = 8U;   //Number of RX_ID
+    static constexpr unsigned RX_ID_PMS1  = 0x000006F0;
+    static constexpr unsigned RX_ID_PMS2  = 0x000006F1;
+    static constexpr unsigned RX_ID_PMS3  = 0x000006F2;
+    static constexpr unsigned RX_ID_FDC1  = 0x00000300;
+    static constexpr unsigned RX_ID_FDC2  = 0x00000301;
+    static constexpr unsigned RX_ID_VCUF1 = 0x00000400;
+      
+    static constexpr unsigned RX_ID_NUM = 12U;   //Number of RX_ID
     //End of---Receive ID definition-----
 
     //Command ID definition class

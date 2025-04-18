@@ -3,20 +3,6 @@
 
 #include <AP_Common/AP_Common.h>
 
-union ByteUnion {
-    uint8_t Byte;
-    struct bits {
-        uint8_t bit0 : 1;
-        uint8_t bit1 : 1;
-        uint8_t bit2 : 1;
-        uint8_t bit3 : 1;
-        uint8_t bit4 : 1;
-        uint8_t bit5 : 1;
-        uint8_t bit6 : 1;
-        uint8_t bit7 : 1;
-    };
-};
-
 struct PMS1_msg {
     //0x6F0 DLC = 4
     uint8_t AlivCnt;        //4bit : Byte0 - bit 0~3 
@@ -31,23 +17,23 @@ struct PMS1_msg {
 
 struct PMS2_msg {
     //0x6F1 DLC = 8
-    uint16_t Batt_Output_Current;    //16bit : Byte0 ~ Byte1
+    int16_t Batt_Output_Current;    //16bit : Byte0 ~ Byte1
     uint16_t LDC_Output_Current;     //16bit : Byte2 ~ Byte3
-    uint16_t Mv_Output_Current;      //16bit : Byte4 ~ Byte5
+    int16_t Mv_Output_Current;      //16bit : Byte4 ~ Byte5
     uint16_t Mv_Battery_Voltage;     //16bit : Byte6 ~ Byte7
 };
 
 struct PMS3_msg {
     //0x6F2 DLC = 8
     uint16_t OutputVoltage;     //16bit : Byte0 ~ Byte1
-    uint16_t OutputCurrent;     //16bit : Byte2 ~ Byte3
+    int16_t OutputCurrent;     //16bit : Byte2 ~ Byte3
     uint16_t InputVoltage;      //16bit : Byte4 ~ Byte5
-    uint16_t InputCurrent;      //16bit : Byte6 ~ Byte7
+    int16_t InputCurrent;      //16bit : Byte6 ~ Byte7
 };
 
-union Uni_FDC1_Flag1 {
+typedef union {
     uint8_t ALL;
-    struct bits {
+    struct {
         uint8_t Ind1_OC_Fault : 1;
         uint8_t Ind2_OC_Fault : 1;
         uint8_t Ind3_OC_Fault : 1;
@@ -57,12 +43,12 @@ union Uni_FDC1_Flag1 {
         uint8_t SiC1_Fault : 1;
         uint8_t SiC2_Fault : 1;
         
-    };
-};
+    }bits;
+}Uni_FDC1_Flag1;
 
-union Uni_FDC1_Flag2 {
+typedef union {
     uint8_t ALL;
-    struct bits {
+    struct {
         uint8_t SiC3_Fault : 1;
         uint8_t SiC4_Fault : 1;
         uint8_t Communication_Fault : 1;
@@ -72,30 +58,30 @@ union Uni_FDC1_Flag2 {
         uint8_t Input_UV_Fault : 1;
         uint8_t Output_UV_Fault : 1;
         
-    };
-};
+    }bits;
+}Uni_FDC1_Flag2;
 
 struct FDC1_msg {
     //0x300 DLC = 8
-    uint8_t AlivCnt;            //8bit : Byte0
+    uint8_t AliveCnt;            //8bit : Byte0
     uint8_t State;              //8bit : Byte1
     uint8_t Aux_Volt;           //8bit : Byte2
     uint8_t Max_Temp;           //8bit : Byte3
     Uni_FDC1_Flag1 Flag1;       //8 Flag bits : Byte4
-    Uni_FDC1_Flag2 Flag2;       //8 Flag bits : Byte4
+    Uni_FDC1_Flag2 Flag2;       //8 Flag bits : Byte5
 };
 
 struct FDC2_msg {
     //0x301 DLC = 8
     uint16_t OutputVoltage;     //16bit : Byte0 ~ Byte1
-    uint16_t OutputCurrent;     //16bit : Byte2 ~ Byte3
+    int16_t OutputCurrent;     //16bit : Byte2 ~ Byte3
     uint16_t InputVoltage;      //16bit : Byte4 ~ Byte5
-    uint16_t InputCurrent;      //16bit : Byte6 ~ Byte7
+    int16_t InputCurrent;      //16bit : Byte6 ~ Byte7
 };
 
 struct VCUFDC1_msg {
     //0x400 DLC = 8
-    uint8_t VCU_AliveCnt;           //8bit : Byte0
+    uint8_t AliveCnt;           //8bit : Byte0
     uint8_t SET_CMD;                //4bit : Byte1 - Bit 0~3
     uint8_t Fault_Reset;            //4bit : Byte1 - Bit 4~7
     uint16_t Target_OutputVoltage;  //16bit : Byte2 ~ Byte3

@@ -6,6 +6,11 @@
 #include <AP_CANManager/AP_CANManager.h>
 #include <AP_Math/AP_Math.h>
 
+//Debug Control
+#define DEBUG_IFCU  1   //IFCU Test
+#define DEBUG_PMS   1   //PMS Test
+#define DEBUG_FC_TX 1   //FC TX Test
+
 extern const AP_HAL::HAL& hal;
 
 #define TEMP_EXP 0		//Initial value
@@ -47,6 +52,45 @@ AP_COAXCAN2::AP_COAXCAN2()
     _FCC_FcPwrReq = 0;
     _FCC_FcThrottle = 0;
     _FCC_FcThrottlePrdct = 0;
+
+    _PMS1.AlivCnt = 0;
+    _PMS1.LDC_State = 0;
+    _PMS1.LDC_State = 0;
+    _PMS1.Fault_LDC_No = 0;
+    _PMS1.Batt_SW_On = 0;
+    _PMS1.Mv_SW_On = 0;
+    _PMS1.Lv_SW_On = 0;
+    _PMS1.Batt_Charger_On = 0;
+
+    _PMS2.Batt_Output_Current = 0;
+    _PMS2.LDC_Output_Current = 0;
+    _PMS2.Mv_Output_Current = 0;
+    _PMS2.Mv_Battery_Voltage = 0;
+
+    _PMS3.OutputVoltage = 0;
+    _PMS3.OutputVoltage = 0;
+    _PMS3.OutputCurrent = 0;
+    _PMS3.InputVoltage = 0;
+    _PMS3.InputCurrent = 0;
+
+    _FDC1.AliveCnt = 0;
+    _FDC1.State = 0;
+    _FDC1.Aux_Volt = 0;
+    _FDC1.Max_Temp = 0;
+    _FDC1.Flag1.ALL = 0;
+    _FDC1.Flag2.ALL = 0;
+
+    _FDC2.OutputVoltage = 0;
+    _FDC2.OutputCurrent = 0;
+    _FDC2.InputVoltage = 0;
+    _FDC2.InputCurrent = 0;
+
+    _VCUFDC1.AliveCnt = 0;
+    _VCUFDC1.SET_CMD = 0;
+    _VCUFDC1.Fault_Reset = 0;
+    _VCUFDC1.Target_OutputVoltage = 0;
+    _VCUFDC1.Target_InputCurrent = 0;
+    _VCUFDC1.Target_InputPower = 0;
 
     _IFCU1.PpCur = 0;
     _IFCU1.PpCurLim = 0;
@@ -326,12 +370,9 @@ void AP_COAXCAN2::RXspin()
 // -------------------------------------------------------------------------
 void AP_COAXCAN2::handleFrame(const AP_HAL::CANFrame& can_rxframe)
 {
-    uint16_t    uint16_temp = 0;
     uint16_t    uint16_temp1 = 0;
     uint16_t    uint16_temp2 = 0;
     uint8_t     uint8_temp = 0;
-
-//    int16_t int16_temp = 0U;
 
     switch(can_rxframe.id&can_rxframe.MaskStdID)
     {
@@ -347,7 +388,9 @@ void AP_COAXCAN2::handleFrame(const AP_HAL::CANFrame& can_rxframe)
             _IFCU1.PpCurLim = uint16_temp2 * 256 + uint16_temp1;
             _IFCU1.PpH2Sof = can_rxframe.data[6];
             // _IFCU1.reserved = can_rxframe.data[7];
-            gcs().send_text(MAV_SEVERITY_INFO, "IFCU1 : %d, %d, %d, %d", _IFCU1.PpVlt, _IFCU1.PpCur, _IFCU1.PpCurLim, _IFCU1.PpH2Sof);
+            #if DEBUG_IFCU == 1
+            gcs().send_text(MAV_SEVERITY_INFO, "IFCU1 : %u, %u, %u, %u", _IFCU1.PpVlt, _IFCU1.PpCur, _IFCU1.PpCurLim, _IFCU1.PpH2Sof);
+            #endif
             break;
         case RX_ID_IFCU2 :
             _IFCU2.State = can_rxframe.data[0];
@@ -357,7 +400,9 @@ void AP_COAXCAN2::handleFrame(const AP_HAL::CANFrame& can_rxframe)
             uint16_temp1 = can_rxframe.data[4];
             uint16_temp2 = can_rxframe.data[5];
             _IFCU2.SvmlsoRVlu = uint16_temp2 * 256 + uint16_temp1;
-            gcs().send_text(MAV_SEVERITY_INFO, "IFCU2 : %d, %d, %d, %d, %d", _IFCU2.State, _IFCU2.FltSts, _IFCU2.DTC, _IFCU2.H2LkLmp, _IFCU2.SvmlsoRVlu);
+            #if DEBUG_IFCU == 1
+            gcs().send_text(MAV_SEVERITY_INFO, "IFCU2 : %u, %u, %u, %u, %u", _IFCU2.State, _IFCU2.FltSts, _IFCU2.DTC, _IFCU2.H2LkLmp, _IFCU2.SvmlsoRVlu);
+            #endif
             break;
         case RX_ID_IFCU3 :
             uint16_temp1 = can_rxframe.data[0];
@@ -372,7 +417,9 @@ void AP_COAXCAN2::handleFrame(const AP_HAL::CANFrame& can_rxframe)
             uint16_temp1 = can_rxframe.data[6];
             uint16_temp2 = can_rxframe.data[7];
             _IFCU3.LdcCur = uint16_temp2 * 256 + uint16_temp1;
-            gcs().send_text(MAV_SEVERITY_INFO, "IFCU3 : %d, %d, %d, %d", _IFCU3.FcNetVlt, _IFCU3.FcNetCur, _IFCU3.LdcVlt, _IFCU3.LdcCur);
+            #if DEBUG_IFCU == 1
+            gcs().send_text(MAV_SEVERITY_INFO, "IFCU3 : %u, %u, %u, %u", _IFCU3.FcNetVlt, _IFCU3.FcNetCur, _IFCU3.LdcVlt, _IFCU3.LdcCur);
+            #endif
             break;
         case RX_ID_IFCU4 :
             _IFCU4.FcInClntTmp = (int8_t)can_rxframe.data[0];
@@ -383,7 +430,9 @@ void AP_COAXCAN2::handleFrame(const AP_HAL::CANFrame& can_rxframe)
             uint16_temp1 = can_rxframe.data[5];
             uint16_temp2 = can_rxframe.data[6];
             _IFCU4.H2TnkFillCnt = uint16_temp2 * 256 + uint16_temp1;
+            #if DEBUG_IFCU == 1
             gcs().send_text(MAV_SEVERITY_INFO, "IFCU4 : %d, %d, %d, %u, %u, %u", _IFCU4.FcInClntTmp, _IFCU4.AmbTemp, _IFCU4.RoomTemp, _IFCU4.H2TnkPrs, _IFCU4.H2TnkTmp, _IFCU4.H2TnkFillCnt);
+            #endif
             break;
         case RX_ID_IFCU5 :
             uint16_temp1 = can_rxframe.data[0];
@@ -395,7 +444,9 @@ void AP_COAXCAN2::handleFrame(const AP_HAL::CANFrame& can_rxframe)
             _IFCU5.HvBsaSoC = can_rxframe.data[4];
             _IFCU5.HvBsaSoH = can_rxframe.data[5];
             _IFCU5.ExWtrTrpFill = can_rxframe.data[6] & 0x01;
-            gcs().send_text(MAV_SEVERITY_INFO, "IFCU5 : %d, %d, %d, %d, %d", _IFCU5.HvBsaVlt, _IFCU5.HvBsaCur, _IFCU5.HvBsaSoC, _IFCU5.HvBsaSoH, _IFCU5.ExWtrTrpFill);
+            #if DEBUG_IFCU == 1
+            gcs().send_text(MAV_SEVERITY_INFO, "IFCU5 : %u, %u, %u, %u, %u", _IFCU5.HvBsaVlt, _IFCU5.HvBsaCur, _IFCU5.HvBsaSoC, _IFCU5.HvBsaSoH, _IFCU5.ExWtrTrpFill);
+            #endif
             break;
         case RX_ID_IFCU6 :
             uint16_temp1 = can_rxframe.data[0];
@@ -408,46 +459,118 @@ void AP_COAXCAN2::handleFrame(const AP_HAL::CANFrame& can_rxframe)
             uint8_temp = can_rxframe.data[5];
             _IFCU6.FcClntFiltChk = uint8_temp & 0x01;
             _IFCU6.FcClntSplChk = (uint8_temp >> 1) & 0x01;
-            gcs().send_text(MAV_SEVERITY_INFO, "IFCU6 : %d, %d, %d, %d, %d", _IFCU6.FcMxCurLim, _IFCU6.FcNetCustCurLim, _IFCU6.H2MidPrs, _IFCU6.FcClntFiltChk, _IFCU6.FcClntSplChk);
+            #if DEBUG_IFCU == 1
+            gcs().send_text(MAV_SEVERITY_INFO, "IFCU6 : %u, %u, %u, %u, %u", _IFCU6.FcMxCurLim, _IFCU6.FcNetCustCurLim, _IFCU6.H2MidPrs, _IFCU6.FcClntFiltChk, _IFCU6.FcClntSplChk);
+            #endif
             break;
-        case RX_ID_CCB1:
-            //Thermist 1 temperature
-            uint16_temp = can_rxframe.data[0];
-            _rx_raw_thermist1 = uint16_temp * 256 + can_rxframe.data[1];
-            //Thermist 2 temperature
-            uint16_temp = can_rxframe.data[2];
-            _rx_raw_thermist2 = uint16_temp * 256 + can_rxframe.data[3];
-            //Thermist 3 temperature
-            uint16_temp = can_rxframe.data[4];
-            _rx_raw_thermist3 = uint16_temp * 256 + can_rxframe.data[5];
-            //Thermist 4 temperature
-            uint16_temp = can_rxframe.data[6];
-            _rx_raw_thermist4 = uint16_temp * 256 + can_rxframe.data[7];
-            
-            _handleFrame_cnt++;
-
+        case RX_ID_PMS1 :
+            _PMS1.AlivCnt = can_rxframe.data[0] & 0x0F;
+            _PMS1.State = ((can_rxframe.data[0] >> 4) & 0x0F)
+                            + (can_rxframe.data[1] & 0x0F);
+            _PMS1.LDC_State = ((can_rxframe.data[1] >> 4) & 0x0F)
+                            + (can_rxframe.data[2] & 0x0F);
+            _PMS1.Fault_LDC_No = ((can_rxframe.data[2] >> 4) & 0x0F)
+                            + (can_rxframe.data[3] & 0x0F);
+            _PMS1.Batt_SW_On =  (can_rxframe.data[3] >> 4) & 0x01;
+            _PMS1.Mv_SW_On = (can_rxframe.data[3] >> 5) & 0x01;
+            _PMS1.Lv_SW_On = (can_rxframe.data[3] >> 6) & 0x01;
+            _PMS1.Batt_Charger_On = (can_rxframe.data[3] >> 7) & 0x01;
+            #if DEBUG_PMS == 1
+            gcs().send_text(MAV_SEVERITY_INFO, "PMS1 : %u, %u, %u, %u, %u%u%u%u", 
+                        _PMS1.AlivCnt, _PMS1.State, _PMS1.LDC_State, _PMS1.Fault_LDC_No, 
+                        _PMS1.Batt_SW_On, _PMS1.Mv_SW_On, _PMS1.Lv_SW_On, _PMS1.Batt_Charger_On);
+            #endif
             break;
-
-        case RX_ID_CCB2:
-
-            //Thermocouple 1 temperature
-            uint16_temp = can_rxframe.data[0];
-            _rx_raw_thermocp1 = uint16_temp * 256 + can_rxframe.data[1];
-            //Thermocouple 2 temperature
-            uint16_temp = can_rxframe.data[2];
-            _rx_raw_thermocp2 = uint16_temp * 256 + can_rxframe.data[3];
-            //(Water)Flow sensor
-            uint16_temp = can_rxframe.data[4];
-            _rx_raw_wflow = uint16_temp * 256 + can_rxframe.data[5];
-            //Board temperature
-            _rx_raw_bdtemp = can_rxframe.data[6];
-            //Cooling controller state
-            _rx_raw_state = can_rxframe.data[7];
-
-            _handleFrame_cnt++;
-
+        case RX_ID_PMS2 :
+            uint16_temp1 = can_rxframe.data[0];
+            uint16_temp2 = can_rxframe.data[1];
+            _PMS2.Batt_Output_Current = (int16_t)(uint16_temp2 * 256 + uint16_temp1);
+            uint16_temp1 = can_rxframe.data[2];
+            uint16_temp2 = can_rxframe.data[3];
+            _PMS2.LDC_Output_Current = uint16_temp2 * 256 + uint16_temp1;
+            uint16_temp1 = can_rxframe.data[4];
+            uint16_temp2 = can_rxframe.data[5];
+            _PMS2.Mv_Output_Current = (int16_t)(uint16_temp2 * 256 + uint16_temp1);
+            uint16_temp1 = can_rxframe.data[6];
+            uint16_temp2 = can_rxframe.data[7];
+            _PMS2.Mv_Battery_Voltage = uint16_temp2 * 256 + uint16_temp1;
+            #if DEBUG_PMS == 1
+            gcs().send_text(MAV_SEVERITY_INFO, "PMS2 : %d, %u, %d, %u", 
+                        _PMS2.Batt_Output_Current, _PMS2.LDC_Output_Current, _PMS2.Mv_Output_Current, _PMS2.Mv_Battery_Voltage);
+            #endif
             break;
-
+        case RX_ID_PMS3 :
+            uint16_temp1 = can_rxframe.data[0];
+            uint16_temp2 = can_rxframe.data[1];
+            _PMS3.OutputVoltage = uint16_temp2 * 256 + uint16_temp1;
+            uint16_temp1 = can_rxframe.data[2];
+            uint16_temp2 = can_rxframe.data[3];
+            _PMS3.OutputCurrent = (int16_t)(uint16_temp2 * 256 + uint16_temp1);
+            uint16_temp1 = can_rxframe.data[4];
+            uint16_temp2 = can_rxframe.data[5];
+            _PMS3.InputVoltage = uint16_temp2 * 256 + uint16_temp1;
+            uint16_temp1 = can_rxframe.data[6];
+            uint16_temp2 = can_rxframe.data[7];
+            _PMS3.InputCurrent = (int16_t)(uint16_temp2 * 256 + uint16_temp1);
+            #if DEBUG_PMS == 1
+            gcs().send_text(MAV_SEVERITY_INFO, "PMS3 : %u, %d, %u, %d", 
+                        _PMS3.OutputVoltage, _PMS3.OutputCurrent, _PMS3.InputVoltage, _PMS3.InputCurrent);
+            #endif
+            break;
+        case RX_ID_FDC1 :
+            _FDC1.AliveCnt   = can_rxframe.data[0];
+            _FDC1.State     = can_rxframe.data[1];
+            _FDC1.Aux_Volt  = can_rxframe.data[2];
+            _FDC1.Max_Temp  = can_rxframe.data[3];
+            _FDC1.Flag1.ALL = can_rxframe.data[4];
+            _FDC1.Flag2.ALL = can_rxframe.data[5];
+            #if DEBUG_PMS == 1
+            gcs().send_text(MAV_SEVERITY_INFO, "FDC1 : %u, %u, %u, %u, %u%u%u%u %u%u%u%u", 
+                        _FDC1.AliveCnt, _FDC1.State, _FDC1.Aux_Volt, _FDC1.Max_Temp,
+                        _FDC1.Flag1.bits.Ind1_OC_Fault, _FDC1.Flag1.bits.Ind2_OC_Fault,
+                        _FDC1.Flag1.bits.Ind3_OC_Fault, _FDC1.Flag1.bits.Ind4_OC_Fault,
+                        _FDC1.Flag1.bits.Current_Unbalance_Fault, _FDC1.Flag1.bits.Output_OC_Fault,
+                        _FDC1.Flag1.bits.SiC1_Fault, _FDC1.Flag1.bits.SiC2_Fault);
+            #endif
+            break;
+        case RX_ID_FDC2 :
+            uint16_temp1 = can_rxframe.data[0];
+            uint16_temp2 = can_rxframe.data[1];
+            _FDC2.OutputVoltage = uint16_temp2 * 256 + uint16_temp1;
+            uint16_temp1 = can_rxframe.data[2];
+            uint16_temp2 = can_rxframe.data[3];
+            _FDC2.OutputCurrent = (int16_t)(uint16_temp2 * 256 + uint16_temp1);
+            uint16_temp1 = can_rxframe.data[4];
+            uint16_temp2 = can_rxframe.data[5];
+            _FDC2.InputVoltage = uint16_temp2 * 256 + uint16_temp1;
+            uint16_temp1 = can_rxframe.data[6];
+            uint16_temp2 = can_rxframe.data[7];
+            _FDC2.InputCurrent = (int16_t)(uint16_temp2 * 256 + uint16_temp1);
+            #if DEBUG_PMS == 1
+            gcs().send_text(MAV_SEVERITY_INFO, "FDC2 : %u, %d, %u, %d", 
+                        _FDC2.OutputVoltage, _FDC2.OutputCurrent, _FDC2.InputVoltage, _FDC2.InputCurrent);
+            #endif
+            break;
+        case RX_ID_VCUF1 :
+            _VCUFDC1.AliveCnt   = can_rxframe.data[0];
+            uint8_temp = can_rxframe.data[1];
+            _VCUFDC1.SET_CMD = uint8_temp & 0x0F;
+            _VCUFDC1.Fault_Reset = ((uint8_temp >> 4) & 0x0F);
+            uint16_temp1 = can_rxframe.data[0];
+            uint16_temp2 = can_rxframe.data[1];
+            _VCUFDC1.Target_OutputVoltage = uint16_temp2 * 256 + uint16_temp1;
+            uint16_temp1 = can_rxframe.data[0];
+            uint16_temp2 = can_rxframe.data[1];
+            _VCUFDC1.Target_InputCurrent = uint16_temp2 * 256 + uint16_temp1;
+            uint16_temp1 = can_rxframe.data[0];
+            uint16_temp2 = can_rxframe.data[1];
+            _VCUFDC1.Target_InputPower = uint16_temp2 * 256 + uint16_temp1;
+            #if DEBUG_PMS == 1
+            gcs().send_text(MAV_SEVERITY_INFO, "PMS2 : %u, %u, %u, %u, %u, %u", 
+                        _VCUFDC1.AliveCnt, _VCUFDC1.SET_CMD, _VCUFDC1.Fault_Reset,
+                        _VCUFDC1.Target_OutputVoltage, _VCUFDC1.Target_InputCurrent, _VCUFDC1.Target_InputPower);
+            #endif
+            break;
         default:
 
             break;
