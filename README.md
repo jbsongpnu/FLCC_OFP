@@ -3,6 +3,7 @@
 ***
 
 ## Version History
+- V0.01.15 Testing new Mavlink command : MAV_CMD_COAX_FCC_READY
 - V0.01.14 AP_CoaxCAN2 is updated with receving PMS codes (+ some debugging)
 - V0.01.13 Reorganizing CAN ICD(IFCU and PMS) with AP_CoaxCAN_msg_List.h
 - V0.01.12 Adding New CoaxCAN2, moving CoaxCAN1's IFCU code to CoaxCAN2

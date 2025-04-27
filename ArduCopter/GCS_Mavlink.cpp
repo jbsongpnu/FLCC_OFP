@@ -1028,9 +1028,33 @@ MAV_RESULT GCS_MAVLINK_Copter::handle_command_long_packet(const mavlink_command_
         GCS_MAVLINK_Copter::convert_COMMAND_LONG_to_COMMAND_INT(packet, packet_int);
         return handle_command_pause_continue(packet_int);
     }
+    case MAV_CMD_COAX_FCC_READY : {
+        return handle_command_COAX_FCC_READY(packet);
+    }
     default:
         return GCS_MAVLINK::handle_command_long_packet(packet);
     }
+}
+
+MAV_RESULT GCS_MAVLINK_Copter::handle_command_COAX_FCC_READY(const mavlink_command_long_t &msg)
+{
+    uint8_t param1 = (uint8_t)msg.param1;
+    gcs().send_text(MAV_SEVERITY_INFO, "Got FCC Ready");
+    switch(param1) {
+        case 0 : 
+            return MAV_RESULT_ACCEPTED;
+        break;
+        case 1 :
+            return MAV_RESULT_ACCEPTED;
+        break;
+        case 2 :
+            return MAV_RESULT_ACCEPTED;
+        break;
+        default :
+            return MAV_RESULT_ACCEPTED;
+        break;
+    }
+
 }
 
 MAV_RESULT GCS_MAVLINK_Copter::handle_command_pause_continue(const mavlink_command_int_t &packet)
