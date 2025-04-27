@@ -1036,10 +1036,15 @@ MAV_RESULT GCS_MAVLINK_Copter::handle_command_long_packet(const mavlink_command_
     }
 }
 
+// -------------------------------------------------------------------------
+// Handle Command 61000 MAV_CMD_COAX_FCC_READY
+// -------------------------------------------------------------------------
 MAV_RESULT GCS_MAVLINK_Copter::handle_command_COAX_FCC_READY(const mavlink_command_long_t &msg)
 {
     uint8_t param1 = (uint8_t)msg.param1;
-    gcs().send_text(MAV_SEVERITY_INFO, "Got FCC Ready");
+    //test code
+    cxdata().fcrdy = param1;
+    gcs().send_text(MAV_SEVERITY_INFO, "Got FCC Ready %u", cxdata().fcrdy);
     switch(param1) {
         case 0 : 
             return MAV_RESULT_ACCEPTED;

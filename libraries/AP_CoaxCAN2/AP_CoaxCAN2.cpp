@@ -5,6 +5,7 @@
 #include <GCS_MAVLink/GCS.h>
 #include <AP_CANManager/AP_CANManager.h>
 #include <AP_Math/AP_Math.h>
+#include "Coaxial_data.h"
 
 //Debug Control
 #define DEBUG_IFCU  1   //IFCU Test
@@ -649,7 +650,7 @@ void AP_COAXCAN2::TX_FCC1_MSG(void)
     //_FCC_AlivCnt : looping 0~15
     _FCC_CmdFcRunStop = 1;
     _FCC_CmdPmsBatCut = 0;
-    //_FCC_Ready : set by GCS
+    _FCC_Ready = cxdata().fcrdy;
     _FCC_Reserved1 = 0;
 
     _FCC_Ready = 1;//Temp debugging
