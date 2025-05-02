@@ -1043,7 +1043,8 @@ MAV_RESULT GCS_MAVLINK_Copter::handle_command_COAX_FCC_READY(const mavlink_comma
 {
     uint8_t param1 = (uint8_t)msg.param1;
     //test code
-    cxdata().fcrdy = param1;
+    if(param1 > 0) cxdata().fcrdy = 1;
+    else cxdata().fcrdy = 0;
     gcs().send_text(MAV_SEVERITY_INFO, "Got FCC Ready %u", cxdata().fcrdy);
     switch(param1) {
         case 0 : 
@@ -1052,10 +1053,8 @@ MAV_RESULT GCS_MAVLINK_Copter::handle_command_COAX_FCC_READY(const mavlink_comma
         case 1 :
             return MAV_RESULT_ACCEPTED;
         break;
-        case 2 :
-            return MAV_RESULT_ACCEPTED;
-        break;
         default :
+            //Should not reach here...
             return MAV_RESULT_ACCEPTED;
         break;
     }

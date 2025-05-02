@@ -25,7 +25,14 @@ void Copter::userhook_50Hz()
 #ifdef USERHOOK_MEDIUMLOOP
 void Copter::userhook_MediumLoop()
 {
-    // put your 10Hz code here
+    //User Code for Coaxial Helicopter 
+    //Loop rate : 10Hz
+    static uint16_t Count = 0;
+    if (Count > 9) {
+        gcs().send_text(MAV_SEVERITY_INFO, "Testing FCC Ready %u", (cxdata().fcrdy & 0x01));
+        Count = 0;
+    }
+    Count++;
 }
 #endif
 
