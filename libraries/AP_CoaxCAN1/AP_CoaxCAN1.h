@@ -7,24 +7,12 @@
 #include <AP_HAL/Semaphores.h>
 #include <AP_Param/AP_Param.h>
 #include "CoaxCAN_driver.hpp"
+#include <AP_CoaxCAN1/AP_CoaxCAN_INV_msg_List.h>
 
 #define COAXCAN1_LOOP_HZ              (200U)      // 200Hz 5ms
 #define COAXCAN1_MINOR_INTERVAL       (2U)      //(2U)        // 100Hz  5ms*2=10ms
 #define COAXCAN1_MALVINK_INTERVAL     (20U)       // 10Hz  5ms*20=100ms
 #define COAXCAN1_ONRUNNING_INTERVAL   (200U)      // 1Hz   5ms*200=1000ms
-
-class COAX1_CTRL_CMD
-{
-public:
-	COAX1_CTRL_CMD()
-	{
-        EX1 = 0;
-        EX2 = 84;
-	}
-
-	uint32_t EX1;
-	uint32_t EX2;
-};
 
 class AP_COAXCAN1 : public AP_CANDriver {
 public:
@@ -50,63 +38,25 @@ public:
     int TXspin(void);
     void handleFrame(const AP_HAL::CANFrame& can_rxframe);
     //TX Function to Devices
-    int  CAN_TX_std(uint16_t can_id, uint8_t data_cmd[], uint8_t msgdlc);    //send with standard ID
-    void TX_FCC1_MSG(void); //0x720
-    void TX_FCC2_MSG(void); //0x721
+    int  CAN_TX_Ext(uint32_t can_id, uint8_t data_cmd[], uint8_t msgdlc);    //send with Ext ID
 
-    struct IFCU1_msg {
-        uint16_t PpVlt;
-        uint16_t PpCur;
-        uint16_t PpCurLim;
-        uint8_t  PpH2Sof;
-        uint8_t  reserved;
-    };
-    IFCU1_msg _IFCU1;
+    void TX_INV_SETCMD_MSG(void); 
+    void TX_INV_SETCC_MSG(void);
+    void TX_INV_SETSC_MSG(void);
+    void TX_INV_SETFLT_MSG(void);
 
-    struct IFCU2_msg {
-        uint8_t State;
-        uint8_t FltSts;
-        uint8_t DTC;
-        uint8_t H2LkLmp;
-        uint8_t SvmlsoRVlu;
-    };
-    IFCU2_msg _IFCU2;
-
-    struct IFCU3_msg {
-        uint16_t FcNetVlt;
-        uint16_t FcNetCur;
-        uint16_t LdcVlt;
-        uint16_t LdcCur;
-    };
-    IFCU3_msg _IFCU3;
-
-    struct IFCU4_msg {
-        int8_t FcInClntTmp;
-        int8_t AmbTemp;
-        int8_t RoomTemp;
-        uint8_t H2TnkPrs;
-        uint8_t H2TnkTmp;
-        uint16_t H2TnkFillCnt;
-    };
-    IFCU4_msg _IFCU4;
-
-    struct IFCU5_msg {
-        uint16_t HvBsaVlt;
-        uint16_t HvBsaCur;
-        uint8_t HvBsaSoC;
-        uint8_t HvBsaSoH;
-        uint8_t ExWtrTrpFill;
-    };
-    IFCU5_msg _IFCU5;
-
-    struct IFCU6_msg {
-        uint16_t FcMxCurLim;
-        uint16_t FcNetCustCurLim;
-        uint8_t H2MidPrs;
-        uint8_t FcClntFiltChk;
-        uint8_t FcClntSplChk;
-    };
-    IFCU6_msg _IFCU6;
+    INV_CMD_msg INV_SET_CMD;
+    INV_CMD_msg INV_GET_CMD;
+    INV_CC_msg  INV_SET_CC;
+    INV_CC_msg  INV_GET_CC;
+    INV_SC_msg  INV_SET_SC;
+    INV_SC_msg  INV_GET_SC;
+    INV_FLT_msg INV_SET_FLT;
+    INV_FLT_msg INV_GET_FLT;
+    INV_STATUS1_msg INV_Status1;
+    INV_STATUS2_msg INV_Status2;
+    INV_STATUS3_msg INV_Status3;
+    INV_STATUS4_msg INV_Status4;
 
 private:
 
@@ -123,30 +73,37 @@ private:
     //CCB Test
     static constexpr unsigned RX_ID_CCB1  = 0x00000001;  //CCB1 message
     static constexpr unsigned RX_ID_CCB2  = 0x00000010;  //CCB2 message
-    //Receive ID for IFCU
-    static constexpr unsigned RX_ID_IFCU1 = 0x000001F0;     //IFCU Voltage-out, Current-out, CurrentLimit, H-tank
-    static constexpr unsigned RX_ID_IFCU2 = 0x000002F0;     //IFCU State, Fault-state, What's Fault, 
-    static constexpr unsigned RX_ID_IFCU3 = 0x000002F1;
-    static constexpr unsigned RX_ID_IFCU4 = 0x000003F0;
-    static constexpr unsigned RX_ID_IFCU5 = 0x000004F0;
-    static constexpr unsigned RX_ID_IFCU6 = 0x000005F0;
-    static constexpr unsigned RX_ID_NUM = 8U;   //Number of RX_ID
+    //Receive ID for Inverter
+    static constexpr unsigned RX_ID_INV_GET_CMD     = 0x016E0102; //Get Command
+    static constexpr unsigned RX_ID_INV_GET_CC      = 0x016F0102; //Get Current control
+    static constexpr unsigned RX_ID_INV_GET_SC      = 0x01700102; //Get Speed control
+    static constexpr unsigned RX_ID_INV_GET_FLT     = 0x01710102; //Get Fault
+    static constexpr unsigned RX_ID_INV_GET_STATUS1 = 0x01720102; //Get Status1
+    static constexpr unsigned RX_ID_INV_GET_STATUS2 = 0x01730102; //Get Status2
+    static constexpr unsigned RX_ID_INV_GET_STATUS3 = 0x01740102; //Get Status3
+    static constexpr unsigned RX_ID_INV_GET_STATUS4 = 0x01750102; //Get Status4
+    static constexpr unsigned RX_ID_NUM = 10U;   //Number of RX_ID
     //End of---Receive ID definition-----
 
-    //Command ID definition class
-    class CMD_ID
-	{
-    public:
-        //CCB Test
-        static constexpr unsigned CMD_ID_EX1 = 0U; //example 1
-        static constexpr unsigned CMD_ID_EX2 = 1U; //example 2
-        //IFCU 
-        static constexpr unsigned CMD_ID_FCC1 = 0x720;  //FCC Alive, Ready, RunStop, CurrentReq
-        static constexpr unsigned CMD_ID_FCC2 = 0x721;  //PowerReqruied, ThrottleNow, ThrottleFuture
-        static constexpr unsigned CMD_ID_FCC3 = 0x720;  //Reserved
-        static constexpr unsigned CMD_ID_NUM = 5U; //Number of CMD_ID
-	};
+    //Command ID definition
+    static constexpr unsigned ID_INV_SET_CMD    = 0x010A0201; //Set Command
+    static constexpr unsigned ID_INV_SET_CC     = 0x010B0201; //Set Current control
+    static constexpr unsigned ID_INV_SET_SC     = 0x010C0201; //Set Speed control
+    static constexpr unsigned ID_INV_SET_FLT    = 0x010D0201; //Set Fault
 
+    class TX_ID
+	{
+        public:
+        //CCB Test
+        static constexpr unsigned TX_ID_EX1 = 0U; //example 1
+        static constexpr unsigned TX_ID_EX2 = 1U; //example 2
+        //Inverter
+        static constexpr unsigned TX_ID_INV_SET_CMD    = 2U; //Set Command
+        static constexpr unsigned TX_ID_INV_SET_CC     = 3U; //Set Current control
+        static constexpr unsigned TX_ID_INV_SET_SC     = 4U; //Set Speed control
+        static constexpr unsigned TX_ID_INV_SET_FLT    = 5U; //Set Fault
+        static constexpr unsigned TX_ID_NUM = 6U;
+    };
     //example data state
     uint16_t _rx_ex1_data1;
     uint16_t _rx_ex1_data2;
@@ -161,15 +118,15 @@ private:
     uint16_t _rx_raw_bdtemp;    //Board temperature 0~99 deg
     uint16_t _rx_raw_state;     //Cooling controller state
 
-    uint32_t _cmd_id[CMD_ID::CMD_ID_NUM];
+    uint32_t _cmd_id[TX_ID::TX_ID_NUM];
     uint32_t _rx_id[RX_ID_NUM];
 
     uint32_t RX_MSG;   //Received message
     uint32_t _rx_idx;  //Received message index
     uint32_t _cmd_idx;  //Command index
 
-    COAX1_CTRL_CMD _coax1_ctrl_cmd;
-    COAX1_CTRL_CMD _coax1_ctrl_cmd_prv;
+    //COAX1_CTRL_CMD _coax1_ctrl_cmd;
+    //COAX1_CTRL_CMD _coax1_ctrl_cmd_prv;
 
     uint32_t _handleFrame_cnt;
 	uint32_t _rtr_tx_cnt;
@@ -199,14 +156,6 @@ private:
 
     uint8_t COAXCAN1_Ctrl_Seq;
     //CAN ICD
-    uint8_t _FCC_AlivCnt;
-    uint8_t _FCC_CmdFcRunStop;
-    uint8_t _FCC_CmdPmsBatCut;
-    uint8_t _FCC_Ready;
-    uint8_t _FCC_Reserved1;
-    uint16_t _FCC_FcPwrReq;
-    uint16_t _FCC_FcThrottle;
-    uint16_t _FCC_FcThrottlePrdct;
 
 };
 

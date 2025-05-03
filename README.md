@@ -3,6 +3,7 @@
 ***
 
 ## Version History
+- V0.01.18 Adding CoaxCAN1 with Inverter ICD. Few fixes with CoaxCAN2 
 - V0.01.17 Testing 10Hz user-hook from scheduler : USERHOOK_MEDIUMLOOP userhook_MediumLoop()
 - V0.01.16 Testing global data storage : Coaxial_data.cpp/h
 - V0.01.15 Testing new Mavlink command : MAV_CMD_COAX_FCC_READY

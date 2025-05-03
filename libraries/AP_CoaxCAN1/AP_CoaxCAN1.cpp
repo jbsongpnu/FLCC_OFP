@@ -9,6 +9,7 @@
 extern const AP_HAL::HAL& hal;
 
 #define TEMP_EXP 0		//Initial value
+#define DEBUG_INVERTER 1
 
 // Table of user settable CAN bus parameters
 const AP_Param::GroupInfo AP_COAXCAN1::var_info[] = {
@@ -39,52 +40,15 @@ AP_COAXCAN1::AP_COAXCAN1()
     _rtr_tx_cnt = 0;
 
     _coaxcan1_last_send_us = 0;
-    _FCC_AlivCnt = 0;
-    _FCC_CmdFcRunStop = 0;
-    _FCC_CmdPmsBatCut = 0;
-    _FCC_Ready = 0;
-    _FCC_Reserved1 = 0;
-    _FCC_FcPwrReq = 0;
-    _FCC_FcThrottle = 0;
-    _FCC_FcThrottlePrdct = 0;
 
-    _IFCU1.PpCur = 0;
-    _IFCU1.PpCurLim = 0;
-    _IFCU1.PpH2Sof = 0;
-    _IFCU1.PpVlt = 0;
-    _IFCU1.reserved = 0;
-
-    _IFCU2.DTC = 0;
-    _IFCU2.FltSts = 0;
-    _IFCU2.H2LkLmp = 0;
-    _IFCU2.State = 0;
-    _IFCU2.SvmlsoRVlu = 0;
-
-    _IFCU3.FcNetCur = 0;
-    _IFCU3.FcNetVlt = 0;
-    _IFCU3.LdcCur = 0;
-    _IFCU3.LdcVlt = 0;
-
-    _IFCU4.AmbTemp = 0;
-    _IFCU4.FcInClntTmp = 0;
-    _IFCU4.H2TnkFillCnt = 0;
-    _IFCU4.H2TnkTmp = 0;
-    _IFCU4.H2TnkPrs = 0;
-    _IFCU4.RoomTemp = 0;
-
-    _IFCU5.ExWtrTrpFill = 0;
-    _IFCU5.HvBsaCur = 0;
-    _IFCU5.HvBsaSoC = 0;
-    _IFCU5.HvBsaSoH = 0;
-    _IFCU5.HvBsaVlt = 0;
-
-    _IFCU6.FcClntFiltChk = 0;
-    _IFCU6.FcClntSplChk = 0;
-    _IFCU6.FcMxCurLim = 0;
-    _IFCU6.FcNetCustCurLim = 0;
-    _IFCU6.H2MidPrs = 0;
-    
     coaxcan1_period_us = 1000000UL / COAXCAN1_LOOP_HZ;
+
+    _cmd_id[TX_ID::TX_ID_EX1]         = 0               | coaxcan1::CanFrame::FlagEFF;
+    _cmd_id[TX_ID::TX_ID_EX2]         = 1               | coaxcan1::CanFrame::FlagEFF;
+    _cmd_id[TX_ID::TX_ID_INV_SET_CMD] = ID_INV_SET_CMD  | coaxcan1::CanFrame::FlagEFF;
+    _cmd_id[TX_ID::TX_ID_INV_SET_CC]  = ID_INV_SET_CC   | coaxcan1::CanFrame::FlagEFF;
+    _cmd_id[TX_ID::TX_ID_INV_SET_SC]  = ID_INV_SET_SC   | coaxcan1::CanFrame::FlagEFF;
+    _cmd_id[TX_ID::TX_ID_INV_SET_FLT] = ID_INV_SET_FLT  | coaxcan1::CanFrame::FlagEFF;
     
 }
 
@@ -197,26 +161,30 @@ void AP_COAXCAN1::loop(void)
 void AP_COAXCAN1::run(void)
 {
     //Receive
-	//RXspin();
+	RXspin();
 
-    if(_AP_COAXCAN1_loop_cnt%20==0)
-    // if(_AP_COAXCAN1_loop_cnt%100==0)
+    //if(_AP_COAXCAN1_loop_cnt%20==0)
+    if(_AP_COAXCAN1_loop_cnt%100==0)
     {
-        //TX_FCC1_MSG();
+        TX_INV_SETCMD_MSG();
         _rtr_tx_cnt++;
     }
-    else if(_AP_COAXCAN1_loop_cnt%20 == 5)
-    // // else if(_AP_COAXCAN1_loop_cnt%100 == 50)
+    // else if(_AP_COAXCAN1_loop_cnt%20 == 5)
+    else if(_AP_COAXCAN1_loop_cnt%100 == 20)
     {
-        //TX_FCC2_MSG();
+        TX_INV_SETCC_MSG();
         _rtr_tx_cnt++;
     }
-    // else
+    // else if(_AP_COAXCAN1_loop_cnt%100 == 40)
     // {
-    //     TXspin();//Transmit unscheduled messages : command from GCS
+    //     TX_INV_SETSC_MSG();
     //     _rtr_tx_cnt++;
     // }
-    //
+    // else if(_AP_COAXCAN1_loop_cnt%100 == 60)
+    // {
+    //     TX_INV_SETFLT_MSG();
+    //     _rtr_tx_cnt++;
+    // }
 
 }
 
@@ -329,87 +297,13 @@ void AP_COAXCAN1::handleFrame(const AP_HAL::CANFrame& can_rxframe)
     uint16_t    uint16_temp = 0;
     uint16_t    uint16_temp1 = 0;
     uint16_t    uint16_temp2 = 0;
-    uint8_t     uint8_temp = 0;
+    //uint8_t     uint8_temp = 0;
 
-//    int16_t int16_temp = 0U;
-
-    switch(can_rxframe.id&can_rxframe.MaskStdID)
+    int16_t int16_temp1 = 0;
+    int16_t int16_temp2 = 0;
+    //gcs().send_text(MAV_SEVERITY_INFO, "can received %lu", can_rxframe.id);
+    switch(can_rxframe.id&can_rxframe.MaskExtID)
     {
-        case RX_ID_IFCU1 :
-            uint16_temp1 = can_rxframe.data[0];
-            uint16_temp2 = can_rxframe.data[1];
-            _IFCU1.PpVlt = uint16_temp2 * 256 + uint16_temp1;
-            uint16_temp1 = can_rxframe.data[2];
-            uint16_temp2 = can_rxframe.data[3];
-            _IFCU1.PpCur = uint16_temp2 * 256 + uint16_temp1;
-            uint16_temp1 = can_rxframe.data[4];
-            uint16_temp2 = can_rxframe.data[5];
-            _IFCU1.PpCurLim = uint16_temp2 * 256 + uint16_temp1;
-            _IFCU1.PpH2Sof = can_rxframe.data[6];
-            // _IFCU1.reserved = can_rxframe.data[7];
-            gcs().send_text(MAV_SEVERITY_INFO, "IFCU1 : %d, %d, %d, %d", _IFCU1.PpVlt, _IFCU1.PpCur, _IFCU1.PpCurLim, _IFCU1.PpH2Sof);
-            break;
-        case RX_ID_IFCU2 :
-            _IFCU2.State = can_rxframe.data[0];
-            _IFCU2.FltSts = can_rxframe.data[1]; 
-            _IFCU2.DTC = can_rxframe.data[2];
-            _IFCU2.H2LkLmp = can_rxframe.data[3];
-            uint16_temp1 = can_rxframe.data[4];
-            uint16_temp2 = can_rxframe.data[5];
-            _IFCU2.SvmlsoRVlu = uint16_temp2 * 256 + uint16_temp1;
-            gcs().send_text(MAV_SEVERITY_INFO, "IFCU2 : %d, %d, %d, %d, %d", _IFCU2.State, _IFCU2.FltSts, _IFCU2.DTC, _IFCU2.H2LkLmp, _IFCU2.SvmlsoRVlu);
-            break;
-        case RX_ID_IFCU3 :
-            uint16_temp1 = can_rxframe.data[0];
-            uint16_temp2 = can_rxframe.data[1];
-            _IFCU3.FcNetVlt = uint16_temp2 * 256 + uint16_temp1;
-            uint16_temp1 = can_rxframe.data[2];
-            uint16_temp2 = can_rxframe.data[3];
-            _IFCU3.FcNetCur = uint16_temp2 * 256 + uint16_temp1;
-            uint16_temp1 = can_rxframe.data[4];
-            uint16_temp2 = can_rxframe.data[5];
-            _IFCU3.LdcVlt = uint16_temp2 * 256 + uint16_temp1;
-            uint16_temp1 = can_rxframe.data[6];
-            uint16_temp2 = can_rxframe.data[7];
-            _IFCU3.LdcCur = uint16_temp2 * 256 + uint16_temp1;
-            gcs().send_text(MAV_SEVERITY_INFO, "IFCU3 : %d, %d, %d, %d", _IFCU3.FcNetVlt, _IFCU3.FcNetCur, _IFCU3.LdcVlt, _IFCU3.LdcCur);
-            break;
-        case RX_ID_IFCU4 :
-            _IFCU4.FcInClntTmp = (int8_t)can_rxframe.data[0];
-            _IFCU4.AmbTemp = (int8_t)can_rxframe.data[1];
-            _IFCU4.RoomTemp = (int8_t)can_rxframe.data[2];
-            _IFCU4.H2TnkPrs = can_rxframe.data[3];
-            _IFCU4.H2TnkTmp = can_rxframe.data[4];
-            uint16_temp1 = can_rxframe.data[5];
-            uint16_temp2 = can_rxframe.data[6];
-            _IFCU4.H2TnkFillCnt = uint16_temp2 * 256 + uint16_temp1;
-            gcs().send_text(MAV_SEVERITY_INFO, "IFCU4 : %d, %d, %d, %u, %u, %u", _IFCU4.FcInClntTmp, _IFCU4.AmbTemp, _IFCU4.RoomTemp, _IFCU4.H2TnkPrs, _IFCU4.H2TnkTmp, _IFCU4.H2TnkFillCnt);
-            break;
-        case RX_ID_IFCU5 :
-            uint16_temp1 = can_rxframe.data[0];
-            uint16_temp2 = can_rxframe.data[1];
-            _IFCU5.HvBsaVlt = uint16_temp2 * 256 + uint16_temp1;
-            uint16_temp1 = can_rxframe.data[2];
-            uint16_temp2 = can_rxframe.data[3];
-            _IFCU5.HvBsaCur = uint16_temp2 * 256 + uint16_temp1;
-            _IFCU5.HvBsaSoC = can_rxframe.data[4];
-            _IFCU5.HvBsaSoH = can_rxframe.data[5];
-            _IFCU5.ExWtrTrpFill = can_rxframe.data[6] & 0x01;
-            gcs().send_text(MAV_SEVERITY_INFO, "IFCU5 : %d, %d, %d, %d, %d", _IFCU5.HvBsaVlt, _IFCU5.HvBsaCur, _IFCU5.HvBsaSoC, _IFCU5.HvBsaSoH, _IFCU5.ExWtrTrpFill);
-            break;
-        case RX_ID_IFCU6 :
-            uint16_temp1 = can_rxframe.data[0];
-            uint16_temp2 = can_rxframe.data[1];
-            _IFCU6.FcMxCurLim = uint16_temp2 * 256 + uint16_temp1;
-            uint16_temp1 = can_rxframe.data[2];
-            uint16_temp2 = can_rxframe.data[3];
-            _IFCU6.FcNetCustCurLim = uint16_temp2 * 256 + uint16_temp1;
-            _IFCU6.H2MidPrs = can_rxframe.data[4];
-            uint8_temp = can_rxframe.data[5];
-            _IFCU6.FcClntFiltChk = uint8_temp & 0x01;
-            _IFCU6.FcClntSplChk = (uint8_temp >> 1) & 0x01;
-            gcs().send_text(MAV_SEVERITY_INFO, "IFCU6 : %d, %d, %d, %d, %d", _IFCU6.FcMxCurLim, _IFCU6.FcNetCustCurLim, _IFCU6.H2MidPrs, _IFCU6.FcClntFiltChk, _IFCU6.FcClntSplChk);
-            break;
         case RX_ID_CCB1:
             //Thermist 1 temperature
             uint16_temp = can_rxframe.data[0];
@@ -423,9 +317,6 @@ void AP_COAXCAN1::handleFrame(const AP_HAL::CANFrame& can_rxframe)
             //Thermist 4 temperature
             uint16_temp = can_rxframe.data[6];
             _rx_raw_thermist4 = uint16_temp * 256 + can_rxframe.data[7];
-            
-            _handleFrame_cnt++;
-
             break;
 
         case RX_ID_CCB2:
@@ -443,11 +334,164 @@ void AP_COAXCAN1::handleFrame(const AP_HAL::CANFrame& can_rxframe)
             _rx_raw_bdtemp = can_rxframe.data[6];
             //Cooling controller state
             _rx_raw_state = can_rxframe.data[7];
-
-            _handleFrame_cnt++;
-
             break;
 
+        case RX_ID_INV_GET_CMD:
+            INV_GET_CMD.BYTE0.ALL = can_rxframe.data[0];
+            int16_temp1 = can_rxframe.data[1];
+            int16_temp2 = can_rxframe.data[2];
+            INV_GET_CMD.Ref1_RAW = (int16_temp2 << 8 ) + int16_temp1;
+            int16_temp1 = can_rxframe.data[3];
+            int16_temp2 = can_rxframe.data[4];
+            INV_GET_CMD.Ref2_RAW = (int16_temp2 << 8 ) + int16_temp1;
+            
+            INV_GET_CMD.Reference1 = (float)INV_GET_CMD.Ref1_RAW * 0.1;
+            INV_GET_CMD.Reference2 = (float)INV_GET_CMD.Ref2_RAW * 0.1;
+#if DEBUG_INVERTER == 1
+            gcs().send_text(MAV_SEVERITY_INFO, "INVGETCMD : (Mode%u) %u, %u, %u", 
+                INV_GET_CMD.BYTE0.bits.Ctrl_Mode, INV_GET_CMD.BYTE0.ALL, 
+                INV_GET_CMD.Ref1_RAW, INV_GET_CMD.Ref2_RAW);
+            gcs().send_text(MAV_SEVERITY_INFO, "ref1=%f, ref2=%f", 
+                INV_GET_CMD.Reference1, INV_GET_CMD.Reference2);
+#endif
+            break;
+        case RX_ID_INV_GET_CC:
+            uint16_temp1 = can_rxframe.data[0];
+            uint16_temp2 = can_rxframe.data[1];
+            INV_GET_CC.Gain_Kpc_RAW = uint16_temp2 * 256 + uint16_temp1;
+            uint16_temp1 = can_rxframe.data[2];
+            uint16_temp2 = can_rxframe.data[3];
+            INV_GET_CC.Gain_Kic_RAW = uint16_temp2 * 256 + uint16_temp1;
+            uint16_temp1 = can_rxframe.data[4];
+            uint16_temp2 = can_rxframe.data[5];
+            INV_GET_CC.Current_Limit = uint16_temp2 * 256 + uint16_temp1;
+
+            INV_GET_CC.Gain_Kpc = (float)INV_GET_CC.Gain_Kpc_RAW * 0.01;
+            INV_GET_CC.Gain_Kic = (float)INV_GET_CC.Gain_Kic_RAW * 0.1;
+            //Current_Limit has no scale factor
+#if DEBUG_INVERTER == 1
+            gcs().send_text(MAV_SEVERITY_INFO, "INVGETCC : %u, %u, %u", 
+                INV_GET_CC.Gain_Kpc_RAW, INV_GET_CC.Gain_Kic_RAW, INV_GET_CC.Current_Limit);
+            gcs().send_text(MAV_SEVERITY_INFO, "Kpc %f, Kic %f", 
+                INV_GET_CC.Gain_Kpc, INV_GET_CC.Gain_Kic);
+#endif
+            break;
+        case RX_ID_INV_GET_SC:
+            uint16_temp1 = can_rxframe.data[0];
+            uint16_temp2 = can_rxframe.data[1];
+            INV_GET_SC.Gain_Kps_RAW = uint16_temp2 * 256 + uint16_temp1;
+            uint16_temp1 = can_rxframe.data[2];
+            uint16_temp2 = can_rxframe.data[3];
+            INV_GET_SC.Gain_Kis_RAW = uint16_temp2 * 256 + uint16_temp1;
+            uint16_temp1 = can_rxframe.data[4];
+            uint16_temp2 = can_rxframe.data[5];
+            INV_GET_SC.Theta_Offset_RAW = uint16_temp2 * 256 + uint16_temp1;
+            uint16_temp1 = can_rxframe.data[6];
+            uint16_temp2 = can_rxframe.data[7];
+            INV_GET_SC.Speed_Limit = uint16_temp2 * 256 + uint16_temp1;
+            
+            INV_GET_SC.Gain_Kps = (float)INV_GET_SC.Gain_Kps_RAW * 0.01;
+            INV_GET_SC.Gain_Kis = (float)INV_GET_SC.Gain_Kis_RAW * 0.1;
+            INV_GET_SC.Theta_Offset = (float)INV_GET_SC.Theta_Offset_RAW * 0.1;
+            //Speed_Limit has no scale factor
+#if DEBUG_INVERTER == 1
+            gcs().send_text(MAV_SEVERITY_INFO, "INVGETSC : %u, %u, %u, %u", 
+                INV_GET_SC.Gain_Kps_RAW, INV_GET_SC.Gain_Kis_RAW, 
+                INV_GET_SC.Theta_Offset_RAW, INV_GET_SC.Speed_Limit);
+            gcs().send_text(MAV_SEVERITY_INFO, "Kps %f, Kis %f, thoffset %f", 
+                INV_GET_SC.Gain_Kps, INV_GET_SC.Gain_Kis, INV_GET_SC.Theta_Offset);
+#endif
+            break;
+        case RX_ID_INV_GET_FLT:
+            INV_GET_FLT.OVL_RAW = can_rxframe.data[0];
+            INV_GET_FLT.UVL_RAW = can_rxframe.data[1];
+            INV_GET_FLT.OCL_RAW = can_rxframe.data[2];
+            INV_GET_FLT.OTL_RAW = can_rxframe.data[3];
+            uint16_temp1 = can_rxframe.data[4];
+            uint16_temp2 = can_rxframe.data[5];
+            INV_GET_FLT.OSL_RAW = uint16_temp2 * 256 + uint16_temp1;
+            
+            INV_GET_FLT.OVL = (uint16_t)INV_GET_FLT.OVL_RAW * 0.1;
+            INV_GET_FLT.UVL = (uint16_t)INV_GET_FLT.UVL_RAW * 0.1;
+            INV_GET_FLT.OCL = (uint16_t)INV_GET_FLT.OCL_RAW * 0.1;
+            INV_GET_FLT.OTL = (uint16_t)INV_GET_FLT.OTL_RAW * 0.1;
+            INV_GET_FLT.OSL = INV_GET_FLT.OSL_RAW;
+#if DEBUG_INVERTER == 1
+            gcs().send_text(MAV_SEVERITY_INFO, "INVGETFLT : real %u, %u, %u, %u, %u", 
+                INV_GET_FLT.OVL, INV_GET_FLT.UVL, INV_GET_FLT.OCL,
+                INV_GET_FLT.OTL, INV_GET_FLT.OSL);
+#endif
+            break;
+        case RX_ID_INV_GET_STATUS1:
+            int16_temp1 = can_rxframe.data[0];
+            int16_temp2 = can_rxframe.data[1];
+            INV_Status1.Motor_Spd_RAW = int16_temp2 * 256 + int16_temp1;
+            int16_temp1 = can_rxframe.data[2];
+            int16_temp2 = can_rxframe.data[3];
+            INV_Status1.i_a_RAW = int16_temp2 * 256 + int16_temp1;
+            int16_temp1 = can_rxframe.data[4];
+            int16_temp2 = can_rxframe.data[5];
+            INV_Status1.i_b_RAW = int16_temp2 * 256 + int16_temp1;
+            int16_temp1 = can_rxframe.data[6];
+            int16_temp2 = can_rxframe.data[7];
+            INV_Status1.i_c_RAW = int16_temp2 * 256 + int16_temp1;
+
+            INV_Status1.motor_Spd = (float)INV_Status1.Motor_Spd_RAW * 0.2;
+            INV_Status1.i_a = (float)INV_Status1.i_a_RAW * 0.01;
+            INV_Status1.i_b = (float)INV_Status1.i_b_RAW * 0.01;
+            INV_Status1.i_c = (float)INV_Status1.i_c_RAW * 0.01;
+#if DEBUG_INVERTER == 1
+            gcs().send_text(MAV_SEVERITY_INFO, "INVStatus1 : %u, %u, %u, %u", 
+                INV_Status1.Motor_Spd_RAW , INV_Status1.i_a_RAW,
+                INV_Status1.i_b_RAW, INV_Status1.i_c_RAW);
+            gcs().send_text(MAV_SEVERITY_INFO, "MS %f, Ia %f, Ib %f, Ic %f", 
+                INV_Status1.motor_Spd, INV_Status1.i_a, 
+                INV_Status1.i_b, INV_Status1.i_c);
+#endif
+            break;
+        case RX_ID_INV_GET_STATUS2:
+            //Byte0 ~ 7 are not used
+            int16_temp1 = can_rxframe.data[6];
+            int16_temp2 = can_rxframe.data[7];
+            INV_Status2.t_a_RAW = int16_temp2 * 256 + int16_temp1;
+            INV_Status2.t_a = (float)INV_Status2.t_a_RAW * 0.01;
+#if DEBUG_INVERTER == 1
+            gcs().send_text(MAV_SEVERITY_INFO, "INVStatus2 : %u, ta %f", 
+                INV_Status2.t_a_RAW, INV_Status2.t_a);
+#endif
+            break;
+        case RX_ID_INV_GET_STATUS3:
+            int16_temp1 = can_rxframe.data[0];
+            int16_temp2 = can_rxframe.data[1];
+            INV_Status3.t_b_RAW = int16_temp2 * 256 + int16_temp1;
+            int16_temp1 = can_rxframe.data[2];
+            int16_temp2 = can_rxframe.data[3];
+            INV_Status3.t_c_RAW = int16_temp2 * 256 + int16_temp1;
+            INV_Status3.t_b = (float)INV_Status3.t_b_RAW * 0.01;
+            INV_Status3.t_c = (float)INV_Status3.t_c_RAW * 0.01;
+#if DEBUG_INVERTER == 1
+            gcs().send_text(MAV_SEVERITY_INFO, "INVStatus3 : %u, %u, ta %f, tc %f", 
+                INV_Status3.t_b_RAW, INV_Status3.t_c_RAW, INV_Status3.t_b, INV_Status3.t_c);
+#endif
+            break;
+        case RX_ID_INV_GET_STATUS4:
+            //Bytes 0 ~ 1 not used
+            uint16_temp1 = can_rxframe.data[2];
+            uint16_temp2 = can_rxframe.data[3];
+            INV_Status4.Flagset.ALL = uint16_temp2 * 256 + uint16_temp1;
+            uint16_temp1 = can_rxframe.data[4];
+            uint16_temp2 = can_rxframe.data[5];
+            INV_Status4.V_dc_input_RAW = uint16_temp2 * 256 + uint16_temp1;
+            INV_Status4.MI = can_rxframe.data[6];
+            INV_Status4.Motor_Align_flag = can_rxframe.data[7] & 0x01;
+
+            INV_Status4.V_dc_input = (float)INV_Status4.V_dc_input_RAW * 0.1;
+#if DEBUG_INVERTER == 1
+            gcs().send_text(MAV_SEVERITY_INFO, "INVStatus4 : %u, %u, %u, %u, Vdc %f", 
+                INV_Status4.Flagset.ALL, INV_Status4.V_dc_input_RAW, 
+                INV_Status4.MI, INV_Status4.Motor_Align_flag, INV_Status4.V_dc_input);
+#endif
+            break;
         default:
 
             break;
@@ -483,7 +527,7 @@ int AP_COAXCAN1::TXspin()
 // -------------------------------------------------------------------------
 // Transmit data
 // -------------------------------------------------------------------------
-int  AP_COAXCAN1::CAN_TX_std(uint16_t can_id, uint8_t data_cmd[], uint8_t msgdlc)
+int  AP_COAXCAN1::CAN_TX_Ext(uint32_t can_id, uint8_t data_cmd[], uint8_t msgdlc)
 {
     int cmd_send_res    = 0;
     uint8_t can_data[8] = {0,0,0,0,0,0,0,0};
@@ -518,49 +562,115 @@ int  AP_COAXCAN1::CAN_TX_std(uint16_t can_id, uint8_t data_cmd[], uint8_t msgdlc
 // -------------------------------------------------------------------------
 // 
 // -------------------------------------------------------------------------
-void AP_COAXCAN1::TX_FCC1_MSG(void)
+void AP_COAXCAN1::TX_INV_SETCMD_MSG(void)
 {
+    static uint8_t count = 0;
     uint8_t temp_data[8] = {0} ;
-    uint8_t tempjoin = 0;
 
-    //_FCC_AlivCnt : looping 0~15
-    _FCC_CmdFcRunStop = 1;
-    _FCC_CmdPmsBatCut = 0;
-    //_FCC_Ready : set by GCS
-    _FCC_Reserved1 = 0;
+    if(count%2 == 0) {
+        INV_SET_CMD.BYTE0.ALL = 0;
+        INV_SET_CMD.BYTE0.bits.Inverter_ONOFF = 0;
+        INV_SET_CMD.BYTE0.bits.Ctrl_Mode = 0;
+        INV_SET_CMD.BYTE0.bits.Fault_Clear = 0;
+        INV_SET_CMD.Reference1 = 0;
+        INV_SET_CMD.Reference2 = 0;
+    }else {
+        INV_SET_CMD.BYTE0.ALL = 0xFF;
+        // INV_SET_CMD.BYTE0.bits.Inverter_ONOFF = 1;
+        // INV_SET_CMD.BYTE0.bits.Ctrl_Mode = 1;
+        // INV_SET_CMD.BYTE0.bits.Fault_Clear = 1;
+        INV_SET_CMD.Reference1 = -0.1;//3276.7;
+        INV_SET_CMD.Reference2 = -0.1;//-3276.8;
+    }
+    count++;
+    INV_SET_CMD.Ref1_RAW = (int16_t)(INV_SET_CMD.Reference1 * 10.0);
+    INV_SET_CMD.Ref2_RAW = (int16_t)(INV_SET_CMD.Reference2 * 10.0);
 
-    _FCC_Ready = 1;//Temp debugging
+    temp_data[0] = INV_SET_CMD.BYTE0.ALL;
+    temp_data[1] = INV_SET_CMD.Ref1_RAW & 0x00FF;
+    temp_data[2] = (INV_SET_CMD.Ref1_RAW >> 8) & 0x00FF;
+    temp_data[3] = INV_SET_CMD.Ref2_RAW & 0x00FF;
+    temp_data[4] = (INV_SET_CMD.Ref2_RAW >> 8) & 0x00FF;
 
-    tempjoin = _FCC_AlivCnt + ((_FCC_CmdFcRunStop & 0x01) << 4) 
-            + ((_FCC_CmdPmsBatCut & 0x01) << 5) + ((_FCC_Ready & 0x01) << 6)
-            + ((_FCC_Reserved1 & 0x01) << 7);
-
-    temp_data[0] = tempjoin;
-
-    CAN_TX_std(CMD_ID::CMD_ID_FCC1, temp_data, 1);
-
-    _FCC_AlivCnt++;
-    _FCC_AlivCnt = _FCC_AlivCnt%16;
+    CAN_TX_Ext(_cmd_id[TX_ID::TX_ID_INV_SET_CMD], temp_data, 5);//DLC changed to 5
 }
 
 // -------------------------------------------------------------------------
 // 
 // -------------------------------------------------------------------------
-void AP_COAXCAN1::TX_FCC2_MSG(void)
+void AP_COAXCAN1::TX_INV_SETCC_MSG(void)
 {
-    uint8_t temp_data[8] = {0,0,0,0,0,0,0,0} ;
+    uint8_t temp_data[8] = {0} ;
 
-    _FCC_FcPwrReq = 35000;
-    _FCC_FcThrottle = 100;
-    _FCC_FcThrottlePrdct = 100;
+    INV_SET_CC.Gain_Kpc = 655.35;
+    INV_SET_CC.Gain_Kic = 6553.5;
+    INV_SET_CC.Current_Limit = 180;
 
-    temp_data[0] = _FCC_FcPwrReq & 0x00FF;
-    temp_data[1] = (_FCC_FcPwrReq >> 8) & 0x00FF;
-    temp_data[2] = _FCC_FcThrottle & 0x00FF;
-    temp_data[3] = (_FCC_FcThrottle >> 8) & 0x00FF;
-    temp_data[4] = _FCC_FcThrottlePrdct & 0x00FF;
-    temp_data[5] = (_FCC_FcThrottlePrdct >> 8) & 0x00FF;
+    INV_SET_CC.Gain_Kpc_RAW = (int16_t)(INV_SET_CC.Gain_Kpc * 100);
+    INV_SET_CC.Gain_Kic_RAW = (int16_t)(INV_SET_CC.Gain_Kic * 10);
 
-    CAN_TX_std(CMD_ID::CMD_ID_FCC2, temp_data, 6);
+    temp_data[0] = INV_SET_CC.Gain_Kpc_RAW & 0x00FF;
+    temp_data[1] = (INV_SET_CC.Gain_Kpc_RAW >> 8) & 0x00FF;
+    temp_data[2] = INV_SET_CC.Gain_Kic_RAW & 0x00FF;
+    temp_data[3] = (INV_SET_CC.Gain_Kic_RAW >> 8) & 0x00FF;
+    temp_data[4] = INV_SET_CC.Current_Limit & 0x00FF;
+    temp_data[5] = (INV_SET_CC.Current_Limit >> 8) & 0x00FF;
+    //bytes 6 ~7 reserved => sent with zeros
 
+    CAN_TX_Ext(_cmd_id[TX_ID::TX_ID_INV_SET_CC], temp_data, 8);
+}
+
+// -------------------------------------------------------------------------
+// 
+// -------------------------------------------------------------------------
+void AP_COAXCAN1::TX_INV_SETSC_MSG(void)
+{
+    uint8_t temp_data[8] = {0} ;
+
+    INV_SET_CC.Gain_Kpc = 655.35;
+    INV_SET_CC.Gain_Kic = 6553.5;
+    INV_SET_CC.Current_Limit = 180;
+
+    INV_SET_CC.Gain_Kpc_RAW = (int16_t)(INV_SET_CC.Gain_Kpc * 100);
+    INV_SET_CC.Gain_Kic_RAW = (int16_t)(INV_SET_CC.Gain_Kic * 10);
+
+    temp_data[0] = INV_SET_CC.Gain_Kpc_RAW & 0x00FF;
+    temp_data[1] = (INV_SET_CC.Gain_Kpc_RAW >> 8) & 0x00FF;
+    temp_data[2] = INV_SET_CC.Gain_Kic_RAW & 0x00FF;
+    temp_data[3] = (INV_SET_CC.Gain_Kic_RAW >> 8) & 0x00FF;
+    temp_data[4] = INV_SET_CC.Current_Limit & 0x00FF;
+    temp_data[5] = (INV_SET_CC.Current_Limit >> 8) & 0x00FF;
+    //bytes 6 ~7 reserved => sent with zeros
+
+    CAN_TX_Ext(_cmd_id[TX_ID::TX_ID_INV_SET_SC], temp_data, 8);
+}
+
+// -------------------------------------------------------------------------
+// 
+// -------------------------------------------------------------------------
+void AP_COAXCAN1::TX_INV_SETFLT_MSG(void)
+{
+    uint8_t temp_data[8] = {0} ;
+
+    INV_SET_FLT.OVL = 500;
+    INV_SET_FLT.UVL = 350;
+    INV_SET_FLT.OCL = 200;
+    INV_SET_FLT.OTL = 80;
+    INV_SET_FLT.OSL = 6000;
+
+    INV_SET_FLT.OVL_RAW = INV_SET_FLT.OVL / 10;
+    INV_SET_FLT.UVL_RAW = INV_SET_FLT.UVL / 10;
+    INV_SET_FLT.OCL_RAW = INV_SET_FLT.OCL / 10;
+    INV_SET_FLT.OTL_RAW = INV_SET_FLT.OTL / 10;
+    INV_SET_FLT.OSL_RAW = INV_SET_FLT.OSL;
+
+    temp_data[0] = INV_SET_FLT.OVL_RAW;
+    temp_data[1] = INV_SET_FLT.UVL_RAW;
+    temp_data[2] = INV_SET_FLT.OCL_RAW;
+    temp_data[3] = INV_SET_FLT.OTL_RAW;
+    //temp_data[4] = 0; //reserved
+    temp_data[5] = INV_SET_FLT.OSL_RAW;
+    //bytes 6 ~7 reserved => sent with zeros
+
+    CAN_TX_Ext(_cmd_id[TX_ID::TX_ID_INV_SET_FLT], temp_data, 6);//DLC changed to 6
 }

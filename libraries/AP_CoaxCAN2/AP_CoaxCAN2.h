@@ -94,21 +94,22 @@ private:
     static constexpr unsigned RX_ID_FDC2  = 0x00000301;
     static constexpr unsigned RX_ID_VCUF1 = 0x00000400;
       
-    static constexpr unsigned RX_ID_NUM = 12U;   //Number of RX_ID
+    //static constexpr unsigned RX_ID_NUM = 12U;   //Number of RX_ID
     //End of---Receive ID definition-----
 
-    //Command ID definition class
-    class CMD_ID
+    //TX definition class
+    static constexpr unsigned ID_FCC1 = 0x720;  //FCC Alive, Ready, RunStop, CurrentReq
+    static constexpr unsigned ID_FCC2 = 0x721;  //PowerReqruied, ThrottleNow, ThrottleFuture
+    static constexpr unsigned ID_FCC3 = 0x720;  //Reserved
+
+    class TX_ID
 	{
     public:
-        //CCB Test
-        static constexpr unsigned CMD_ID_EX1 = 0U; //example 1
-        static constexpr unsigned CMD_ID_EX2 = 1U; //example 2
-        //IFCU 
-        static constexpr unsigned CMD_ID_FCC1 = 0x720;  //FCC Alive, Ready, RunStop, CurrentReq
-        static constexpr unsigned CMD_ID_FCC2 = 0x721;  //PowerReqruied, ThrottleNow, ThrottleFuture
-        static constexpr unsigned CMD_ID_FCC3 = 0x720;  //Reserved
-        static constexpr unsigned CMD_ID_NUM = 5U; //Number of CMD_ID
+        //IFCU & PMU
+        static constexpr unsigned TX_ID_FCC1 = 0U;  //FCC Alive, Ready, RunStop, CurrentReq
+        static constexpr unsigned TX_ID_FCC2 = 1U;  //PowerReqruied, ThrottleNow, ThrottleFuture
+        static constexpr unsigned TX_ID_FCC3 = 2U;  //Reserved
+        static constexpr unsigned TX_ID_NUM  = 3U; //Number of CMD_ID
 	};
 
     //example data state
@@ -125,8 +126,8 @@ private:
     uint16_t _rx_raw_bdtemp;    //Board temperature 0~99 deg
     uint16_t _rx_raw_state;     //Cooling controller state
 
-    uint32_t _cmd_id[CMD_ID::CMD_ID_NUM];
-    uint32_t _rx_id[RX_ID_NUM];
+    uint32_t _cmd_id[TX_ID::TX_ID_NUM];
+    //uint32_t _rx_id[RX_ID_NUM];
 
     uint32_t RX_MSG;   //Received message
     uint32_t _rx_idx;  //Received message index

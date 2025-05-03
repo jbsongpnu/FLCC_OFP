@@ -29,7 +29,7 @@ void Copter::userhook_MediumLoop()
     //Loop rate : 10Hz
     static uint16_t Count = 0;
     if (Count > 9) {
-        gcs().send_text(MAV_SEVERITY_INFO, "Testing FCC Ready %u", (cxdata().fcrdy & 0x01));
+        //gcs().send_text(MAV_SEVERITY_INFO, "Testing FCC Ready %u", (cxdata().fcrdy & 0x01));
         Count = 0;
     }
     Count++;

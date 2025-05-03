@@ -130,6 +130,10 @@ AP_COAXCAN2::AP_COAXCAN2()
     _IFCU6.H2MidPrs = 0;
     
     coaxcan2_period_us = 1000000UL / COAXCAN2_LOOP_HZ;
+
+    _cmd_id[TX_ID::TX_ID_FCC1]  = ID_FCC1;
+    _cmd_id[TX_ID::TX_ID_FCC2]  = ID_FCC2;
+    _cmd_id[TX_ID::TX_ID_FCC3]  = ID_FCC3;
     
 }
 
@@ -661,7 +665,7 @@ void AP_COAXCAN2::TX_FCC1_MSG(void)
 
     temp_data[0] = tempjoin;
 
-    CAN_TX_std(CMD_ID::CMD_ID_FCC1, temp_data, 1);
+    CAN_TX_std(TX_ID::TX_ID_FCC1, temp_data, 1);
 
     _FCC_AlivCnt++;
     _FCC_AlivCnt = _FCC_AlivCnt%16;
@@ -685,6 +689,6 @@ void AP_COAXCAN2::TX_FCC2_MSG(void)
     temp_data[4] = _FCC_FcThrottlePrdct & 0x00FF;
     temp_data[5] = (_FCC_FcThrottlePrdct >> 8) & 0x00FF;
 
-    CAN_TX_std(CMD_ID::CMD_ID_FCC2, temp_data, 6);
+    CAN_TX_std(TX_ID::TX_ID_FCC2, temp_data, 6);
 
 }
