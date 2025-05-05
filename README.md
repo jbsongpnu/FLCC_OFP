@@ -3,6 +3,7 @@
 ***
 
 ## Version History
+- V0.01.19 Creating global variables for Inverter code of CoaxCAN1, and initial processes
 - V0.01.18 Adding CoaxCAN1 with Inverter ICD. Few fixes with CoaxCAN2 
 - V0.01.17 Testing 10Hz user-hook from scheduler : USERHOOK_MEDIUMLOOP userhook_MediumLoop()
 - V0.01.16 Testing global data storage : Coaxial_data.cpp/h

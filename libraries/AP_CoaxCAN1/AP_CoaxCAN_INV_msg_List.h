@@ -14,13 +14,13 @@ typedef union {
 }Uni_INV_Flag1;
 
 struct INV_CMD_msg {
-    //DLC = 5
+    //DLC = 7
     Uni_INV_Flag1 BYTE0;        //8bit : Byte0
-    int16_t Ref1_RAW;           //16bit : Byte1 ~ Byte2
-    int16_t Ref2_RAW;           //16bit : Byte3 ~ Byte4
+    int32_t Ref1_RAW;           //32bit : Byte1 ~ Byte4
+    int16_t Ref2_RAW;           //16bit : Byte5 ~ Byte6
     float Reference1;           //Reference1 data
     float Reference2;           //Reference2 data
-    //Not used : Byte5 ~ Byte7
+    //Not used : Byte7
 };
 
 struct INV_CC_msg {

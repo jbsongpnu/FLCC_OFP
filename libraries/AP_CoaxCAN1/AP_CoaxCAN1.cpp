@@ -5,6 +5,7 @@
 #include <GCS_MAVLink/GCS.h>
 #include <AP_CANManager/AP_CANManager.h>
 #include <AP_Math/AP_Math.h>
+#include <AP_CoaxCAN2/Coaxial_data.h>
 
 extern const AP_HAL::HAL& hal;
 
@@ -163,6 +164,10 @@ void AP_COAXCAN1::run(void)
     //Receive
 	RXspin();
 
+    //Check data 
+    if(_AP_COAXCAN1_loop_cnt%10==0) {
+        Check_INV_data();
+    }
     //if(_AP_COAXCAN1_loop_cnt%20==0)
     if(_AP_COAXCAN1_loop_cnt%100==0)
     {
@@ -175,16 +180,16 @@ void AP_COAXCAN1::run(void)
         TX_INV_SETCC_MSG();
         _rtr_tx_cnt++;
     }
-    // else if(_AP_COAXCAN1_loop_cnt%100 == 40)
-    // {
-    //     TX_INV_SETSC_MSG();
-    //     _rtr_tx_cnt++;
-    // }
-    // else if(_AP_COAXCAN1_loop_cnt%100 == 60)
-    // {
-    //     TX_INV_SETFLT_MSG();
-    //     _rtr_tx_cnt++;
-    // }
+    else if(_AP_COAXCAN1_loop_cnt%100 == 40)
+    {
+        TX_INV_SETSC_MSG();
+        _rtr_tx_cnt++;
+    }
+    else if(_AP_COAXCAN1_loop_cnt%100 == 60)
+    {
+        TX_INV_SETFLT_MSG();
+        _rtr_tx_cnt++;
+    }
 
 }
 
@@ -301,6 +306,8 @@ void AP_COAXCAN1::handleFrame(const AP_HAL::CANFrame& can_rxframe)
 
     int16_t int16_temp1 = 0;
     int16_t int16_temp2 = 0;
+    int32_t int32_temp1 = 0;
+    int32_t int32_temp2 = 0;
     //gcs().send_text(MAV_SEVERITY_INFO, "can received %lu", can_rxframe.id);
     switch(can_rxframe.id&can_rxframe.MaskExtID)
     {
@@ -338,17 +345,22 @@ void AP_COAXCAN1::handleFrame(const AP_HAL::CANFrame& can_rxframe)
 
         case RX_ID_INV_GET_CMD:
             INV_GET_CMD.BYTE0.ALL = can_rxframe.data[0];
-            int16_temp1 = can_rxframe.data[1];
-            int16_temp2 = can_rxframe.data[2];
-            INV_GET_CMD.Ref1_RAW = (int16_temp2 << 8 ) + int16_temp1;
-            int16_temp1 = can_rxframe.data[3];
-            int16_temp2 = can_rxframe.data[4];
+            int32_temp1 = can_rxframe.data[1];
+            int32_temp2 = can_rxframe.data[2];
+            INV_GET_CMD.Ref1_RAW = (int32_temp2 << 8 ) + int32_temp1;
+            int32_temp1 = can_rxframe.data[3];
+            int32_temp2 = can_rxframe.data[4];
+            INV_GET_CMD.Ref1_RAW += (int32_temp2 << 24 ) + (int32_temp2 << 16 );
+            int16_temp1 = can_rxframe.data[5];
+            int16_temp2 = can_rxframe.data[6];
             INV_GET_CMD.Ref2_RAW = (int16_temp2 << 8 ) + int16_temp1;
             
             INV_GET_CMD.Reference1 = (float)INV_GET_CMD.Ref1_RAW * 0.1;
             INV_GET_CMD.Reference2 = (float)INV_GET_CMD.Ref2_RAW * 0.1;
+
+            _NewINV_msg = _NewINV_msg | 0x01;//bit0 : CMD
 #if DEBUG_INVERTER == 1
-            gcs().send_text(MAV_SEVERITY_INFO, "INVGETCMD : (Mode%u) %u, %u, %u", 
+            gcs().send_text(MAV_SEVERITY_INFO, "INVGETCMD : (Mode%u) %u, %ld, %d", 
                 INV_GET_CMD.BYTE0.bits.Ctrl_Mode, INV_GET_CMD.BYTE0.ALL, 
                 INV_GET_CMD.Ref1_RAW, INV_GET_CMD.Ref2_RAW);
             gcs().send_text(MAV_SEVERITY_INFO, "ref1=%f, ref2=%f", 
@@ -369,6 +381,8 @@ void AP_COAXCAN1::handleFrame(const AP_HAL::CANFrame& can_rxframe)
             INV_GET_CC.Gain_Kpc = (float)INV_GET_CC.Gain_Kpc_RAW * 0.01;
             INV_GET_CC.Gain_Kic = (float)INV_GET_CC.Gain_Kic_RAW * 0.1;
             //Current_Limit has no scale factor
+
+            _NewINV_msg = _NewINV_msg | 0x02;//bit1 : CC
 #if DEBUG_INVERTER == 1
             gcs().send_text(MAV_SEVERITY_INFO, "INVGETCC : %u, %u, %u", 
                 INV_GET_CC.Gain_Kpc_RAW, INV_GET_CC.Gain_Kic_RAW, INV_GET_CC.Current_Limit);
@@ -394,6 +408,8 @@ void AP_COAXCAN1::handleFrame(const AP_HAL::CANFrame& can_rxframe)
             INV_GET_SC.Gain_Kis = (float)INV_GET_SC.Gain_Kis_RAW * 0.1;
             INV_GET_SC.Theta_Offset = (float)INV_GET_SC.Theta_Offset_RAW * 0.1;
             //Speed_Limit has no scale factor
+
+            _NewINV_msg = _NewINV_msg | 0x04;//bit2 : SC
 #if DEBUG_INVERTER == 1
             gcs().send_text(MAV_SEVERITY_INFO, "INVGETSC : %u, %u, %u, %u", 
                 INV_GET_SC.Gain_Kps_RAW, INV_GET_SC.Gain_Kis_RAW, 
@@ -416,6 +432,8 @@ void AP_COAXCAN1::handleFrame(const AP_HAL::CANFrame& can_rxframe)
             INV_GET_FLT.OCL = (uint16_t)INV_GET_FLT.OCL_RAW * 0.1;
             INV_GET_FLT.OTL = (uint16_t)INV_GET_FLT.OTL_RAW * 0.1;
             INV_GET_FLT.OSL = INV_GET_FLT.OSL_RAW;
+
+            _NewINV_msg = _NewINV_msg | 0x08;//bit3 : FLT
 #if DEBUG_INVERTER == 1
             gcs().send_text(MAV_SEVERITY_INFO, "INVGETFLT : real %u, %u, %u, %u, %u", 
                 INV_GET_FLT.OVL, INV_GET_FLT.UVL, INV_GET_FLT.OCL,
@@ -440,6 +458,8 @@ void AP_COAXCAN1::handleFrame(const AP_HAL::CANFrame& can_rxframe)
             INV_Status1.i_a = (float)INV_Status1.i_a_RAW * 0.01;
             INV_Status1.i_b = (float)INV_Status1.i_b_RAW * 0.01;
             INV_Status1.i_c = (float)INV_Status1.i_c_RAW * 0.01;
+
+            _NewINV_msg = _NewINV_msg | 0x10;//bit4 : st1
 #if DEBUG_INVERTER == 1
             gcs().send_text(MAV_SEVERITY_INFO, "INVStatus1 : %u, %u, %u, %u", 
                 INV_Status1.Motor_Spd_RAW , INV_Status1.i_a_RAW,
@@ -455,6 +475,8 @@ void AP_COAXCAN1::handleFrame(const AP_HAL::CANFrame& can_rxframe)
             int16_temp2 = can_rxframe.data[7];
             INV_Status2.t_a_RAW = int16_temp2 * 256 + int16_temp1;
             INV_Status2.t_a = (float)INV_Status2.t_a_RAW * 0.01;
+
+            _NewINV_msg = _NewINV_msg | 0x20;//bit5 : st2
 #if DEBUG_INVERTER == 1
             gcs().send_text(MAV_SEVERITY_INFO, "INVStatus2 : %u, ta %f", 
                 INV_Status2.t_a_RAW, INV_Status2.t_a);
@@ -469,6 +491,8 @@ void AP_COAXCAN1::handleFrame(const AP_HAL::CANFrame& can_rxframe)
             INV_Status3.t_c_RAW = int16_temp2 * 256 + int16_temp1;
             INV_Status3.t_b = (float)INV_Status3.t_b_RAW * 0.01;
             INV_Status3.t_c = (float)INV_Status3.t_c_RAW * 0.01;
+
+            _NewINV_msg = _NewINV_msg | 0x40;//bit6 : st3
 #if DEBUG_INVERTER == 1
             gcs().send_text(MAV_SEVERITY_INFO, "INVStatus3 : %u, %u, ta %f, tc %f", 
                 INV_Status3.t_b_RAW, INV_Status3.t_c_RAW, INV_Status3.t_b, INV_Status3.t_c);
@@ -486,6 +510,8 @@ void AP_COAXCAN1::handleFrame(const AP_HAL::CANFrame& can_rxframe)
             INV_Status4.Motor_Align_flag = can_rxframe.data[7] & 0x01;
 
             INV_Status4.V_dc_input = (float)INV_Status4.V_dc_input_RAW * 0.1;
+
+            _NewINV_msg = _NewINV_msg | 0x80;//bit7 : st4
 #if DEBUG_INVERTER == 1
             gcs().send_text(MAV_SEVERITY_INFO, "INVStatus4 : %u, %u, %u, %u, Vdc %f", 
                 INV_Status4.Flagset.ALL, INV_Status4.V_dc_input_RAW, 
@@ -498,6 +524,79 @@ void AP_COAXCAN1::handleFrame(const AP_HAL::CANFrame& can_rxframe)
     }
 }
 
+// -------------------------------------------------------------------------
+// Check multiple received data : Check each messages and transfer to global memory
+// -------------------------------------------------------------------------
+void AP_COAXCAN1::Check_INV_data(void)
+{   //To do : check min/max, change for command and etc. later
+    //CMD
+    if(_NewINV_msg & 0x01) {
+        cxdata().INV_data.CMD_Flag.ALL = INV_GET_CMD.BYTE0.ALL;
+        cxdata().INV_data.Reference1 = INV_GET_CMD.Reference1;
+        cxdata().INV_data.Reference2 = INV_GET_CMD.Reference2;
+        if(INV_GET_CMD.BYTE0.bits.Ctrl_Mode==4){
+            cxdata().INV_data.Motor_RPM_CMD = INV_GET_CMD.Ref1_RAW / 10;
+            cxdata().INV_data.Motor_RPM_CMD = INV_GET_CMD.Ref1_RAW / 10;
+        }
+        cxdata().INV_data.isNew = cxdata().INV_data.isNew | 0x01;
+    }
+    //CC
+    if(_NewINV_msg & 0x02) {
+        cxdata().INV_data.Gain_Kpc = INV_GET_CC.Gain_Kpc;
+        cxdata().INV_data.Gain_Kic = INV_GET_CC.Gain_Kic;
+        cxdata().INV_data.Current_Limit = INV_GET_CC.Current_Limit;
+        cxdata().INV_data.isNew = cxdata().INV_data.isNew | 0x02;
+    }
+    //SC
+    if(_NewINV_msg & 0x04) {
+        cxdata().INV_data.Gain_Kps = INV_GET_SC.Gain_Kps;
+        cxdata().INV_data.Gain_Kis = INV_GET_SC.Gain_Kis;
+        cxdata().INV_data.Theta_Offset = INV_GET_SC.Theta_Offset;
+        cxdata().INV_data.Speed_Limit = INV_GET_SC.Speed_Limit;
+        cxdata().INV_data.isNew = cxdata().INV_data.isNew | 0x04;
+    }
+    //FLT
+    if(_NewINV_msg & 0x08) {
+        cxdata().INV_data.OVL = INV_GET_FLT.OVL;
+        cxdata().INV_data.UVL = INV_GET_FLT.UVL;
+        cxdata().INV_data.OCL = INV_GET_FLT.OCL;
+        cxdata().INV_data.OTL = INV_GET_FLT.OTL;
+        cxdata().INV_data.OSL = INV_GET_FLT.OSL;
+        cxdata().INV_data.isNew = cxdata().INV_data.isNew | 0x08;
+    }
+    //status1
+    if(_NewINV_msg & 0x10) {
+        cxdata().INV_data.motor_Spd = INV_Status1.motor_Spd;
+        cxdata().INV_data.i_a = INV_Status1.i_a;
+        cxdata().INV_data.i_b = INV_Status1.i_b;
+        cxdata().INV_data.i_c = INV_Status1.i_c;
+
+        cxdata().INV_data.isNew = cxdata().INV_data.isNew | 0x10;
+    }
+    //status2
+    if(_NewINV_msg & 0x20) {
+        cxdata().INV_data.t_a = INV_Status2.t_a;
+        
+        cxdata().INV_data.isNew = cxdata().INV_data.isNew | 0x20;
+    }
+    //status3
+    if(_NewINV_msg & 0x40) {
+        cxdata().INV_data.t_b = INV_Status3.t_b;
+        cxdata().INV_data.t_c = INV_Status3.t_c;
+        
+        cxdata().INV_data.isNew = cxdata().INV_data.isNew | 0x40;
+    }
+    //status4
+    if(_NewINV_msg & 0x80) {
+        cxdata().INV_data.FLT.ALL = INV_Status4.Flagset.ALL;
+        cxdata().INV_data.V_dc_input = INV_Status4.V_dc_input;
+        cxdata().INV_data.MI = INV_Status4.MI;
+        cxdata().INV_data.Motor_Align_flag = INV_Status4.Motor_Align_flag;
+
+        cxdata().INV_data.isNew = cxdata().INV_data.isNew | 0x80;
+    }
+    _NewINV_msg = 0;
+}
 // -------------------------------------------------------------------------
 // Transmit data
 // -------------------------------------------------------------------------

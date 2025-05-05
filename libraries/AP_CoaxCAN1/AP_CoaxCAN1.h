@@ -45,6 +45,8 @@ public:
     void TX_INV_SETSC_MSG(void);
     void TX_INV_SETFLT_MSG(void);
 
+    void Check_INV_data(void);
+
     INV_CMD_msg INV_SET_CMD;
     INV_CMD_msg INV_GET_CMD;
     INV_CC_msg  INV_SET_CC;
@@ -60,6 +62,8 @@ public:
 
 private:
 
+    uint8_t _NewINV_msg = 0; //bit0 : CMD, bit1 : CC, bit2 : SC, bit3 : FLT
+                            //bit4 : st1, bit5 : st2, bit6 : st3, bit7 : st4
     char _thread_name[9];
     bool _initialized;
     uint8_t _driver_index;                                          // JBSong
