@@ -35,7 +35,7 @@ public:
     void loop(void);
     void run(void);
     void RXspin(void);
-    int TXspin(void);
+    void TXspin(void);
     void handleFrame(const AP_HAL::CANFrame& can_rxframe);
     //TX Function to Devices
     int  CAN_TX_Ext(uint32_t can_id, uint8_t data_cmd[], uint8_t msgdlc);    //send with Ext ID
@@ -64,6 +64,7 @@ private:
 
     uint8_t _NewINV_msg = 0; //bit0 : CMD, bit1 : CC, bit2 : SC, bit3 : FLT
                             //bit4 : st1, bit5 : st2, bit6 : st3, bit7 : st4
+    uint8_t _INV_has_Initialized = 0;   //0 : not connected, each bit corresponds to _NewINV_msg
     char _thread_name[9];
     bool _initialized;
     uint8_t _driver_index;                                          // JBSong

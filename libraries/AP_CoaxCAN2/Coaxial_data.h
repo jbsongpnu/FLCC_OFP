@@ -79,6 +79,28 @@ struct datadef_INV {
     float Motor_ACC_CMD;
 };
 
+typedef union {
+    uint16_t ALL;
+    struct {
+        uint16_t Inverter_ONOFF : 1;//Inverter out On/Off 
+        uint16_t Inverter_STOP : 1; //Inverter stop
+        uint16_t Motor_RPM : 1;     //Set motor
+        uint16_t Set_CC : 1;        //Set current control param
+        uint16_t Set_SC : 1;        //Set speed control param
+        uint16_t Set_FLT : 1;       //Set fault level
+        uint16_t Set_ETC : 1;       //etc. future use
+        uint16_t reserved1 : 9;
+    }bits;
+}Uni_GCS_CMD_Flag1;
+
+struct datadef_Control_CMD {
+    Uni_GCS_CMD_Flag1 NewCMD;
+    uint8_t Inv_On_Off;
+    float Target_INV_RPM;
+    float Target_INV_ACC;
+    datadef_INV INVSetValue;
+};
+
 class CoaxData
 {
 public:
@@ -91,6 +113,7 @@ public:
     //====Inverter====
     datadef_INV INV_data;
     //End of Inverter
+    datadef_Control_CMD Command_Received;
 
 private:
     CoaxData();

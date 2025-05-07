@@ -3,6 +3,7 @@
 ***
 
 ## Version History
+- V0.01.20 Adding Mavlink command processes : MAV_CMD_COAX_SET_MOTOR, MAV_CMD_INVERTER_OPTION
 - V0.01.19 Creating global variables for Inverter code of CoaxCAN1, and initial processes
 - V0.01.18 Adding CoaxCAN1 with Inverter ICD. Few fixes with CoaxCAN2 
 - V0.01.17 Testing 10Hz user-hook from scheduler : USERHOOK_MEDIUMLOOP userhook_MediumLoop()

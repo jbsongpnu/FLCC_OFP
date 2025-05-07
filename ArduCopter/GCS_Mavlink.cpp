@@ -1031,6 +1031,12 @@ MAV_RESULT GCS_MAVLINK_Copter::handle_command_long_packet(const mavlink_command_
     case MAV_CMD_COAX_FCC_READY : {
         return handle_command_COAX_FCC_READY(packet);
     }
+    case MAV_CMD_COAX_SET_MOTOR : {
+        return handle_command_COAX_SET_MOTOR(packet);
+    }
+    case MAV_CMD_INVERTER_OPTION : {
+        return handle_command_INVERTER_OPTION(packet);
+    }
     default:
         return GCS_MAVLINK::handle_command_long_packet(packet);
     }
@@ -1058,6 +1064,83 @@ MAV_RESULT GCS_MAVLINK_Copter::handle_command_COAX_FCC_READY(const mavlink_comma
             return MAV_RESULT_ACCEPTED;
         break;
     }
+
+}
+
+// -------------------------------------------------------------------------
+// Handle Command 61110 MAV_CMD_COAX_SET_MOTOR
+// -------------------------------------------------------------------------
+MAV_RESULT GCS_MAVLINK_Copter::handle_command_COAX_SET_MOTOR(const mavlink_command_long_t &msg)
+{
+    uint8_t param1 = (uint8_t)msg.param1;
+    uint8_t param2 = (uint8_t)msg.param2;
+    float rpm = msg.param3;
+    float acc = msg.param4;
+
+    if((param1 > 0) && (param1 < 3)) {
+        //Only send On/Off if param1 is 1 or 2
+        cxdata().Command_Received.NewCMD.bits.Inverter_ONOFF = 1;
+        cxdata().Command_Received.Inv_On_Off = param1;
+    } else if (param1 == 0){
+        //When param1 is 0
+        if(param2 == 4) {
+            cxdata().Command_Received.NewCMD.bits.Motor_RPM = 1;
+            cxdata().Command_Received.Target_INV_RPM = rpm;
+            cxdata().Command_Received.Target_INV_ACC = acc;
+        } else if(param2 ==0) {
+            cxdata().Command_Received.NewCMD.bits.Inverter_STOP = 1;
+        }
+    }
+    //no setting-action for param > 2
+
+    gcs().send_text(MAV_SEVERITY_INFO, "Got Coax Set Motor %u %u %f %f", param1, param2, rpm, acc);
+    
+    return MAV_RESULT_ACCEPTED;
+
+}
+
+// -------------------------------------------------------------------------
+// Handle Command 61111 MAV_CMD_INVERTER_OPTION
+// -------------------------------------------------------------------------
+MAV_RESULT GCS_MAVLINK_Copter::handle_command_INVERTER_OPTION(const mavlink_command_long_t &msg)
+{
+    uint8_t mode = (uint8_t)msg.param1;
+
+    switch (mode) {
+        case 0 :
+            cxdata().Command_Received.NewCMD.bits.Set_CC = 1;
+            cxdata().Command_Received.INVSetValue.Gain_Kpc = msg.param2;
+            cxdata().Command_Received.INVSetValue.Gain_Kic = msg.param3;
+            cxdata().Command_Received.INVSetValue.Current_Limit = (uint16_t)msg.param4;
+
+            gcs().send_text(MAV_SEVERITY_INFO, "Got 61111 %u %f %f %u", mode, msg.param2, msg.param3, (uint16_t)msg.param4);
+            break;
+        case 1 :
+            cxdata().Command_Received.NewCMD.bits.Set_SC = 1;
+            cxdata().Command_Received.INVSetValue.Gain_Kps = msg.param2;
+            cxdata().Command_Received.INVSetValue.Gain_Kis = msg.param3;
+            cxdata().Command_Received.INVSetValue.Theta_Offset = msg.param4;
+            cxdata().Command_Received.INVSetValue.Speed_Limit = (uint16_t)msg.param5;
+
+            gcs().send_text(MAV_SEVERITY_INFO, "Got 61111 %u %f %f %f %u", mode, msg.param2, msg.param3, msg.param4, (uint16_t)msg.param5);
+            break;
+        case 2 :
+            cxdata().Command_Received.NewCMD.bits.Set_FLT = 1;
+            cxdata().Command_Received.INVSetValue.OVL = (uint16_t)msg.param2;
+            cxdata().Command_Received.INVSetValue.UVL = (uint16_t)msg.param3;
+            cxdata().Command_Received.INVSetValue.OCL = (uint16_t)msg.param4;
+            cxdata().Command_Received.INVSetValue.OTL = (uint16_t)msg.param5;
+            cxdata().Command_Received.INVSetValue.OSL = (uint16_t)msg.param6;
+
+            gcs().send_text(MAV_SEVERITY_INFO, "Got 61111 %u %u %u %u %u %u", mode, (uint16_t)msg.param2, 
+                (uint16_t)msg.param3, (uint16_t)msg.param4, (uint16_t)msg.param5, (uint16_t)msg.param6);
+            break;
+        default:
+            break;
+
+    }
+   
+    return MAV_RESULT_ACCEPTED;
 
 }
 

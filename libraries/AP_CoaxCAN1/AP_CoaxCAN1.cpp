@@ -169,27 +169,29 @@ void AP_COAXCAN1::run(void)
         Check_INV_data();
     }
     //if(_AP_COAXCAN1_loop_cnt%20==0)
-    if(_AP_COAXCAN1_loop_cnt%100==0)
-    {
-        TX_INV_SETCMD_MSG();
-        _rtr_tx_cnt++;
-    }
-    // else if(_AP_COAXCAN1_loop_cnt%20 == 5)
-    else if(_AP_COAXCAN1_loop_cnt%100 == 20)
-    {
-        TX_INV_SETCC_MSG();
-        _rtr_tx_cnt++;
-    }
-    else if(_AP_COAXCAN1_loop_cnt%100 == 40)
-    {
-        TX_INV_SETSC_MSG();
-        _rtr_tx_cnt++;
-    }
-    else if(_AP_COAXCAN1_loop_cnt%100 == 60)
-    {
-        TX_INV_SETFLT_MSG();
-        _rtr_tx_cnt++;
-    }
+    // if(_AP_COAXCAN1_loop_cnt%100==0)
+    // {
+    //     //TX_INV_SETCMD_MSG();
+    //     _rtr_tx_cnt++;
+    // }
+    // // else if(_AP_COAXCAN1_loop_cnt%20 == 5)
+    // else if(_AP_COAXCAN1_loop_cnt%100 == 20)
+    // {
+    //     TX_INV_SETCC_MSG();
+    //     _rtr_tx_cnt++;
+    // }
+    // else if(_AP_COAXCAN1_loop_cnt%100 == 40)
+    // {
+    //     TX_INV_SETSC_MSG();
+    //     _rtr_tx_cnt++;
+    // }
+    // else if(_AP_COAXCAN1_loop_cnt%100 == 60)
+    // {
+    //     TX_INV_SETFLT_MSG();
+    //     _rtr_tx_cnt++;
+    // }
+
+    TXspin();
 
 }
 
@@ -350,7 +352,7 @@ void AP_COAXCAN1::handleFrame(const AP_HAL::CANFrame& can_rxframe)
             INV_GET_CMD.Ref1_RAW = (int32_temp2 << 8 ) + int32_temp1;
             int32_temp1 = can_rxframe.data[3];
             int32_temp2 = can_rxframe.data[4];
-            INV_GET_CMD.Ref1_RAW += (int32_temp2 << 24 ) + (int32_temp2 << 16 );
+            INV_GET_CMD.Ref1_RAW += (int32_temp2 << 24 ) + (int32_temp1 << 16 );
             int16_temp1 = can_rxframe.data[5];
             int16_temp2 = can_rxframe.data[6];
             INV_GET_CMD.Ref2_RAW = (int16_temp2 << 8 ) + int16_temp1;
@@ -427,10 +429,10 @@ void AP_COAXCAN1::handleFrame(const AP_HAL::CANFrame& can_rxframe)
             uint16_temp2 = can_rxframe.data[5];
             INV_GET_FLT.OSL_RAW = uint16_temp2 * 256 + uint16_temp1;
             
-            INV_GET_FLT.OVL = (uint16_t)INV_GET_FLT.OVL_RAW * 0.1;
-            INV_GET_FLT.UVL = (uint16_t)INV_GET_FLT.UVL_RAW * 0.1;
-            INV_GET_FLT.OCL = (uint16_t)INV_GET_FLT.OCL_RAW * 0.1;
-            INV_GET_FLT.OTL = (uint16_t)INV_GET_FLT.OTL_RAW * 0.1;
+            INV_GET_FLT.OVL = (uint16_t)INV_GET_FLT.OVL_RAW * 10;
+            INV_GET_FLT.UVL = (uint16_t)INV_GET_FLT.UVL_RAW * 10;
+            INV_GET_FLT.OCL = (uint16_t)INV_GET_FLT.OCL_RAW * 10;
+            INV_GET_FLT.OTL = (uint16_t)INV_GET_FLT.OTL_RAW * 10;
             INV_GET_FLT.OSL = INV_GET_FLT.OSL_RAW;
 
             _NewINV_msg = _NewINV_msg | 0x08;//bit3 : FLT
@@ -529,6 +531,7 @@ void AP_COAXCAN1::handleFrame(const AP_HAL::CANFrame& can_rxframe)
 // -------------------------------------------------------------------------
 void AP_COAXCAN1::Check_INV_data(void)
 {   //To do : check min/max, change for command and etc. later
+
     //CMD
     if(_NewINV_msg & 0x01) {
         cxdata().INV_data.CMD_Flag.ALL = INV_GET_CMD.BYTE0.ALL;
@@ -539,6 +542,7 @@ void AP_COAXCAN1::Check_INV_data(void)
             cxdata().INV_data.Motor_RPM_CMD = INV_GET_CMD.Ref1_RAW / 10;
         }
         cxdata().INV_data.isNew = cxdata().INV_data.isNew | 0x01;
+        _INV_has_Initialized |= 0x01;
     }
     //CC
     if(_NewINV_msg & 0x02) {
@@ -546,6 +550,7 @@ void AP_COAXCAN1::Check_INV_data(void)
         cxdata().INV_data.Gain_Kic = INV_GET_CC.Gain_Kic;
         cxdata().INV_data.Current_Limit = INV_GET_CC.Current_Limit;
         cxdata().INV_data.isNew = cxdata().INV_data.isNew | 0x02;
+        _INV_has_Initialized |= 0x02;
     }
     //SC
     if(_NewINV_msg & 0x04) {
@@ -554,6 +559,7 @@ void AP_COAXCAN1::Check_INV_data(void)
         cxdata().INV_data.Theta_Offset = INV_GET_SC.Theta_Offset;
         cxdata().INV_data.Speed_Limit = INV_GET_SC.Speed_Limit;
         cxdata().INV_data.isNew = cxdata().INV_data.isNew | 0x04;
+        _INV_has_Initialized |= 0x04;
     }
     //FLT
     if(_NewINV_msg & 0x08) {
@@ -563,6 +569,7 @@ void AP_COAXCAN1::Check_INV_data(void)
         cxdata().INV_data.OTL = INV_GET_FLT.OTL;
         cxdata().INV_data.OSL = INV_GET_FLT.OSL;
         cxdata().INV_data.isNew = cxdata().INV_data.isNew | 0x08;
+        _INV_has_Initialized |= 0x08;
     }
     //status1
     if(_NewINV_msg & 0x10) {
@@ -572,12 +579,14 @@ void AP_COAXCAN1::Check_INV_data(void)
         cxdata().INV_data.i_c = INV_Status1.i_c;
 
         cxdata().INV_data.isNew = cxdata().INV_data.isNew | 0x10;
+        _INV_has_Initialized |= 0x10;
     }
     //status2
     if(_NewINV_msg & 0x20) {
         cxdata().INV_data.t_a = INV_Status2.t_a;
         
         cxdata().INV_data.isNew = cxdata().INV_data.isNew | 0x20;
+        _INV_has_Initialized |= 0x20;
     }
     //status3
     if(_NewINV_msg & 0x40) {
@@ -585,6 +594,7 @@ void AP_COAXCAN1::Check_INV_data(void)
         cxdata().INV_data.t_c = INV_Status3.t_c;
         
         cxdata().INV_data.isNew = cxdata().INV_data.isNew | 0x40;
+        _INV_has_Initialized |= 0x40;
     }
     //status4
     if(_NewINV_msg & 0x80) {
@@ -594,33 +604,95 @@ void AP_COAXCAN1::Check_INV_data(void)
         cxdata().INV_data.Motor_Align_flag = INV_Status4.Motor_Align_flag;
 
         cxdata().INV_data.isNew = cxdata().INV_data.isNew | 0x80;
+        _INV_has_Initialized |= 0x80;
     }
     _NewINV_msg = 0;
 }
 // -------------------------------------------------------------------------
 // Transmit data
 // -------------------------------------------------------------------------
-int AP_COAXCAN1::TXspin()
+void AP_COAXCAN1::TXspin()
 {
-    int cmd_send_res    = 0;
-    uint8_t can_data[8] = {0,0,0,0,0,0,0,0};
-    uint8_t msgdlc = 8;
-    uint32_t can_id = 0xFE;
+    //====Send GCS 61110 command to Inverter
+    if(cxdata().Command_Received.NewCMD.bits.Inverter_ONOFF) {
+        //Command for Inverter On/Off only
+        cxdata().Command_Received.NewCMD.bits.Inverter_ONOFF = 0;
+        if(_INV_has_Initialized & 0x01) {
+            //when connection is established
+            INV_SET_CMD.BYTE0.bits.Inverter_ONOFF = cxdata().Command_Received.Inv_On_Off; //On/Off from GCS
+            INV_SET_CMD.BYTE0.bits.Ctrl_Mode = INV_GET_CMD.BYTE0.bits.Ctrl_Mode; //maintain control mode (usually 4 - speed control mode)
+            INV_SET_CMD.BYTE0.bits.Fault_Clear = 1; //clear fault
+            INV_SET_CMD.Reference1 = INV_GET_CMD.Reference1; //maintain previous values
+            INV_SET_CMD.Reference2 = INV_GET_CMD.Reference2;
+        }else {
+            //send On/Off even if no connection is established yet
+            INV_SET_CMD.BYTE0.bits.Inverter_ONOFF = cxdata().Command_Received.Inv_On_Off;
+            INV_SET_CMD.BYTE0.bits.Ctrl_Mode = 4;   //default mode
+            INV_SET_CMD.BYTE0.bits.Fault_Clear = 1; //clear fault
+            INV_SET_CMD.Reference1 = 0; //reset rpm
+            INV_SET_CMD.Reference2 = 0; //reset acc
+        }
+        TX_INV_SETCMD_MSG();
+    }else if(cxdata().Command_Received.NewCMD.bits.Motor_RPM){
+        //Send RPM and ACC command - can only be sent after connection
+        cxdata().Command_Received.NewCMD.bits.Motor_RPM = 0;
+        if(_INV_has_Initialized & 0x01) {
+            INV_SET_CMD.BYTE0.bits.Inverter_ONOFF = INV_GET_CMD.BYTE0.bits.Inverter_ONOFF;//maintain On/Off state
+            INV_SET_CMD.BYTE0.bits.Ctrl_Mode = 4; //speed mode
+            INV_SET_CMD.BYTE0.bits.Fault_Clear = 0; //no need for fault-clear
+            INV_SET_CMD.Reference1 = cxdata().Command_Received.Target_INV_RPM;
+            INV_SET_CMD.Reference2 = cxdata().Command_Received.Target_INV_ACC;
 
-    can_data[0] = 5;
+            TX_INV_SETCMD_MSG();
+        }
+    }else if(cxdata().Command_Received.NewCMD.bits.Inverter_STOP){
+        //Emergency Stop
+        cxdata().Command_Received.NewCMD.bits.Inverter_STOP = 0;
+        INV_SET_CMD.BYTE0.bits.Inverter_ONOFF = INV_GET_CMD.BYTE0.bits.Inverter_ONOFF;//maintain On/Off state
+        INV_SET_CMD.BYTE0.bits.Ctrl_Mode = 0; //set stop mode
+        INV_SET_CMD.BYTE0.bits.Fault_Clear = 0; //no need for fault-clear
+        if(_INV_has_Initialized & 0x01) {
+            INV_SET_CMD.Reference1 = INV_GET_CMD.Reference1; //maintain previous values
+            INV_SET_CMD.Reference2 = INV_GET_CMD.Reference2;
+        } else {
+            INV_SET_CMD.Reference1 = 0; //reset rpm
+            INV_SET_CMD.Reference2 = 0; //reset acc
+        }
+        TX_INV_SETCMD_MSG();
+    }
+    //====End of GCS 61110 
 
-    AP_HAL::CANFrame out_frame;
-    uint64_t timeout = AP_HAL::native_micros64() + COAXCAN1_SEND_TIMEOUT_US; 
+    //====Send GCS 61111 command to Inverter
+    if(cxdata().Command_Received.NewCMD.bits.Set_CC) {
+        //send Current control parameters
+        cxdata().Command_Received.NewCMD.bits.Set_CC = 0;
+        INV_SET_CC.Gain_Kpc = cxdata().Command_Received.INVSetValue.Gain_Kpc;
+        INV_SET_CC.Gain_Kic = cxdata().Command_Received.INVSetValue.Gain_Kic;
+        INV_SET_CC.Current_Limit = cxdata().Command_Received.INVSetValue.Current_Limit;
+        TX_INV_SETCC_MSG();
+    }
+    if(cxdata().Command_Received.NewCMD.bits.Set_SC) {
+        //send speed control parameters
+        cxdata().Command_Received.NewCMD.bits.Set_SC = 0;
+        INV_SET_SC.Gain_Kps = cxdata().Command_Received.INVSetValue.Gain_Kps;
+        INV_SET_SC.Gain_Kis = cxdata().Command_Received.INVSetValue.Gain_Kis;
+        INV_SET_SC.Theta_Offset = cxdata().Command_Received.INVSetValue.Theta_Offset;
+        INV_SET_SC.Speed_Limit = cxdata().Command_Received.INVSetValue.Speed_Limit;
+        TX_INV_SETSC_MSG();
+    }
+    if(cxdata().Command_Received.NewCMD.bits.Set_FLT) {
+        //send fault level setting parameters
+        cxdata().Command_Received.NewCMD.bits.Set_FLT = 0;
+        INV_SET_FLT.OVL = cxdata().Command_Received.INVSetValue.OVL;
+        INV_SET_FLT.UVL = cxdata().Command_Received.INVSetValue.UVL;
+        INV_SET_FLT.OCL = cxdata().Command_Received.INVSetValue.OCL;
+        INV_SET_FLT.OTL = cxdata().Command_Received.INVSetValue.OTL;
+        INV_SET_FLT.OSL = cxdata().Command_Received.INVSetValue.OSL;
+        TX_INV_SETFLT_MSG();
+    }
+
     
-    out_frame = {can_id, can_data, msgdlc};
-    cmd_send_res    = _can_iface->send(out_frame, timeout, AP_HAL::CANIface::AbortOnError);
 
-    //if(cmd_send_res==1)
-    //{
-    //    gcs().send_text(MAV_SEVERITY_INFO, "CAN TX OK");
-    //}
-
-	return cmd_send_res;
 }
 
 // -------------------------------------------------------------------------
@@ -663,35 +735,44 @@ int  AP_COAXCAN1::CAN_TX_Ext(uint32_t can_id, uint8_t data_cmd[], uint8_t msgdlc
 // -------------------------------------------------------------------------
 void AP_COAXCAN1::TX_INV_SETCMD_MSG(void)
 {
-    static uint8_t count = 0;
+    // static uint8_t count = 0;
     uint8_t temp_data[8] = {0} ;
 
-    if(count%2 == 0) {
-        INV_SET_CMD.BYTE0.ALL = 0;
-        INV_SET_CMD.BYTE0.bits.Inverter_ONOFF = 0;
-        INV_SET_CMD.BYTE0.bits.Ctrl_Mode = 0;
-        INV_SET_CMD.BYTE0.bits.Fault_Clear = 0;
-        INV_SET_CMD.Reference1 = 0;
-        INV_SET_CMD.Reference2 = 0;
-    }else {
-        INV_SET_CMD.BYTE0.ALL = 0xFF;
-        // INV_SET_CMD.BYTE0.bits.Inverter_ONOFF = 1;
-        // INV_SET_CMD.BYTE0.bits.Ctrl_Mode = 1;
-        // INV_SET_CMD.BYTE0.bits.Fault_Clear = 1;
-        INV_SET_CMD.Reference1 = -0.1;//3276.7;
-        INV_SET_CMD.Reference2 = -0.1;//-3276.8;
+    // if(count%2 == 0) {
+    //     INV_SET_CMD.BYTE0.ALL = 0;
+    //     INV_SET_CMD.BYTE0.bits.Inverter_ONOFF = 0;
+    //     INV_SET_CMD.BYTE0.bits.Ctrl_Mode = 0;
+    //     INV_SET_CMD.BYTE0.bits.Fault_Clear = 0;
+    //     INV_SET_CMD.Reference1 = 0;
+    //     INV_SET_CMD.Reference2 = 0;
+    // }else {
+    //     INV_SET_CMD.BYTE0.ALL = 0xFF;
+    //     // INV_SET_CMD.BYTE0.bits.Inverter_ONOFF = 1;
+    //     // INV_SET_CMD.BYTE0.bits.Ctrl_Mode = 1;
+    //     // INV_SET_CMD.BYTE0.bits.Fault_Clear = 1;
+    //     INV_SET_CMD.Reference1 = -0.1;//3276.7;
+    //     INV_SET_CMD.Reference2 = -0.1;//-3276.8;
+    // }
+    // count++;
+    if((INV_SET_CMD.Reference1 > 9999.9)||(INV_SET_CMD.Reference1 < -9999.9)) {
+        gcs().send_text(MAV_SEVERITY_NOTICE, "Bad Parameter for INV command RPM %f", INV_SET_CMD.Reference1);
+        return;
+    }else if ((INV_SET_CMD.Reference2 > 3276.7)||(INV_SET_CMD.Reference2 < -3276.8)) {
+        gcs().send_text(MAV_SEVERITY_NOTICE, "Bad Parameter for INV command ACC %f", INV_SET_CMD.Reference2);
+        return;
     }
-    count++;
-    INV_SET_CMD.Ref1_RAW = (int16_t)(INV_SET_CMD.Reference1 * 10.0);
+    INV_SET_CMD.Ref1_RAW = (int32_t)(INV_SET_CMD.Reference1 * 10.0);
     INV_SET_CMD.Ref2_RAW = (int16_t)(INV_SET_CMD.Reference2 * 10.0);
 
     temp_data[0] = INV_SET_CMD.BYTE0.ALL;
     temp_data[1] = INV_SET_CMD.Ref1_RAW & 0x00FF;
     temp_data[2] = (INV_SET_CMD.Ref1_RAW >> 8) & 0x00FF;
-    temp_data[3] = INV_SET_CMD.Ref2_RAW & 0x00FF;
-    temp_data[4] = (INV_SET_CMD.Ref2_RAW >> 8) & 0x00FF;
+    temp_data[3] = (INV_SET_CMD.Ref1_RAW >> 16) & 0x00FF;
+    temp_data[4] = (INV_SET_CMD.Ref1_RAW >> 24) & 0x00FF;
+    temp_data[5] = INV_SET_CMD.Ref2_RAW & 0x00FF;
+    temp_data[6] = (INV_SET_CMD.Ref2_RAW >> 8) & 0x00FF;
 
-    CAN_TX_Ext(_cmd_id[TX_ID::TX_ID_INV_SET_CMD], temp_data, 5);//DLC changed to 5
+    CAN_TX_Ext(_cmd_id[TX_ID::TX_ID_INV_SET_CMD], temp_data, 7);//DLC changed to 5
 }
 
 // -------------------------------------------------------------------------
@@ -701,12 +782,18 @@ void AP_COAXCAN1::TX_INV_SETCC_MSG(void)
 {
     uint8_t temp_data[8] = {0} ;
 
-    INV_SET_CC.Gain_Kpc = 655.35;
-    INV_SET_CC.Gain_Kic = 6553.5;
-    INV_SET_CC.Current_Limit = 180;
+    // INV_SET_CC.Gain_Kpc = 655.35;
+    // INV_SET_CC.Gain_Kic = 6553.5;
+    // INV_SET_CC.Current_Limit = 180;
+    if((INV_SET_CC.Gain_Kpc > 655.35)||(INV_SET_CC.Gain_Kpc < 0)
+        ||(INV_SET_CC.Gain_Kic > 6553.5)||(INV_SET_CC.Gain_Kic < 0)
+        ||(INV_SET_CC.Current_Limit > 180)) {
+        gcs().send_text(MAV_SEVERITY_NOTICE, "Bad Parameter for INV command CC");
+        return;
+    }
 
-    INV_SET_CC.Gain_Kpc_RAW = (int16_t)(INV_SET_CC.Gain_Kpc * 100);
-    INV_SET_CC.Gain_Kic_RAW = (int16_t)(INV_SET_CC.Gain_Kic * 10);
+    INV_SET_CC.Gain_Kpc_RAW = (uint16_t)(INV_SET_CC.Gain_Kpc * 100);
+    INV_SET_CC.Gain_Kic_RAW = (uint16_t)(INV_SET_CC.Gain_Kic * 10);
 
     temp_data[0] = INV_SET_CC.Gain_Kpc_RAW & 0x00FF;
     temp_data[1] = (INV_SET_CC.Gain_Kpc_RAW >> 8) & 0x00FF;
@@ -726,20 +813,29 @@ void AP_COAXCAN1::TX_INV_SETSC_MSG(void)
 {
     uint8_t temp_data[8] = {0} ;
 
-    INV_SET_CC.Gain_Kpc = 655.35;
-    INV_SET_CC.Gain_Kic = 6553.5;
-    INV_SET_CC.Current_Limit = 180;
+    // INV_SET_CC.Gain_Kpc = 655.35;
+    // INV_SET_CC.Gain_Kic = 6553.5;
+    // INV_SET_CC.Current_Limit = 180;
+    if((INV_SET_SC.Gain_Kps > 655.35)||(INV_SET_SC.Gain_Kps < 0)
+        ||(INV_SET_SC.Gain_Kis > 6553.5)||(INV_SET_SC.Gain_Kis < 0)
+        ||(INV_SET_SC.Theta_Offset > 6553.5)||(INV_SET_SC.Theta_Offset < 0)
+        ||(INV_SET_SC.Speed_Limit > 5000)) {
+        gcs().send_text(MAV_SEVERITY_NOTICE, "Bad Parameter for INV command SC");
+        return;
+    }
 
-    INV_SET_CC.Gain_Kpc_RAW = (int16_t)(INV_SET_CC.Gain_Kpc * 100);
-    INV_SET_CC.Gain_Kic_RAW = (int16_t)(INV_SET_CC.Gain_Kic * 10);
-
-    temp_data[0] = INV_SET_CC.Gain_Kpc_RAW & 0x00FF;
-    temp_data[1] = (INV_SET_CC.Gain_Kpc_RAW >> 8) & 0x00FF;
-    temp_data[2] = INV_SET_CC.Gain_Kic_RAW & 0x00FF;
-    temp_data[3] = (INV_SET_CC.Gain_Kic_RAW >> 8) & 0x00FF;
-    temp_data[4] = INV_SET_CC.Current_Limit & 0x00FF;
-    temp_data[5] = (INV_SET_CC.Current_Limit >> 8) & 0x00FF;
-    //bytes 6 ~7 reserved => sent with zeros
+    INV_SET_SC.Gain_Kps_RAW = (uint16_t)(INV_SET_SC.Gain_Kps * 100);
+    INV_SET_SC.Gain_Kis_RAW = (uint16_t)(INV_SET_SC.Gain_Kis * 10);
+    INV_SET_SC.Theta_Offset_RAW = (uint16_t)(INV_SET_SC.Theta_Offset * 10);
+    
+    temp_data[0] = INV_SET_SC.Gain_Kps_RAW & 0x00FF;
+    temp_data[1] = (INV_SET_SC.Gain_Kps_RAW >> 8) & 0x00FF;
+    temp_data[2] = INV_SET_SC.Gain_Kis_RAW & 0x00FF;
+    temp_data[3] = (INV_SET_SC.Gain_Kis_RAW >> 8) & 0x00FF;
+    temp_data[4] = INV_SET_SC.Theta_Offset_RAW & 0x00FF;
+    temp_data[5] = (INV_SET_SC.Theta_Offset_RAW >> 8) & 0x00FF;
+    temp_data[6] = INV_SET_SC.Speed_Limit & 0x00FF;
+    temp_data[7] = (INV_SET_SC.Speed_Limit >> 8) & 0x00FF;
 
     CAN_TX_Ext(_cmd_id[TX_ID::TX_ID_INV_SET_SC], temp_data, 8);
 }
@@ -751,12 +847,16 @@ void AP_COAXCAN1::TX_INV_SETFLT_MSG(void)
 {
     uint8_t temp_data[8] = {0} ;
 
-    INV_SET_FLT.OVL = 500;
-    INV_SET_FLT.UVL = 350;
-    INV_SET_FLT.OCL = 200;
-    INV_SET_FLT.OTL = 80;
-    INV_SET_FLT.OSL = 6000;
-
+    // INV_SET_FLT.OVL = 500;
+    // INV_SET_FLT.UVL = 350;
+    // INV_SET_FLT.OCL = 200;
+    // INV_SET_FLT.OTL = 80;
+    // INV_SET_FLT.OSL = 6000;
+    if((INV_SET_FLT.OVL>550)||(INV_SET_FLT.UVL>350)||(INV_SET_FLT.OCL>200)
+        ||(INV_SET_FLT.OTL>100)||(INV_SET_FLT.OSL>6000)) {
+        gcs().send_text(MAV_SEVERITY_NOTICE, "Bad Parameter for INV command FLT");
+        return;
+    }
     INV_SET_FLT.OVL_RAW = INV_SET_FLT.OVL / 10;
     INV_SET_FLT.UVL_RAW = INV_SET_FLT.UVL / 10;
     INV_SET_FLT.OCL_RAW = INV_SET_FLT.OCL / 10;
@@ -767,8 +867,8 @@ void AP_COAXCAN1::TX_INV_SETFLT_MSG(void)
     temp_data[1] = INV_SET_FLT.UVL_RAW;
     temp_data[2] = INV_SET_FLT.OCL_RAW;
     temp_data[3] = INV_SET_FLT.OTL_RAW;
-    //temp_data[4] = 0; //reserved
-    temp_data[5] = INV_SET_FLT.OSL_RAW;
+    temp_data[4] = INV_SET_FLT.OSL_RAW & 0x00FF; //reserved
+    temp_data[5] = (INV_SET_FLT.OSL_RAW >> 8) & 0x00FF;;
     //bytes 6 ~7 reserved => sent with zeros
 
     CAN_TX_Ext(_cmd_id[TX_ID::TX_ID_INV_SET_FLT], temp_data, 6);//DLC changed to 6
