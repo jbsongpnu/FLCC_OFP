@@ -6256,5 +6256,24 @@
       <field type="int16_t" name="temperature" units="cdegC">Temperature</field>
       <field type="uint16_t" name="humidity" units="c%">Humidity</field>
     </message>
+    <!-- TC -->
+    <message id="62000" name="SYS_ICD_FLCC_GCS_INV_STATE">
+      <description>TC1 (Inverter).</description>
+      <field type="uint8_t" name="Inverter_OnOff" units="N/A">Inverter_ONOFF</field>
+      <field type="uint8_t" name="Control_Mode" units="N/A">Ctrl_Mode</field>
+      <field type="uint16_t" name="Motor_Speed" units="rpm">motor_Spd_RPM</field>
+      <field type="uint16_t" name="Target_Motor_Speed" units="rpm">Motor_RPM_CMD</field>
+      <field type="uint16_t" name="Motor_Speed_Limit" units="rpm">Speed_Limit</field>
+      <field type="uint16_t" name="Target_Motor_Acceleration" units="rpm/s">Motor_ACC_CMD</field>
+      <field type="uint16_t" name="Theta_Offset" units="deg">Theta_Offset</field>
+      <field type="uint16_t" name="i_a" units="A">phase A current x0.01</field>
+      <field type="uint16_t" name="i_b" units="A">phase B current x0.01</field>
+      <field type="uint16_t" name="i_c" units="A">phase C current x0.01</field>
+      <field type="uint16_t" name="t_a" units="degC">phase A temperature x0.01</field>
+      <field type="uint16_t" name="t_b" units="degC">phase B temperature x0.01</field>
+      <field type="uint16_t" name="t_c" units="degC">phase C temperature x0.01</field>
+      <field type="uint16_t" name="V_dc" units="V">Voltage input x0.1</field>
+      <field type="uint16_t" name="Fault_Flags" units="N/A">Fault flag set</field>
+    </message>
   </messages>
 </mavlink>

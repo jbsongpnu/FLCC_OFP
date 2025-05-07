@@ -27,6 +27,8 @@ const AP_Param::GroupInfo AP_COAXCAN1::var_info[] = {
     AP_GROUPEND
 };
 
+__mavlink_sys_icd_flcc_gcs_inv_state_t MAV_GCSTX_INV_State = {0};   // Mavlink downstream for Inverter State ID=62000
+
 AP_COAXCAN1::AP_COAXCAN1()
 {
     AP_Param::setup_object_defaults(this, var_info);
@@ -51,6 +53,10 @@ AP_COAXCAN1::AP_COAXCAN1()
     _cmd_id[TX_ID::TX_ID_INV_SET_SC]  = ID_INV_SET_SC   | coaxcan1::CanFrame::FlagEFF;
     _cmd_id[TX_ID::TX_ID_INV_SET_FLT] = ID_INV_SET_FLT  | coaxcan1::CanFrame::FlagEFF;
     
+    MAV_GCSTX_INV_State.Inverter_OnOff = 2;
+    MAV_GCSTX_INV_State.Control_Mode = 4;
+    MAV_GCSTX_INV_State.Target_Motor_Acceleration = 100; //100rpm/s
+    MAV_GCSTX_INV_State.Motor_Speed_Limit = 5000;
 }
 
 AP_COAXCAN1::~AP_COAXCAN1()
@@ -140,17 +146,6 @@ void AP_COAXCAN1::loop(void)
 
         run();
                     
-        if(_AP_COAXCAN1_loop_cnt%COAXCAN1_MALVINK_INTERVAL==0)      // 100ms period send2ppc
-        {
-            //send2gcs();     // Send COAX Data to GCS
-            //if(COAXCAN1_Fail_Status == COAXCAN1_STATUS::CONNECTED)
-            //{
-            //    gcs().send_text(MAV_SEVERITY_INFO, "CCB1 %d,%d,%d,%d", _rx_raw_thermist1, _rx_raw_thermist2, _rx_raw_thermist3, _rx_raw_thermist4); // For test
-            //    gcs().send_text(MAV_SEVERITY_INFO, "CCB2 %d,%d,%d,%d,%d", _rx_raw_thermocp1, _rx_raw_thermocp2, _rx_raw_wflow, _rx_raw_bdtemp, _rx_raw_state); // For test
-            //    gcs().send_text(MAV_SEVERITY_INFO, "TX %d RX %d",(uint16_t)(_rtr_tx_cnt & 0xFFFF),(uint16_t)(_handleFrame_cnt & 0xFFFF));
-            //}
-        }
-
         _AP_COAXCAN1_loop_cnt++;                                  // 5ms period increase
     }
 }
@@ -193,6 +188,10 @@ void AP_COAXCAN1::run(void)
 
     TXspin();
 
+    if((_AP_COAXCAN1_loop_cnt%40==0) && (_INV_has_Initialized)) {
+        send2GCS_and_Log(); //Send to GCS and log file
+    }
+    
 }
 
 // -------------------------------------------------------------------------
@@ -872,4 +871,15 @@ void AP_COAXCAN1::TX_INV_SETFLT_MSG(void)
     //bytes 6 ~7 reserved => sent with zeros
 
     CAN_TX_Ext(_cmd_id[TX_ID::TX_ID_INV_SET_FLT], temp_data, 6);//DLC changed to 6
+}
+
+
+// -------------------------------------------------------------------------
+// 
+// -------------------------------------------------------------------------
+void AP_COAXCAN1::send2GCS_and_Log(void)
+{
+    //Send to GCS and Log file
+    gcs().send_message(MSG_INV_STATE);
+    //handlded by send_message_flcc_gcs_inv_state() defined in GCS_Common.cpp
 }

@@ -67,7 +67,7 @@ struct datadef_INV {
     float t_a;      //phase A temperature deg C : 0.01 precision
     float t_b;      //phase B temperature deg C : 0.01 precision
     float t_c;      //phase C temperature deg C : 0.01 precision
-    Sts4_FlagsSet FLT;
+    Sts4_FlagsSet FLT;  //Fault flag set
     float V_dc_input;   //Voltage input V : 0.1 precision
     uint16_t MI;    //Motor voltage usage % : 1 precision
     bool Motor_Align_flag;   //0 or 1 : align

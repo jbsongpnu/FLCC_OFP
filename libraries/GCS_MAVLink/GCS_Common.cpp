@@ -105,6 +105,8 @@ uint8_t GCS_MAVLINK::mavlink_private = 0;
 
 GCS *GCS::_singleton = nullptr;
 
+extern __mavlink_sys_icd_flcc_gcs_inv_state_t MAV_GCSTX_INV_State;
+
 GCS_MAVLINK_InProgress GCS_MAVLINK_InProgress::in_progress_tasks[1];
 uint32_t GCS_MAVLINK_InProgress::last_check_ms;
 
@@ -5884,6 +5886,11 @@ bool GCS_MAVLINK::try_send_message(const enum ap_message id)
         send_winch_status();
         break;
 
+    case MSG_INV_STATE :
+        CHECK_PAYLOAD_SIZE(SYS_ICD_FLCC_GCS_INV_STATE);
+        send_message_flcc_gcs_inv_state();
+        break;
+
     case MSG_WATER_DEPTH:
 #if APM_BUILD_TYPE(APM_BUILD_Rover)
         CHECK_PAYLOAD_SIZE(WATER_DEPTH);
@@ -6613,3 +6620,49 @@ MAV_RESULT GCS_MAVLINK::handle_control_high_latency(const mavlink_command_long_t
     return MAV_RESULT_ACCEPTED;
 }
 #endif // HAL_HIGH_LATENCY2_ENABLED
+
+
+void GCS_MAVLINK::send_message_flcc_gcs_inv_state() const
+{
+    mavlink_msg_sys_icd_flcc_gcs_inv_state_send(
+        chan,
+        MAV_GCSTX_INV_State.Inverter_OnOff,
+        MAV_GCSTX_INV_State.Control_Mode,
+        MAV_GCSTX_INV_State.Motor_Speed,
+        MAV_GCSTX_INV_State.Target_Motor_Speed,
+        MAV_GCSTX_INV_State.Motor_Speed_Limit,
+        MAV_GCSTX_INV_State.Target_Motor_Acceleration,
+        MAV_GCSTX_INV_State.Theta_Offset,
+        MAV_GCSTX_INV_State.i_a,
+        MAV_GCSTX_INV_State.i_b,
+        MAV_GCSTX_INV_State.i_c,
+        MAV_GCSTX_INV_State.t_a,
+        MAV_GCSTX_INV_State.t_b,
+        MAV_GCSTX_INV_State.t_c,
+        MAV_GCSTX_INV_State.V_dc,
+        MAV_GCSTX_INV_State.Fault_Flags
+    );
+    
+    AP::logger().Write("INV1", "TimeUS, ONOFF, RPM, RPMCMD, IA, IB, IC", "QBHHHHH",
+        AP_HAL::micros64(),
+        MAV_GCSTX_INV_State.Inverter_OnOff,
+        MAV_GCSTX_INV_State.Motor_Speed,
+        MAV_GCSTX_INV_State.Target_Motor_Speed,
+        MAV_GCSTX_INV_State.i_a,
+        MAV_GCSTX_INV_State.i_b,
+        MAV_GCSTX_INV_State.i_c
+    );
+    AP::logger().Write("INV2", "TimeUS, MODE, RPMLIM, ACC, OFFSET, TA, TB, TC, VIN, FLTBIT", "QBHHHHHHH",
+        AP_HAL::micros64(),
+        MAV_GCSTX_INV_State.Control_Mode,
+        MAV_GCSTX_INV_State.Motor_Speed_Limit,
+        MAV_GCSTX_INV_State.Target_Motor_Acceleration,
+        MAV_GCSTX_INV_State.Theta_Offset,
+        MAV_GCSTX_INV_State.t_a,
+        MAV_GCSTX_INV_State.t_b,
+        MAV_GCSTX_INV_State.t_c,
+        MAV_GCSTX_INV_State.V_dc,
+        MAV_GCSTX_INV_State.Fault_Flags
+    );
+
+}
