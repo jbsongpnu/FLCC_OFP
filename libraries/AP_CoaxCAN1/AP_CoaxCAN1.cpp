@@ -27,7 +27,7 @@ const AP_Param::GroupInfo AP_COAXCAN1::var_info[] = {
     AP_GROUPEND
 };
 
-__mavlink_sys_icd_flcc_gcs_inv_state_t MAV_GCSTX_INV_State = {0};   // Mavlink downstream for Inverter State ID=62000
+mavlink_sys_icd_flcc_gcs_inv_state_t MAV_GCSTX_INV_State = {0};   // Mavlink downstream for Inverter State ID=62000
 
 AP_COAXCAN1::AP_COAXCAN1()
 {
@@ -188,9 +188,10 @@ void AP_COAXCAN1::run(void)
 
     TXspin();
 
-    if((_AP_COAXCAN1_loop_cnt%40==0) && (_INV_has_Initialized)) {
+    //if((_AP_COAXCAN1_loop_cnt%40==0) && (_INV_has_Initialized)) {
+        if(_AP_COAXCAN1_loop_cnt%40==0)
         send2GCS_and_Log(); //Send to GCS and log file
-    }
+    //}
     
 }
 
