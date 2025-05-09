@@ -6624,7 +6624,7 @@ MAV_RESULT GCS_MAVLINK::handle_control_high_latency(const mavlink_command_long_t
 
 
 void GCS_MAVLINK::send_message_flcc_gcs_inv_state() const
-{
+{   
     mavlink_msg_sys_icd_flcc_gcs_inv_state_send(
         chan,
         MAV_GCSTX_INV_State.Inverter_OnOff,
@@ -6637,28 +6637,6 @@ void GCS_MAVLINK::send_message_flcc_gcs_inv_state() const
         MAV_GCSTX_INV_State.i_a,
         MAV_GCSTX_INV_State.i_b,
         MAV_GCSTX_INV_State.i_c,
-        MAV_GCSTX_INV_State.t_a,
-        MAV_GCSTX_INV_State.t_b,
-        MAV_GCSTX_INV_State.t_c,
-        MAV_GCSTX_INV_State.V_dc,
-        MAV_GCSTX_INV_State.Fault_Flags
-    );
-    
-    AP::logger().Write("INV1", "TimeUS, ONOFF, RPM, RPMCMD, IA, IB, IC", "QBHHHHH",
-        AP_HAL::micros64(),
-        MAV_GCSTX_INV_State.Inverter_OnOff,
-        MAV_GCSTX_INV_State.Motor_Speed,
-        MAV_GCSTX_INV_State.Target_Motor_Speed,
-        MAV_GCSTX_INV_State.i_a,
-        MAV_GCSTX_INV_State.i_b,
-        MAV_GCSTX_INV_State.i_c
-    );
-    AP::logger().Write("INV2", "TimeUS, MODE, RPMLIM, ACC, OFFSET, TA, TB, TC, VIN, FLTBIT", "QBHHHHHHH",
-        AP_HAL::micros64(),
-        MAV_GCSTX_INV_State.Control_Mode,
-        MAV_GCSTX_INV_State.Motor_Speed_Limit,
-        MAV_GCSTX_INV_State.Target_Motor_Acceleration,
-        MAV_GCSTX_INV_State.Theta_Offset,
         MAV_GCSTX_INV_State.t_a,
         MAV_GCSTX_INV_State.t_b,
         MAV_GCSTX_INV_State.t_c,

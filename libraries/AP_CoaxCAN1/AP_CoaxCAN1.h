@@ -46,7 +46,6 @@ public:
     void TX_INV_SETFLT_MSG(void);
 
     void Check_INV_data(void);
-    void send2GCS_and_Log(void);
 
     INV_CMD_msg INV_SET_CMD;
     INV_CMD_msg INV_GET_CMD;

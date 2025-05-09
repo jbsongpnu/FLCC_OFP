@@ -53,10 +53,6 @@ AP_COAXCAN1::AP_COAXCAN1()
     _cmd_id[TX_ID::TX_ID_INV_SET_SC]  = ID_INV_SET_SC   | coaxcan1::CanFrame::FlagEFF;
     _cmd_id[TX_ID::TX_ID_INV_SET_FLT] = ID_INV_SET_FLT  | coaxcan1::CanFrame::FlagEFF;
     
-    MAV_GCSTX_INV_State.Inverter_OnOff = 2;
-    MAV_GCSTX_INV_State.Control_Mode = 4;
-    MAV_GCSTX_INV_State.Target_Motor_Acceleration = 100; //100rpm/s
-    MAV_GCSTX_INV_State.Motor_Speed_Limit = 5000;
 }
 
 AP_COAXCAN1::~AP_COAXCAN1()
@@ -187,11 +183,6 @@ void AP_COAXCAN1::run(void)
     // }
 
     TXspin();
-
-    //if((_AP_COAXCAN1_loop_cnt%40==0) && (_INV_has_Initialized)) {
-        if(_AP_COAXCAN1_loop_cnt%40==0)
-        send2GCS_and_Log(); //Send to GCS and log file
-    //}
     
 }
 
@@ -480,7 +471,7 @@ void AP_COAXCAN1::handleFrame(const AP_HAL::CANFrame& can_rxframe)
 
             _NewINV_msg = _NewINV_msg | 0x20;//bit5 : st2
 #if DEBUG_INVERTER == 1
-            gcs().send_text(MAV_SEVERITY_INFO, "INVStatus2 : %u, ta %f", 
+            gcs().send_text(MAV_SEVERITY_INFO, "INVStatus2 : %d, ta %f", 
                 INV_Status2.t_a_RAW, INV_Status2.t_a);
 #endif
             break;
@@ -496,7 +487,7 @@ void AP_COAXCAN1::handleFrame(const AP_HAL::CANFrame& can_rxframe)
 
             _NewINV_msg = _NewINV_msg | 0x40;//bit6 : st3
 #if DEBUG_INVERTER == 1
-            gcs().send_text(MAV_SEVERITY_INFO, "INVStatus3 : %u, %u, ta %f, tc %f", 
+            gcs().send_text(MAV_SEVERITY_INFO, "INVStatus3 : %d, %d, tb %f, tc %f", 
                 INV_Status3.t_b_RAW, INV_Status3.t_c_RAW, INV_Status3.t_b, INV_Status3.t_c);
 #endif
             break;
@@ -872,15 +863,4 @@ void AP_COAXCAN1::TX_INV_SETFLT_MSG(void)
     //bytes 6 ~7 reserved => sent with zeros
 
     CAN_TX_Ext(_cmd_id[TX_ID::TX_ID_INV_SET_FLT], temp_data, 6);//DLC changed to 6
-}
-
-
-// -------------------------------------------------------------------------
-// 
-// -------------------------------------------------------------------------
-void AP_COAXCAN1::send2GCS_and_Log(void)
-{
-    //Send to GCS and Log file
-    gcs().send_message(MSG_INV_STATE);
-    //handlded by send_message_flcc_gcs_inv_state() defined in GCS_Common.cpp
 }

@@ -3,7 +3,8 @@
 ***
 
 ## Version History
-- V0.01.21 Trying to fix the problem with downstream : currently 62000 down stream is not working
+- V0.01.23 Logging problem solved. GCS TX and Logging from User-Medium Loop. Few bug fixes
+- V0.01.22 Trying to fix the problem with downstream : currently 62000 down stream is not working
 - V0.01.21 Adding Mavlink downstream and logging : SYS_ICD_FLCC_GCS_INV_STATE for motor inverter
 - V0.01.20 Adding Mavlink command processes : MAV_CMD_COAX_SET_MOTOR, MAV_CMD_INVERTER_OPTION
 - V0.01.19 Creating global variables for Inverter code of CoaxCAN1, and initial processes
