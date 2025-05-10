@@ -88,8 +88,11 @@ typedef union {
         uint16_t Set_CC : 1;        //Set current control param
         uint16_t Set_SC : 1;        //Set speed control param
         uint16_t Set_FLT : 1;       //Set fault level
-        uint16_t Set_ETC : 1;       //etc. future use
-        uint16_t reserved1 : 9;
+        uint16_t CCB_ActiveON : 1;  //CCB - Active control mode on
+        uint16_t CCB_Motor_Off : 1; //CCB - All motors off
+        uint16_t CCB_Motor_MAX : 1; //CCB - All motors should be forced to run with Max power
+        uint16_t CCB_FAN_toggle : 1;//CCB - Toggle Fan on/off
+        uint16_t reserved1 : 6;
     }bits;
 }Uni_GCS_CMD_Flag1;
 
@@ -99,6 +102,33 @@ struct datadef_Control_CMD {
     float Target_INV_RPM;
     float Target_INV_ACC;
     datadef_INV INVSetValue;
+};
+
+typedef union {
+    uint8_t ALL;
+    struct {
+        uint8_t IsActive : 1;       //Active control on/off
+        uint8_t Motor1_run : 1;     //Motor1 run (greater than zero)
+        uint8_t Motor2_run : 1;     //Motor2 run (greater than zero)
+        uint8_t IsForcedMax : 1;    //Motors are forced to run at full speed
+        uint8_t FanOnOff : 1;       //Fan on or off
+        uint8_t Tact1 : 1;          //Tact switch1 on or off
+        uint8_t Tact2 : 1;          //Tact switch2 on or off
+        uint8_t RS422_Enabled : 1;  //RS422 Enabled or not
+    }bits;
+}CC_State_Flag1;
+struct datadef_CCB_data {
+    uint16_t Thermistor1x10;    //Thermistor temperature x 10 (99.9deg => 999)
+    uint16_t Thermistor2x10;    
+    uint16_t Thermistor3x10;
+    uint16_t Thermistor4x10;
+    CC_State_Flag1 State;       //State bits
+    uint16_t ThCp1x10;          //Thermo-coupler temperature
+    uint16_t ThCp2x10;
+    uint16_t Flow_mL;           //Flow at mL / minute
+    uint8_t Brd_temp;           //Board temperature 0 ~ 99
+    //Update indication flag
+    uint8_t isNew;              //bit0 : MSG1, bit1 : MSG2
 };
 
 class CoaxData
@@ -113,6 +143,9 @@ public:
     //====Inverter====
     datadef_INV INV_data;
     //End of Inverter
+    //====CCB : Cooling Control Board===
+    datadef_CCB_data CCB_data;
+    //End of CCB
     datadef_Control_CMD Command_Received;
 
 private:

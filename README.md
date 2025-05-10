@@ -3,6 +3,7 @@
 ***
 
 ## Version History
+- V0.01.24 Added CCB ICD with AP_CoaxialCAN1. Added Mavlink processing MAV_CMD_CCB_CONTROL, SYS_ICD_FLCC_GCS_CCB_STATE. Added logging too.
 - V0.01.23 Logging problem solved. GCS TX and Logging from User-Medium Loop. Few bug fixes
 - V0.01.22 Trying to fix the problem with downstream : currently 62000 down stream is not working
 - V0.01.21 Adding Mavlink downstream and logging : SYS_ICD_FLCC_GCS_INV_STATE for motor inverter

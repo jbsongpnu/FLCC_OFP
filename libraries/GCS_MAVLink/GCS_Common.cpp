@@ -105,7 +105,8 @@ uint8_t GCS_MAVLINK::mavlink_private = 0;
 
 GCS *GCS::_singleton = nullptr;
 
-extern __mavlink_sys_icd_flcc_gcs_inv_state_t MAV_GCSTX_INV_State;
+extern mavlink_sys_icd_flcc_gcs_inv_state_t MAV_GCSTX_INV_State;
+extern mavlink_sys_icd_flcc_gcs_ccb_state_t MAV_GCSTX_CCB_State;
 
 GCS_MAVLINK_InProgress GCS_MAVLINK_InProgress::in_progress_tasks[1];
 uint32_t GCS_MAVLINK_InProgress::last_check_ms;
@@ -996,6 +997,7 @@ ap_message GCS_MAVLINK::mavlink_id_to_ap_message_id(const uint32_t mavlink_id) c
         { MAVLINK_MSG_ID_UAVIONIX_ADSB_OUT_STATUS, MSG_UAVIONIX_ADSB_OUT_STATUS},
 #endif
         {MAVLINK_MSG_ID_SYS_ICD_FLCC_GCS_INV_STATE, MSG_INV_STATE},
+        {MAVLINK_MSG_ID_SYS_ICD_FLCC_GCS_CCB_STATE, MSG_CCB_STATE},
             };
 
     for (uint8_t i=0; i<ARRAY_SIZE(map); i++) {
@@ -5891,7 +5893,9 @@ bool GCS_MAVLINK::try_send_message(const enum ap_message id)
         CHECK_PAYLOAD_SIZE(SYS_ICD_FLCC_GCS_INV_STATE);
         send_message_flcc_gcs_inv_state();
         break;
-
+    case MSG_CCB_STATE :
+        CHECK_PAYLOAD_SIZE(SYS_ICD_FLCC_GCS_CCB_STATE);
+        break;
     case MSG_WATER_DEPTH:
 #if APM_BUILD_TYPE(APM_BUILD_Rover)
         CHECK_PAYLOAD_SIZE(WATER_DEPTH);
@@ -6642,6 +6646,25 @@ void GCS_MAVLINK::send_message_flcc_gcs_inv_state() const
         MAV_GCSTX_INV_State.t_c,
         MAV_GCSTX_INV_State.V_dc,
         MAV_GCSTX_INV_State.Fault_Flags
+    );
+
+}
+
+void GCS_MAVLINK::send_message_flcc_gcs_ccb_state() const
+{
+    mavlink_msg_sys_icd_flcc_gcs_ccb_state_send(
+        chan,
+        MAV_GCSTX_CCB_State.Active_Mode,
+        MAV_GCSTX_CCB_State.Motor_ON,
+        MAV_GCSTX_CCB_State.Motor_MAX,
+        MAV_GCSTX_CCB_State.Thermistor1x10,
+        MAV_GCSTX_CCB_State.Thermistor2x10,
+        MAV_GCSTX_CCB_State.Thermistor3x10,
+        MAV_GCSTX_CCB_State.Thermistor4x10,
+        MAV_GCSTX_CCB_State.ThCp1x10,
+        MAV_GCSTX_CCB_State.ThCp2x10,
+        MAV_GCSTX_CCB_State.Flow_mL,
+        MAV_GCSTX_CCB_State.Brd_temp
     );
 
 }

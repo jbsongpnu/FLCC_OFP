@@ -531,7 +531,6 @@ static const ap_message STREAM_EXTRA1_msgs[] = {
 };
 static const ap_message STREAM_EXTRA2_msgs[] = {
     MSG_VFR_HUD,
-    MSG_INV_STATE,
 };
 static const ap_message STREAM_EXTRA3_msgs[] = {
     MSG_AHRS,
@@ -1038,6 +1037,9 @@ MAV_RESULT GCS_MAVLINK_Copter::handle_command_long_packet(const mavlink_command_
     case MAV_CMD_INVERTER_OPTION : {
         return handle_command_INVERTER_OPTION(packet);
     }
+    case MAV_CMD_CCB_CONTROL : {
+        return handle_command_CCB_CONTROL(packet);
+    }
     default:
         return GCS_MAVLINK::handle_command_long_packet(packet);
     }
@@ -1143,6 +1145,30 @@ MAV_RESULT GCS_MAVLINK_Copter::handle_command_INVERTER_OPTION(const mavlink_comm
    
     return MAV_RESULT_ACCEPTED;
 
+}
+
+// -------------------------------------------------------------------------
+// Handle Command 61112 MAV_CMD_CCB_CONTROL
+// -------------------------------------------------------------------------
+MAV_RESULT GCS_MAVLINK_Copter::handle_command_CCB_CONTROL(const mavlink_command_long_t &msg)
+{
+    switch((uint8_t)msg.param1) {
+        case 1 :
+            cxdata().Command_Received.NewCMD.bits.CCB_ActiveON = 1;
+            break;
+        case 2 :
+            cxdata().Command_Received.NewCMD.bits.CCB_Motor_Off = 1;
+            break;
+        case 3 :
+            cxdata().Command_Received.NewCMD.bits.CCB_Motor_MAX = 1;
+            break;
+        case 4 :
+            cxdata().Command_Received.NewCMD.bits.CCB_FAN_toggle = 1;
+            break;
+        default :
+            break;
+    }
+    return MAV_RESULT_ACCEPTED;
 }
 
 MAV_RESULT GCS_MAVLINK_Copter::handle_command_pause_continue(const mavlink_command_int_t &packet)

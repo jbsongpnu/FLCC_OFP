@@ -2013,6 +2013,16 @@
         <param index="6" label="param5">User defined</param>
         <param index="7">Reserved (set to 0)</param>
       </entry>
+      <entry value="61112" name="MAV_CMD_CCB_CONTROL" hasLocation="false" isDestination="false">
+        <description>Coaxial Project - Custom command to send CCB option settings.</description>
+        <param index="1" label="CCB_Command" minValue="1" maxValue="4" increment="1">CCB Command. 1 : Motor Active Control ON, 2 : Motor Off, 3 : Motor Max, Toggle FAN.</param>
+        <param index="2">Empty.</param>
+        <param index="3">Empty.</param>
+        <param index="4">Empty.</param>
+        <param index="5">Empty.</param>
+        <param index="6">Empty.</param>
+        <param index="7">Empty.</param>
+      </entry>
     </enum>
     <enum name="MAV_DATA_STREAM">
       <description>A data stream is not a fixed set of messages, but rather a
@@ -6274,6 +6284,20 @@
       <field type="uint16_t" name="t_c" units="degC">phase C temperature x0.01</field>
       <field type="uint16_t" name="V_dc" units="V">Voltage input x0.1</field>
       <field type="uint16_t" name="Fault_Flags" units="N/A">Fault flag set</field>
+    </message>
+    <message id="62002" name="SYS_ICD_FLCC_GCS_CCB_STATE">
+      <description>TC1 (Inverter).</description>
+      <field type="uint8_t" name="Active_Mode" units="N/A">Active mode on/off</field>
+      <field type="uint8_t" name="Motor_ON" units="N/A">Motor On/off</field>
+      <field type="uint8_t" name="Motor_MAX" units="rpm">Motor forced to max</field>
+      <field type="uint16_t" name="Thermistor1x10" units="degC">Thermistor 1 temperature x 10</field>
+      <field type="uint16_t" name="Thermistor2x10" units="degC">Thermistor 2 temperature x 10</field>
+      <field type="uint16_t" name="Thermistor3x10" units="degC">Thermistor 3 temperature x 10</field>
+      <field type="uint16_t" name="Thermistor4x10" units="degC">Thermistor 4 temperature x 10</field>
+      <field type="uint16_t" name="ThCp1x10" units="degC">Thermocoupler 1 temperature x 10</field>
+      <field type="uint16_t" name="ThCp2x10" units="degC">Thermocoupler 2 temperature x 10</field>
+      <field type="uint16_t" name="Flow_mL" units="mL/min">Flow rate in mL/min</field>
+      <field type="uint8_t" name="Brd_temp" units="degC">Board temperature 0~100</field>
     </message>
   </messages>
 </mavlink>

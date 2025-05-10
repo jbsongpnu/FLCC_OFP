@@ -41,6 +41,7 @@ protected:
     MAV_RESULT handle_command_COAX_FCC_READY(const mavlink_command_long_t &msg);
     MAV_RESULT handle_command_COAX_SET_MOTOR(const mavlink_command_long_t &msg);
     MAV_RESULT handle_command_INVERTER_OPTION(const mavlink_command_long_t &msg);
+    MAV_RESULT handle_command_CCB_CONTROL(const mavlink_command_long_t &msg);
     
 #if HAL_MOUNT_ENABLED
     void handle_mount_message(const mavlink_message_t &msg) override;

@@ -44,8 +44,10 @@ public:
     void TX_INV_SETCC_MSG(void);
     void TX_INV_SETSC_MSG(void);
     void TX_INV_SETFLT_MSG(void);
+    void TX_CCB(void);
 
     void Check_INV_data(void);
+    void Check_CCB_data(void);
 
     INV_CMD_msg INV_SET_CMD;
     INV_CMD_msg INV_GET_CMD;
@@ -59,12 +61,17 @@ public:
     INV_STATUS2_msg INV_Status2;
     INV_STATUS3_msg INV_Status3;
     INV_STATUS4_msg INV_Status4;
+    CC_MSG1_msg CC_MSG1 ;
+    CC_MSG2_msg CC_MSG2 ;
+    CC_CMD_msg CC_CMD;
 
 private:
 
     uint8_t _NewINV_msg = 0; //bit0 : CMD, bit1 : CC, bit2 : SC, bit3 : FLT
                             //bit4 : st1, bit5 : st2, bit6 : st3, bit7 : st4
+    uint8_t _NewCC_msg = 0; //bit0 : MSG1, bit1 : MSG2
     uint8_t _INV_has_Initialized = 0;   //0 : not connected, each bit corresponds to _NewINV_msg
+    uint8_t _CCB_has_Initialized = 0;   //0 : not connected, each bit corresponds to _NewCC_msg
     char _thread_name[9];
     bool _initialized;
     uint8_t _driver_index;                                          // JBSong

@@ -3,6 +3,7 @@
 #ifdef USERHOOK_INIT
 
 extern mavlink_sys_icd_flcc_gcs_inv_state_t MAV_GCSTX_INV_State;
+extern mavlink_sys_icd_flcc_gcs_ccb_state_t MAV_GCSTX_CCB_State;
 
 void Copter::userhook_init()
 {
@@ -24,6 +25,17 @@ void Copter::userhook_init()
     MAV_GCSTX_INV_State.V_dc = 0;
     MAV_GCSTX_INV_State.Fault_Flags = 0;
 
+    MAV_GCSTX_CCB_State.Active_Mode = 1;
+    MAV_GCSTX_CCB_State.Motor_MAX = 0;
+    MAV_GCSTX_CCB_State.Motor_ON = 0;
+    MAV_GCSTX_CCB_State.Brd_temp = 1;
+    MAV_GCSTX_CCB_State.Flow_mL = 2;
+    MAV_GCSTX_CCB_State.ThCp1x10 = 5;
+    MAV_GCSTX_CCB_State.ThCp2x10 = 6;
+    MAV_GCSTX_CCB_State.Thermistor1x10 = 1;
+    MAV_GCSTX_CCB_State.Thermistor2x10 = 2;
+    MAV_GCSTX_CCB_State.Thermistor3x10 = 3;
+    MAV_GCSTX_CCB_State.Thermistor4x10 = 4;
 }
 #endif
 
@@ -45,12 +57,13 @@ void Copter::userhook_50Hz()
 void Copter::userhook_MediumLoop()
 {
     //User Code for Coaxial Helicopter 
-
-    gcs().send_message(MSG_INV_STATE); //Send to GCS 
     //Loop rate : 10Hz
     static uint16_t Count = 0;
-    if (Count > 9) {
-        //gcs().send_text(MAV_SEVERITY_INFO, "Testing FCC Ready %u", (cxdata().fcrdy & 0x01));
+    //Send to GCS at 5Hz
+    if (Count == 1) {
+        gcs().send_message(MSG_INV_STATE); //
+    }else if(Count == 5) {
+        gcs().send_message(MSG_CCB_STATE);
         Count = 0;
     }
     Count++;
@@ -76,6 +89,42 @@ void Copter::userhook_MediumLoop()
         MAV_GCSTX_INV_State.V_dc,
         MAV_GCSTX_INV_State.Fault_Flags
     );
+    AP::logger().Write("CCB", "TimeUS,FLOW,ACTIVE,MMAX,MON,TC1,TC2,TI1,TI2,TI3,TI4,BDTEMP", "QHBBBHHHHHH",
+        AP_HAL::micros64(),
+        MAV_GCSTX_CCB_State.Flow_mL,
+        MAV_GCSTX_CCB_State.Active_Mode,
+        MAV_GCSTX_CCB_State.Motor_MAX,
+        MAV_GCSTX_CCB_State.Motor_ON,
+        MAV_GCSTX_CCB_State.ThCp1x10,
+        MAV_GCSTX_CCB_State.ThCp2x10,
+        MAV_GCSTX_CCB_State.Thermistor1x10,
+        MAV_GCSTX_CCB_State.Thermistor2x10,
+        MAV_GCSTX_CCB_State.Thermistor3x10,
+        MAV_GCSTX_CCB_State.Thermistor4x10
+    );
+    /*
+    Format characters in the format string for binary log messages
+    a   : int16_t[32]
+    b   : int8_t
+    B   : uint8_t
+    h   : int16_t
+    H   : uint16_t
+    i   : int32_t
+    I   : uint32_t
+    f   : float
+    d   : double
+    n   : char[4]
+    N   : char[16]
+    Z   : char[64]
+    c   : int16_t * 100
+    C   : uint16_t * 100
+    e   : int32_t * 100
+    E   : uint32_t * 100
+    L   : int32_t latitude/longitude
+    M   : uint8_t flight mode
+    q   : int64_t
+    Q   : uint64_t
+    */
 }
 #endif
 

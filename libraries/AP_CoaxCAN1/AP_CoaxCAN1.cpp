@@ -10,7 +10,8 @@
 extern const AP_HAL::HAL& hal;
 
 #define TEMP_EXP 0		//Initial value
-#define DEBUG_INVERTER 1
+#define DEBUG_INVERTER 0
+#define DEBUG_CCB 1
 
 // Table of user settable CAN bus parameters
 const AP_Param::GroupInfo AP_COAXCAN1::var_info[] = {
@@ -28,6 +29,7 @@ const AP_Param::GroupInfo AP_COAXCAN1::var_info[] = {
 };
 
 mavlink_sys_icd_flcc_gcs_inv_state_t MAV_GCSTX_INV_State = {0};   // Mavlink downstream for Inverter State ID=62000
+mavlink_sys_icd_flcc_gcs_ccb_state_t MAV_GCSTX_CCB_State = {0};   // Mavlink downstream for CCB State ID=62002
 
 AP_COAXCAN1::AP_COAXCAN1()
 {
@@ -158,6 +160,7 @@ void AP_COAXCAN1::run(void)
     //Check data 
     if(_AP_COAXCAN1_loop_cnt%10==0) {
         Check_INV_data();
+        Check_CCB_data();
     }
     //if(_AP_COAXCAN1_loop_cnt%20==0)
     // if(_AP_COAXCAN1_loop_cnt%100==0)
@@ -307,33 +310,45 @@ void AP_COAXCAN1::handleFrame(const AP_HAL::CANFrame& can_rxframe)
         case RX_ID_CCB1:
             //Thermist 1 temperature
             uint16_temp = can_rxframe.data[0];
-            _rx_raw_thermist1 = uint16_temp * 256 + can_rxframe.data[1];
+            CC_MSG1.Thermistor1x10 = uint16_temp * 256 + can_rxframe.data[1];
             //Thermist 2 temperature
             uint16_temp = can_rxframe.data[2];
-            _rx_raw_thermist2 = uint16_temp * 256 + can_rxframe.data[3];
+            CC_MSG1.Thermistor2x10 = uint16_temp * 256 + can_rxframe.data[3];
             //Thermist 3 temperature
             uint16_temp = can_rxframe.data[4];
-            _rx_raw_thermist3 = uint16_temp * 256 + can_rxframe.data[5];
+            CC_MSG1.Thermistor3x10 = uint16_temp * 256 + can_rxframe.data[5];
             //Thermist 4 temperature
             uint16_temp = can_rxframe.data[6];
-            _rx_raw_thermist4 = uint16_temp * 256 + can_rxframe.data[7];
+            CC_MSG1.Thermistor4x10 = uint16_temp * 256 + can_rxframe.data[7];
+
+            _NewCC_msg = _NewCC_msg | 0x01;//bit0 : MSG1
+#if DEBUG_CCB == 1
+            gcs().send_text(MAV_SEVERITY_INFO, "CCB_1 : %u, %u, %u, %u", 
+                CC_MSG1.Thermistor1x10, CC_MSG1.Thermistor2x10, CC_MSG1.Thermistor3x10, CC_MSG1.Thermistor4x10 );
+#endif
             break;
 
         case RX_ID_CCB2:
 
             //Thermocouple 1 temperature
             uint16_temp = can_rxframe.data[0];
-            _rx_raw_thermocp1 = uint16_temp * 256 + can_rxframe.data[1];
+            CC_MSG2.ThCp1x10 = uint16_temp * 256 + can_rxframe.data[1];
             //Thermocouple 2 temperature
             uint16_temp = can_rxframe.data[2];
-            _rx_raw_thermocp2 = uint16_temp * 256 + can_rxframe.data[3];
+            CC_MSG2.ThCp2x10 = uint16_temp * 256 + can_rxframe.data[3];
             //(Water)Flow sensor
             uint16_temp = can_rxframe.data[4];
-            _rx_raw_wflow = uint16_temp * 256 + can_rxframe.data[5];
+            CC_MSG2.Flow_mL = uint16_temp * 256 + can_rxframe.data[5];
             //Board temperature
-            _rx_raw_bdtemp = can_rxframe.data[6];
+            CC_MSG2.Brd_temp = can_rxframe.data[6];
             //Cooling controller state
-            _rx_raw_state = can_rxframe.data[7];
+            CC_MSG2.State.ALL = can_rxframe.data[7];
+
+            _NewCC_msg = _NewCC_msg | 0x02;//bit1 : MSG2
+#if DEBUG_CCB == 1
+            gcs().send_text(MAV_SEVERITY_INFO, "CCB_2 : %u, %u, %u, %u, %u", 
+                CC_MSG2.ThCp1x10, CC_MSG2.ThCp2x10, CC_MSG2.Flow_mL, CC_MSG2.Brd_temp, CC_MSG2.State.ALL );
+#endif
             break;
 
         case RX_ID_INV_GET_CMD:
@@ -518,7 +533,7 @@ void AP_COAXCAN1::handleFrame(const AP_HAL::CANFrame& can_rxframe)
 }
 
 // -------------------------------------------------------------------------
-// Check multiple received data : Check each messages and transfer to global memory
+// Check multiple received Inverter data : Check each messages and transfer to global memory
 // -------------------------------------------------------------------------
 void AP_COAXCAN1::Check_INV_data(void)
 {   //To do : check min/max, change for command and etc. later
@@ -599,6 +614,32 @@ void AP_COAXCAN1::Check_INV_data(void)
     }
     _NewINV_msg = 0;
 }
+
+// -------------------------------------------------------------------------
+// Check multiple received CCB data : Check each messages and transfer to global memory
+// -------------------------------------------------------------------------
+void AP_COAXCAN1::Check_CCB_data(void)
+{
+    //MSG1
+    if(_NewCC_msg & 0x01) {
+        cxdata().CCB_data.Thermistor1x10 = CC_MSG1.Thermistor1x10;
+        cxdata().CCB_data.Thermistor2x10 = CC_MSG1.Thermistor2x10;
+        cxdata().CCB_data.Thermistor3x10 = CC_MSG1.Thermistor3x10;
+        cxdata().CCB_data.Thermistor4x10 = CC_MSG1.Thermistor4x10;
+        _CCB_has_Initialized |= 0x01;
+    }
+    //MSG2
+    if(_NewCC_msg & 0x02) {
+        cxdata().CCB_data.ThCp1x10 = CC_MSG2.ThCp1x10;
+        cxdata().CCB_data.ThCp2x10 = CC_MSG2.ThCp2x10;
+        cxdata().CCB_data.Flow_mL = CC_MSG2.Flow_mL;
+        cxdata().CCB_data.Brd_temp = CC_MSG2.Brd_temp;
+        cxdata().CCB_data.State.ALL = CC_MSG2.State.ALL;
+        _CCB_has_Initialized |= 0x02;
+    }
+    _NewCC_msg = 0;
+}
+
 // -------------------------------------------------------------------------
 // Transmit data
 // -------------------------------------------------------------------------
@@ -682,7 +723,30 @@ void AP_COAXCAN1::TXspin()
         TX_INV_SETFLT_MSG();
     }
 
-    
+    //====Send GCS 61112 command to CCB
+    //if and else if should be used here : one command at a time to CCB
+    //Therefore, if multiple commands are received, should run TXspin() multiple times.
+    if(cxdata().Command_Received.NewCMD.bits.CCB_ActiveON) {
+        //Active Mode on
+        cxdata().Command_Received.NewCMD.bits.CCB_ActiveON = 0;
+        CC_CMD.Command = 1;
+        TX_CCB();
+    }else if(cxdata().Command_Received.NewCMD.bits.CCB_Motor_Off) {
+        //Motor off
+        cxdata().Command_Received.NewCMD.bits.CCB_Motor_Off = 0;
+        CC_CMD.Command = 2;
+        TX_CCB();
+    }else if(cxdata().Command_Received.NewCMD.bits.CCB_Motor_MAX) {
+        //Motor maximized
+        cxdata().Command_Received.NewCMD.bits.CCB_Motor_MAX = 0;
+        CC_CMD.Command = 3;
+        TX_CCB();
+    }else if(cxdata().Command_Received.NewCMD.bits.CCB_FAN_toggle) {
+        //Toggle FAN
+        cxdata().Command_Received.NewCMD.bits.CCB_FAN_toggle = 0;
+        CC_CMD.Command = 4;
+        TX_CCB();
+    }
 
 }
 
@@ -863,4 +927,17 @@ void AP_COAXCAN1::TX_INV_SETFLT_MSG(void)
     //bytes 6 ~7 reserved => sent with zeros
 
     CAN_TX_Ext(_cmd_id[TX_ID::TX_ID_INV_SET_FLT], temp_data, 6);//DLC changed to 6
+}
+
+// -------------------------------------------------------------------------
+// Send Command to CCB
+// -------------------------------------------------------------------------
+void AP_COAXCAN1::TX_CCB(void)
+{
+    uint8_t temp_data[8] = {0} ;
+    
+    temp_data[0] = CC_CMD.Command;
+    //bytes 1 ~7 reserved => sent with zeros
+
+    CAN_TX_Ext(0xFE, temp_data, 6);//DLC changed to 6
 }

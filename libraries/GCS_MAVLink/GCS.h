@@ -1069,6 +1069,7 @@ private:
     bool _locked;
 
     void send_message_flcc_gcs_inv_state() const;
+    void send_message_flcc_gcs_ccb_state() const;
 };
 
 /// @class GCS

@@ -121,4 +121,45 @@ struct INV_STATUS4_msg {
     uint8_t Motor_Align_flag;   //1bit : Byte7 - bit0
     float V_dc_input;
 };
+
+struct CC_MSG1_msg {
+    //DLC = 8
+    uint16_t Thermistor1x10;    //16bit : Byte0 ~ Byte1
+    uint16_t Thermistor2x10;    //16bit : Byte2 ~ Byte3
+    uint16_t Thermistor3x10;    //16bit : Byte4 ~ Byte5
+    uint16_t Thermistor4x10;    //16bit : Byte6 ~ Byte7
+};
+
+typedef union {
+    uint8_t ALL;
+    struct {
+        uint8_t IsActive : 1;
+        uint8_t Motor1_run : 1;
+        uint8_t Motor2_run : 1;
+        uint8_t IsForcedMax : 1;
+        uint8_t FanOnOff : 1;
+        uint8_t Tact1 : 1;
+        uint8_t Tact2 : 1;
+        uint8_t RS422_Enabled : 1;
+    }bits;
+}Uni_CC_State_Flag1;
+
+struct CC_MSG2_msg {
+    //DLC = 8
+    uint16_t ThCp1x10;          //16bit : Byte0 ~ Byte1
+    uint16_t ThCp2x10;          //16bit : Byte2 ~ Byte3
+    uint16_t Flow_mL;           //16bit : Byte4 ~ Byte5
+    uint8_t Brd_temp;           //8bit : Byte6
+    Uni_CC_State_Flag1 State;   //8bit : Byte7
+};
+
+struct CC_CMD_msg {
+    uint8_t Command;    // 00 : (none)
+                        // 01 : Coolling Active Control On (Default)
+                        // 02 : All Pump Motor Stop
+                        // 03 : All Pump Motor Full Speed (Forced Max)
+                        // 04 : Toggle Radiator Fan (On/Off)
+                        // 05 : Data Request by CAN
+};
+
 #endif

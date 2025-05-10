@@ -34,6 +34,18 @@ CoaxData::CoaxData() {
     INV_data.Motor_RPM_CMD = 0;
     INV_data.Motor_ACC_CMD = 0;
 
+    CCB_data.isNew = 0;
+    CCB_data.Brd_temp = 1;
+    CCB_data.Flow_mL = 2;
+    CCB_data.State.ALL = 0;
+    CCB_data.State.bits.IsActive = 1;
+    CCB_data.ThCp1x10 = 5;
+    CCB_data.ThCp2x10 = 6;
+    CCB_data.Thermistor1x10 = 1;
+    CCB_data.Thermistor2x10 = 2;
+    CCB_data.Thermistor3x10 = 3;
+    CCB_data.Thermistor4x10 = 4;
+
 }
 
 CoaxData* CoaxData::_instance = nullptr;
