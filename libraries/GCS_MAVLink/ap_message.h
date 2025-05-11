@@ -85,5 +85,6 @@ enum ap_message : uint8_t {
     MSG_AUTOPILOT_STATE_FOR_GIMBAL_DEVICE,
     MSG_INV_STATE,  // mavlink message to send Inverter state
     MSG_CCB_STATE,  // mavlink message to send CCB state
+    MSG_HBSYS,      // mavlink message to send Hybrid-system state1
     MSG_LAST // MSG_LAST must be the last entry in this enum
 };

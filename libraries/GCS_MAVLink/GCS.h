@@ -1070,6 +1070,7 @@ private:
 
     void send_message_flcc_gcs_inv_state() const;
     void send_message_flcc_gcs_ccb_state() const;
+    void send_message_flcc_gcs_hbsys() const;
 };
 
 /// @class GCS

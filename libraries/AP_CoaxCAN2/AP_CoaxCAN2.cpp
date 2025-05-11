@@ -31,6 +31,8 @@ const AP_Param::GroupInfo AP_COAXCAN2::var_info[] = {
     AP_GROUPEND
 };
 
+mavlink_sys_icd_flcc_gcs_hbsys_t MAV_GCSTX_HBSYS = {0};
+
 AP_COAXCAN2::AP_COAXCAN2()
 {
     AP_Param::setup_object_defaults(this, var_info);
@@ -40,11 +42,6 @@ AP_COAXCAN2::AP_COAXCAN2()
     _initialized    = false;
     _iface                  = nullptr;
 
-    _rx_ex1_data1 = 0;
-    _rx_ex1_data2 = 0;
-    _rtr_tx_cnt = 0;
-
-    _coaxcan2_last_send_us = 0;
     _FCC_AlivCnt = 0;
     _FCC_CmdFcRunStop = 0;
     _FCC_CmdPmsBatCut = 0;
@@ -63,40 +60,40 @@ AP_COAXCAN2::AP_COAXCAN2()
     _PMS1.Lv_SW_On = 0;
     _PMS1.Batt_Charger_On = 0;
 
-    _PMS2.Batt_Output_Current = 0;
-    _PMS2.LDC_Output_Current = 0;
-    _PMS2.Mv_Output_Current = 0;
-    _PMS2.Mv_Battery_Voltage = 0;
+    _PMS2.Batt_Output_Current_raw = 0;
+    _PMS2.LDC_Output_Current_raw = 0;
+    _PMS2.Mv_Output_Current_raw = 0;
+    _PMS2.Mv_Battery_Voltage_raw = 0;
 
-    _PMS3.OutputVoltage = 0;
-    _PMS3.OutputVoltage = 0;
-    _PMS3.OutputCurrent = 0;
-    _PMS3.InputVoltage = 0;
-    _PMS3.InputCurrent = 0;
+    _PMS3.OutputVoltage_raw = 0;
+    _PMS3.OutputVoltage_raw = 0;
+    _PMS3.OutputCurrent_raw = 0;
+    _PMS3.InputVoltage_raw = 0;
+    _PMS3.InputCurrent_raw = 0;
 
     _FDC1.AliveCnt = 0;
     _FDC1.State = 0;
-    _FDC1.Aux_Volt = 0;
+    _FDC1.Aux_Volt_raw = 0;
     _FDC1.Max_Temp = 0;
     _FDC1.Flag1.ALL = 0;
     _FDC1.Flag2.ALL = 0;
 
-    _FDC2.OutputVoltage = 0;
-    _FDC2.OutputCurrent = 0;
-    _FDC2.InputVoltage = 0;
-    _FDC2.InputCurrent = 0;
+    _FDC2.OutputVoltage_raw = 0;
+    _FDC2.OutputCurrent_raw = 0;
+    _FDC2.InputVoltage_raw = 0;
+    _FDC2.InputCurrent_raw = 0;
 
     _VCUFDC1.AliveCnt = 0;
     _VCUFDC1.SET_CMD = 0;
     _VCUFDC1.Fault_Reset = 0;
-    _VCUFDC1.Target_OutputVoltage = 0;
-    _VCUFDC1.Target_InputCurrent = 0;
-    _VCUFDC1.Target_InputPower = 0;
+    _VCUFDC1.Target_OutputVoltage_raw = 0;
+    _VCUFDC1.Target_InputCurrent_raw = 0;
+    _VCUFDC1.Target_InputPower_raw = 0;
 
-    _IFCU1.PpCur = 0;
-    _IFCU1.PpCurLim = 0;
-    _IFCU1.PpH2Sof = 0;
-    _IFCU1.PpVlt = 0;
+    _IFCU1.PpCur_raw = 0;
+    _IFCU1.PpCurLim_raw = 0;
+    _IFCU1.PpH2Sof_raw = 0;
+    _IFCU1.PpVlt_raw = 0;
     _IFCU1.reserved = 0;
 
     _IFCU2.DTC = 0;
@@ -105,29 +102,29 @@ AP_COAXCAN2::AP_COAXCAN2()
     _IFCU2.State = 0;
     _IFCU2.SvmlsoRVlu = 0;
 
-    _IFCU3.FcNetCur = 0;
-    _IFCU3.FcNetVlt = 0;
-    _IFCU3.LdcCur = 0;
-    _IFCU3.LdcVlt = 0;
+    _IFCU3.FcNetCur_raw = 0;
+    _IFCU3.FcNetVlt_raw = 0;
+    _IFCU3.LdcCur_raw = 0;
+    _IFCU3.LdcVlt_raw = 0;
 
     _IFCU4.AmbTemp = 0;
     _IFCU4.FcInClntTmp = 0;
     _IFCU4.H2TnkFillCnt = 0;
     _IFCU4.H2TnkTmp = 0;
-    _IFCU4.H2TnkPrs = 0;
+    _IFCU4.H2TnkPrs_raw = 0;
     _IFCU4.RoomTemp = 0;
 
     _IFCU5.ExWtrTrpFill = 0;
-    _IFCU5.HvBsaCur = 0;
-    _IFCU5.HvBsaSoC = 0;
-    _IFCU5.HvBsaSoH = 0;
-    _IFCU5.HvBsaVlt = 0;
+    _IFCU5.HvBsaCur_raw = 0;
+    _IFCU5.HvBsaSoC_raw = 0;
+    _IFCU5.HvBsaSoH_raw = 0;
+    _IFCU5.HvBsaVlt_raw = 0;
 
     _IFCU6.FcClntFiltChk = 0;
     _IFCU6.FcClntSplChk = 0;
-    _IFCU6.FcMxCurLim = 0;
-    _IFCU6.FcNetCustCurLim = 0;
-    _IFCU6.H2MidPrs = 0;
+    _IFCU6.FcMxCurLim_raw = 0;
+    _IFCU6.FcNetCustCurLim_raw = 0;
+    _IFCU6.H2MidPrs_raw = 0;
     
     coaxcan2_period_us = 1000000UL / COAXCAN2_LOOP_HZ;
 
@@ -224,17 +221,6 @@ void AP_COAXCAN2::loop(void)
 
         run();
                     
-        if(_AP_COAXCAN2_loop_cnt%COAXCAN2_MALVINK_INTERVAL==0)      // 100ms period send2ppc
-        {
-            //send2gcs();     // Send COAX Data to GCS
-            //if(COAXCAN2_Fail_Status == COAXCAN2_STATUS::CONNECTED)
-            //{
-            //    gcs().send_text(MAV_SEVERITY_INFO, "CCB1 %d,%d,%d,%d", _rx_raw_thermist1, _rx_raw_thermist2, _rx_raw_thermist3, _rx_raw_thermist4); // For test
-            //    gcs().send_text(MAV_SEVERITY_INFO, "CCB2 %d,%d,%d,%d,%d", _rx_raw_thermocp1, _rx_raw_thermocp2, _rx_raw_wflow, _rx_raw_bdtemp, _rx_raw_state); // For test
-            //    gcs().send_text(MAV_SEVERITY_INFO, "TX %d RX %d",(uint16_t)(_rtr_tx_cnt & 0xFFFF),(uint16_t)(_handleFrame_cnt & 0xFFFF));
-            //}
-        }
-
         _AP_COAXCAN2_loop_cnt++;                                  // 5ms period increase
     }
 }
@@ -248,25 +234,28 @@ void AP_COAXCAN2::run(void)
     //Receive
 	RXspin();
 
+    //Check data
+    if(_AP_COAXCAN2_loop_cnt%10==0) {
+        Check_ALL_data();
+    }
+
     if(_AP_COAXCAN2_loop_cnt%20==0)
     // if(_AP_COAXCAN2_loop_cnt%100==0)
     {
         TX_FCC1_MSG();
-        _rtr_tx_cnt++;
     }
     else if(_AP_COAXCAN2_loop_cnt%20 == 5)
     // // else if(_AP_COAXCAN2_loop_cnt%100 == 50)
     {
         TX_FCC2_MSG();
-        _rtr_tx_cnt++;
     }
     // else
     // {
     //     TXspin();//Transmit unscheduled messages : command from GCS
-    //     _rtr_tx_cnt++;
     // }
     //
 
+    //TXspin();
 }
 
 // -------------------------------------------------------------------------
@@ -384,17 +373,19 @@ void AP_COAXCAN2::handleFrame(const AP_HAL::CANFrame& can_rxframe)
         case RX_ID_IFCU1 :
             uint16_temp1 = can_rxframe.data[0];
             uint16_temp2 = can_rxframe.data[1];
-            _IFCU1.PpVlt = uint16_temp2 * 256 + uint16_temp1;
+            _IFCU1.PpVlt_raw = uint16_temp2 * 256 + uint16_temp1;
             uint16_temp1 = can_rxframe.data[2];
             uint16_temp2 = can_rxframe.data[3];
-            _IFCU1.PpCur = uint16_temp2 * 256 + uint16_temp1;
+            _IFCU1.PpCur_raw = uint16_temp2 * 256 + uint16_temp1;
             uint16_temp1 = can_rxframe.data[4];
             uint16_temp2 = can_rxframe.data[5];
-            _IFCU1.PpCurLim = uint16_temp2 * 256 + uint16_temp1;
-            _IFCU1.PpH2Sof = can_rxframe.data[6];
+            _IFCU1.PpCurLim_raw = uint16_temp2 * 256 + uint16_temp1;
+            _IFCU1.PpH2Sof_raw = can_rxframe.data[6];
             // _IFCU1.reserved = can_rxframe.data[7];
+
+            _NewIFCU_msg = _NewIFCU_msg | 0x01;//bit0 : IFCU1
             #if DEBUG_IFCU == 1
-            gcs().send_text(MAV_SEVERITY_INFO, "IFCU1 : %u, %u, %u, %u", _IFCU1.PpVlt, _IFCU1.PpCur, _IFCU1.PpCurLim, _IFCU1.PpH2Sof);
+            gcs().send_text(MAV_SEVERITY_INFO, "IFCU1 : %u, %u, %u, %u", _IFCU1.PpVlt_raw, _IFCU1.PpCur_raw, _IFCU1.PpCurLim_raw, _IFCU1.PpH2Sof_raw);
             #endif
             break;
         case RX_ID_IFCU2 :
@@ -405,6 +396,8 @@ void AP_COAXCAN2::handleFrame(const AP_HAL::CANFrame& can_rxframe)
             uint16_temp1 = can_rxframe.data[4];
             uint16_temp2 = can_rxframe.data[5];
             _IFCU2.SvmlsoRVlu = uint16_temp2 * 256 + uint16_temp1;
+
+            _NewIFCU_msg = _NewIFCU_msg | 0x02;//bit1 : IFCU2
             #if DEBUG_IFCU == 1
             gcs().send_text(MAV_SEVERITY_INFO, "IFCU2 : %u, %u, %u, %u, %u", _IFCU2.State, _IFCU2.FltSts, _IFCU2.DTC, _IFCU2.H2LkLmp, _IFCU2.SvmlsoRVlu);
             #endif
@@ -412,60 +405,68 @@ void AP_COAXCAN2::handleFrame(const AP_HAL::CANFrame& can_rxframe)
         case RX_ID_IFCU3 :
             uint16_temp1 = can_rxframe.data[0];
             uint16_temp2 = can_rxframe.data[1];
-            _IFCU3.FcNetVlt = uint16_temp2 * 256 + uint16_temp1;
+            _IFCU3.FcNetVlt_raw = uint16_temp2 * 256 + uint16_temp1;
             uint16_temp1 = can_rxframe.data[2];
             uint16_temp2 = can_rxframe.data[3];
-            _IFCU3.FcNetCur = uint16_temp2 * 256 + uint16_temp1;
+            _IFCU3.FcNetCur_raw = uint16_temp2 * 256 + uint16_temp1;
             uint16_temp1 = can_rxframe.data[4];
             uint16_temp2 = can_rxframe.data[5];
-            _IFCU3.LdcVlt = uint16_temp2 * 256 + uint16_temp1;
+            _IFCU3.LdcVlt_raw = uint16_temp2 * 256 + uint16_temp1;
             uint16_temp1 = can_rxframe.data[6];
             uint16_temp2 = can_rxframe.data[7];
-            _IFCU3.LdcCur = uint16_temp2 * 256 + uint16_temp1;
+            _IFCU3.LdcCur_raw = uint16_temp2 * 256 + uint16_temp1;
+
+            _NewIFCU_msg = _NewIFCU_msg | 0x04;//bit2 : IFCU3
             #if DEBUG_IFCU == 1
-            gcs().send_text(MAV_SEVERITY_INFO, "IFCU3 : %u, %u, %u, %u", _IFCU3.FcNetVlt, _IFCU3.FcNetCur, _IFCU3.LdcVlt, _IFCU3.LdcCur);
+            gcs().send_text(MAV_SEVERITY_INFO, "IFCU3 : %u, %u, %u, %u", _IFCU3.FcNetVlt_raw, _IFCU3.FcNetCur_raw, _IFCU3.LdcVlt_raw, _IFCU3.LdcCur_raw);
             #endif
             break;
         case RX_ID_IFCU4 :
             _IFCU4.FcInClntTmp = (int8_t)can_rxframe.data[0];
             _IFCU4.AmbTemp = (int8_t)can_rxframe.data[1];
             _IFCU4.RoomTemp = (int8_t)can_rxframe.data[2];
-            _IFCU4.H2TnkPrs = can_rxframe.data[3];
+            _IFCU4.H2TnkPrs_raw = can_rxframe.data[3];
             _IFCU4.H2TnkTmp = can_rxframe.data[4];
             uint16_temp1 = can_rxframe.data[5];
             uint16_temp2 = can_rxframe.data[6];
             _IFCU4.H2TnkFillCnt = uint16_temp2 * 256 + uint16_temp1;
+
+            _NewIFCU_msg = _NewIFCU_msg | 0x08;//bit3 : IFCU4
             #if DEBUG_IFCU == 1
-            gcs().send_text(MAV_SEVERITY_INFO, "IFCU4 : %d, %d, %d, %u, %u, %u", _IFCU4.FcInClntTmp, _IFCU4.AmbTemp, _IFCU4.RoomTemp, _IFCU4.H2TnkPrs, _IFCU4.H2TnkTmp, _IFCU4.H2TnkFillCnt);
+            gcs().send_text(MAV_SEVERITY_INFO, "IFCU4 : %d, %d, %d, %u, %u, %u", _IFCU4.FcInClntTmp, _IFCU4.AmbTemp, _IFCU4.RoomTemp, _IFCU4.H2TnkPrs_raw, _IFCU4.H2TnkTmp, _IFCU4.H2TnkFillCnt);
             #endif
             break;
         case RX_ID_IFCU5 :
             uint16_temp1 = can_rxframe.data[0];
             uint16_temp2 = can_rxframe.data[1];
-            _IFCU5.HvBsaVlt = uint16_temp2 * 256 + uint16_temp1;
+            _IFCU5.HvBsaVlt_raw = uint16_temp2 * 256 + uint16_temp1;
             uint16_temp1 = can_rxframe.data[2];
             uint16_temp2 = can_rxframe.data[3];
-            _IFCU5.HvBsaCur = uint16_temp2 * 256 + uint16_temp1;
-            _IFCU5.HvBsaSoC = can_rxframe.data[4];
-            _IFCU5.HvBsaSoH = can_rxframe.data[5];
+            _IFCU5.HvBsaCur_raw = uint16_temp2 * 256 + uint16_temp1;
+            _IFCU5.HvBsaSoC_raw = can_rxframe.data[4];
+            _IFCU5.HvBsaSoH_raw = can_rxframe.data[5];
             _IFCU5.ExWtrTrpFill = can_rxframe.data[6] & 0x01;
+
+            _NewIFCU_msg = _NewIFCU_msg | 0x10;//bit4 : IFCU5
             #if DEBUG_IFCU == 1
-            gcs().send_text(MAV_SEVERITY_INFO, "IFCU5 : %u, %u, %u, %u, %u", _IFCU5.HvBsaVlt, _IFCU5.HvBsaCur, _IFCU5.HvBsaSoC, _IFCU5.HvBsaSoH, _IFCU5.ExWtrTrpFill);
+            gcs().send_text(MAV_SEVERITY_INFO, "IFCU5 : %u, %u, %u, %u, %u", _IFCU5.HvBsaVlt_raw, _IFCU5.HvBsaCur_raw, _IFCU5.HvBsaSoC_raw, _IFCU5.HvBsaSoH_raw, _IFCU5.ExWtrTrpFill);
             #endif
             break;
         case RX_ID_IFCU6 :
             uint16_temp1 = can_rxframe.data[0];
             uint16_temp2 = can_rxframe.data[1];
-            _IFCU6.FcMxCurLim = uint16_temp2 * 256 + uint16_temp1;
+            _IFCU6.FcMxCurLim_raw= uint16_temp2 * 256 + uint16_temp1;
             uint16_temp1 = can_rxframe.data[2];
             uint16_temp2 = can_rxframe.data[3];
-            _IFCU6.FcNetCustCurLim = uint16_temp2 * 256 + uint16_temp1;
-            _IFCU6.H2MidPrs = can_rxframe.data[4];
+            _IFCU6.FcNetCustCurLim_raw = uint16_temp2 * 256 + uint16_temp1;
+            _IFCU6.H2MidPrs_raw = can_rxframe.data[4];
             uint8_temp = can_rxframe.data[5];
             _IFCU6.FcClntFiltChk = uint8_temp & 0x01;
             _IFCU6.FcClntSplChk = (uint8_temp >> 1) & 0x01;
+
+            _NewIFCU_msg = _NewIFCU_msg | 0x20;//bit5 : IFCU6
             #if DEBUG_IFCU == 1
-            gcs().send_text(MAV_SEVERITY_INFO, "IFCU6 : %u, %u, %u, %u, %u", _IFCU6.FcMxCurLim, _IFCU6.FcNetCustCurLim, _IFCU6.H2MidPrs, _IFCU6.FcClntFiltChk, _IFCU6.FcClntSplChk);
+            gcs().send_text(MAV_SEVERITY_INFO, "IFCU6 : %u, %u, %u, %u, %u", _IFCU6.FcMxCurLim_raw, _IFCU6.FcNetCustCurLim_raw, _IFCU6.H2MidPrs_raw, _IFCU6.FcClntFiltChk, _IFCU6.FcClntSplChk);
             #endif
             break;
         case RX_ID_PMS1 :
@@ -480,6 +481,8 @@ void AP_COAXCAN2::handleFrame(const AP_HAL::CANFrame& can_rxframe)
             _PMS1.Mv_SW_On = (can_rxframe.data[3] >> 5) & 0x01;
             _PMS1.Lv_SW_On = (can_rxframe.data[3] >> 6) & 0x01;
             _PMS1.Batt_Charger_On = (can_rxframe.data[3] >> 7) & 0x01;
+
+            _NewDMI_msg = _NewDMI_msg | 0x01;//bit0 : PMS1
             #if DEBUG_PMS == 1
             gcs().send_text(MAV_SEVERITY_INFO, "PMS1 : %u, %u, %u, %u, %u%u%u%u", 
                         _PMS1.AlivCnt, _PMS1.State, _PMS1.LDC_State, _PMS1.Fault_LDC_No, 
@@ -489,49 +492,55 @@ void AP_COAXCAN2::handleFrame(const AP_HAL::CANFrame& can_rxframe)
         case RX_ID_PMS2 :
             uint16_temp1 = can_rxframe.data[0];
             uint16_temp2 = can_rxframe.data[1];
-            _PMS2.Batt_Output_Current = (int16_t)(uint16_temp2 * 256 + uint16_temp1);
+            _PMS2.Batt_Output_Current_raw = (int16_t)(uint16_temp2 * 256 + uint16_temp1);
             uint16_temp1 = can_rxframe.data[2];
             uint16_temp2 = can_rxframe.data[3];
-            _PMS2.LDC_Output_Current = uint16_temp2 * 256 + uint16_temp1;
+            _PMS2.LDC_Output_Current_raw = uint16_temp2 * 256 + uint16_temp1;
             uint16_temp1 = can_rxframe.data[4];
             uint16_temp2 = can_rxframe.data[5];
-            _PMS2.Mv_Output_Current = (int16_t)(uint16_temp2 * 256 + uint16_temp1);
+            _PMS2.Mv_Output_Current_raw = (int16_t)(uint16_temp2 * 256 + uint16_temp1);
             uint16_temp1 = can_rxframe.data[6];
             uint16_temp2 = can_rxframe.data[7];
-            _PMS2.Mv_Battery_Voltage = uint16_temp2 * 256 + uint16_temp1;
+            _PMS2.Mv_Battery_Voltage_raw = uint16_temp2 * 256 + uint16_temp1;
+
+            _NewDMI_msg = _NewDMI_msg | 0x02;//bit1 : PMS2
             #if DEBUG_PMS == 1
             gcs().send_text(MAV_SEVERITY_INFO, "PMS2 : %d, %u, %d, %u", 
-                        _PMS2.Batt_Output_Current, _PMS2.LDC_Output_Current, _PMS2.Mv_Output_Current, _PMS2.Mv_Battery_Voltage);
+                        _PMS2.Batt_Output_Current_raw, _PMS2.LDC_Output_Current_raw, _PMS2.Mv_Output_Current_raw, _PMS2.Mv_Battery_Voltage_raw);
             #endif
             break;
         case RX_ID_PMS3 :
             uint16_temp1 = can_rxframe.data[0];
             uint16_temp2 = can_rxframe.data[1];
-            _PMS3.OutputVoltage = uint16_temp2 * 256 + uint16_temp1;
+            _PMS3.OutputVoltage_raw = uint16_temp2 * 256 + uint16_temp1;
             uint16_temp1 = can_rxframe.data[2];
             uint16_temp2 = can_rxframe.data[3];
-            _PMS3.OutputCurrent = (int16_t)(uint16_temp2 * 256 + uint16_temp1);
+            _PMS3.OutputCurrent_raw = (int16_t)(uint16_temp2 * 256 + uint16_temp1);
             uint16_temp1 = can_rxframe.data[4];
             uint16_temp2 = can_rxframe.data[5];
-            _PMS3.InputVoltage = uint16_temp2 * 256 + uint16_temp1;
+            _PMS3.InputVoltage_raw = uint16_temp2 * 256 + uint16_temp1;
             uint16_temp1 = can_rxframe.data[6];
             uint16_temp2 = can_rxframe.data[7];
-            _PMS3.InputCurrent = (int16_t)(uint16_temp2 * 256 + uint16_temp1);
+            _PMS3.InputCurrent_raw = (int16_t)(uint16_temp2 * 256 + uint16_temp1);
+
+            _NewDMI_msg = _NewDMI_msg | 0x04;//bit2 : PMS3
             #if DEBUG_PMS == 1
             gcs().send_text(MAV_SEVERITY_INFO, "PMS3 : %u, %d, %u, %d", 
-                        _PMS3.OutputVoltage, _PMS3.OutputCurrent, _PMS3.InputVoltage, _PMS3.InputCurrent);
+                        _PMS3.OutputVoltage_raw, _PMS3.OutputCurrent_raw, _PMS3.InputVoltage_raw, _PMS3.InputCurrent_raw);
             #endif
             break;
         case RX_ID_FDC1 :
             _FDC1.AliveCnt   = can_rxframe.data[0];
             _FDC1.State     = can_rxframe.data[1];
-            _FDC1.Aux_Volt  = can_rxframe.data[2];
+            _FDC1.Aux_Volt_raw  = can_rxframe.data[2];
             _FDC1.Max_Temp  = can_rxframe.data[3];
             _FDC1.Flag1.ALL = can_rxframe.data[4];
             _FDC1.Flag2.ALL = can_rxframe.data[5];
+
+            _NewDMI_msg = _NewDMI_msg | 0x08;//bit3 : FDC1
             #if DEBUG_PMS == 1
             gcs().send_text(MAV_SEVERITY_INFO, "FDC1 : %u, %u, %u, %u, %u%u%u%u %u%u%u%u", 
-                        _FDC1.AliveCnt, _FDC1.State, _FDC1.Aux_Volt, _FDC1.Max_Temp,
+                        _FDC1.AliveCnt, _FDC1.State, _FDC1.Aux_Volt_raw, _FDC1.Max_Temp,
                         _FDC1.Flag1.bits.Ind1_OC_Fault, _FDC1.Flag1.bits.Ind2_OC_Fault,
                         _FDC1.Flag1.bits.Ind3_OC_Fault, _FDC1.Flag1.bits.Ind4_OC_Fault,
                         _FDC1.Flag1.bits.Current_Unbalance_Fault, _FDC1.Flag1.bits.Output_OC_Fault,
@@ -541,19 +550,21 @@ void AP_COAXCAN2::handleFrame(const AP_HAL::CANFrame& can_rxframe)
         case RX_ID_FDC2 :
             uint16_temp1 = can_rxframe.data[0];
             uint16_temp2 = can_rxframe.data[1];
-            _FDC2.OutputVoltage = uint16_temp2 * 256 + uint16_temp1;
+            _FDC2.OutputVoltage_raw = uint16_temp2 * 256 + uint16_temp1;
             uint16_temp1 = can_rxframe.data[2];
             uint16_temp2 = can_rxframe.data[3];
-            _FDC2.OutputCurrent = (int16_t)(uint16_temp2 * 256 + uint16_temp1);
+            _FDC2.OutputCurrent_raw = (int16_t)(uint16_temp2 * 256 + uint16_temp1);
             uint16_temp1 = can_rxframe.data[4];
             uint16_temp2 = can_rxframe.data[5];
-            _FDC2.InputVoltage = uint16_temp2 * 256 + uint16_temp1;
+            _FDC2.InputVoltage_raw = uint16_temp2 * 256 + uint16_temp1;
             uint16_temp1 = can_rxframe.data[6];
             uint16_temp2 = can_rxframe.data[7];
-            _FDC2.InputCurrent = (int16_t)(uint16_temp2 * 256 + uint16_temp1);
+            _FDC2.InputCurrent_raw = (int16_t)(uint16_temp2 * 256 + uint16_temp1);
+
+            _NewDMI_msg = _NewDMI_msg | 0x10;//bit4 : FDC2
             #if DEBUG_PMS == 1
             gcs().send_text(MAV_SEVERITY_INFO, "FDC2 : %u, %d, %u, %d", 
-                        _FDC2.OutputVoltage, _FDC2.OutputCurrent, _FDC2.InputVoltage, _FDC2.InputCurrent);
+                        _FDC2.OutputVoltage_raw, _FDC2.OutputCurrent_raw, _FDC2.InputVoltage_raw, _FDC2.InputCurrent_raw);
             #endif
             break;
         case RX_ID_VCUF1 :
@@ -563,23 +574,158 @@ void AP_COAXCAN2::handleFrame(const AP_HAL::CANFrame& can_rxframe)
             _VCUFDC1.Fault_Reset = ((uint8_temp >> 4) & 0x0F);
             uint16_temp1 = can_rxframe.data[0];
             uint16_temp2 = can_rxframe.data[1];
-            _VCUFDC1.Target_OutputVoltage = uint16_temp2 * 256 + uint16_temp1;
+            _VCUFDC1.Target_OutputVoltage_raw = uint16_temp2 * 256 + uint16_temp1;
             uint16_temp1 = can_rxframe.data[0];
             uint16_temp2 = can_rxframe.data[1];
-            _VCUFDC1.Target_InputCurrent = uint16_temp2 * 256 + uint16_temp1;
+            _VCUFDC1.Target_InputCurrent_raw = uint16_temp2 * 256 + uint16_temp1;
             uint16_temp1 = can_rxframe.data[0];
             uint16_temp2 = can_rxframe.data[1];
-            _VCUFDC1.Target_InputPower = uint16_temp2 * 256 + uint16_temp1;
+            _VCUFDC1.Target_InputPower_raw = uint16_temp2 * 256 + uint16_temp1;
+
+            _NewDMI_msg = _NewDMI_msg | 0x20;//bit5 : VCUF1
             #if DEBUG_PMS == 1
             gcs().send_text(MAV_SEVERITY_INFO, "PMS2 : %u, %u, %u, %u, %u, %u", 
                         _VCUFDC1.AliveCnt, _VCUFDC1.SET_CMD, _VCUFDC1.Fault_Reset,
-                        _VCUFDC1.Target_OutputVoltage, _VCUFDC1.Target_InputCurrent, _VCUFDC1.Target_InputPower);
+                        _VCUFDC1.Target_OutputVoltage_raw, _VCUFDC1.Target_InputCurrent_raw, _VCUFDC1.Target_InputPower_raw);
             #endif
             break;
         default:
 
             break;
     }
+}
+
+// -------------------------------------------------------------------------
+// Check multiple received Inverter data : Check each messages and transfer to global memory
+// -------------------------------------------------------------------------
+void AP_COAXCAN2::Check_ALL_data(void)
+{   
+    //IFCU1
+    if(_NewIFCU_msg & 0x01) {
+        cxdata().IFCU_data.PpVlt = (float)_IFCU1.PpVlt_raw * 0.01;
+        cxdata().IFCU_data.PpCur = (float)_IFCU1.PpCur_raw * 0.01;
+        cxdata().IFCU_data.PpCurLim = (float)_IFCU1.PpCurLim_raw * 0.01;
+        cxdata().IFCU_data.PpH2Sof = (float)_IFCU1.PpH2Sof_raw * 0.5;
+        _IFCU_has_Initialized |= 0x01;
+#if DEBUG_IFCU == 1
+        gcs().send_text(MAV_SEVERITY_INFO, "IFCU1-i : %.2f, %.2f, %.2f, %.1f",
+            cxdata().IFCU_data.PpVlt, cxdata().IFCU_data.PpCur, cxdata().IFCU_data.PpCurLim, cxdata().IFCU_data.PpH2Sof);
+#endif
+    }
+    //IFCU2
+    if(_NewIFCU_msg & 0x02) {
+        cxdata().IFCU_data.State = _IFCU2.State;
+        cxdata().IFCU_data.FltSts = _IFCU2.FltSts;
+        cxdata().IFCU_data.DTC = _IFCU2.DTC;
+        cxdata().IFCU_data.H2LkLmp = _IFCU2.H2LkLmp;
+        cxdata().IFCU_data.SvmlsoRVlu = _IFCU2.SvmlsoRVlu;
+        _IFCU_has_Initialized |= 0x02;
+    }
+    //IFCU3
+    if(_NewIFCU_msg & 0x04) {
+        cxdata().IFCU_data.FcNetVlt = (float)_IFCU3.FcNetVlt_raw * 0.1;
+        cxdata().IFCU_data.FcNetCur = (float)_IFCU3.FcNetCur_raw * 0.1 - 1000.0;
+        cxdata().IFCU_data.LdcVlt = (float)_IFCU3.LdcVlt_raw * 0.01;
+        cxdata().IFCU_data.LdcCur = (float)_IFCU3.LdcCur_raw * 0.1;
+        _IFCU_has_Initialized |= 0x04;
+#if DEBUG_IFCU == 1
+        gcs().send_text(MAV_SEVERITY_INFO, "IFCU3-i : %.1f, %.1f, %.2f, %.1f",
+            cxdata().IFCU_data.FcNetVlt, cxdata().IFCU_data.FcNetCur, cxdata().IFCU_data.LdcVlt, cxdata().IFCU_data.LdcCur);
+#endif
+    }
+    //IFCU4
+    if(_NewIFCU_msg & 0x08) {
+        cxdata().IFCU_data.FcInClntTmp = _IFCU4.FcInClntTmp;
+        cxdata().IFCU_data.AmbTemp = _IFCU4.AmbTemp;
+        cxdata().IFCU_data.RoomTemp = _IFCU4.RoomTemp;
+        cxdata().IFCU_data.H2TnkPrs = (float)_IFCU4.H2TnkPrs_raw * 0.4;
+        cxdata().IFCU_data.H2TnkTmp = (int16_t)_IFCU4.H2TnkTmp - 50;
+        cxdata().IFCU_data.H2TnkFillCnt = _IFCU4.H2TnkFillCnt;
+        _IFCU_has_Initialized |= 0x08;
+#if DEBUG_IFCU == 1
+        gcs().send_text(MAV_SEVERITY_INFO, "IFCU1-4 : H2TnkPrs %.1f, H2TnkTmp %d",
+            cxdata().IFCU_data.H2TnkPrs, cxdata().IFCU_data.H2TnkTmp);
+#endif
+    }
+    //IFCU5 => not really used, just initialize it
+    if(_NewIFCU_msg & 0x10) {
+        _IFCU_has_Initialized |= 0x10;
+    }
+    //IFCU6
+    if(_NewIFCU_msg & 0x20) {
+        cxdata().IFCU_data.FcMxCurLim = (float)_IFCU6.FcMxCurLim_raw * 0.01;
+        cxdata().IFCU_data.FcNetCustCurLim = (float)_IFCU6.FcNetCustCurLim_raw * 0.01;
+        cxdata().IFCU_data.H2MidPrs = (uint16_t)_IFCU6.H2MidPrs_raw * 20;
+        cxdata().IFCU_data.FcClntFiltChk = _IFCU6.FcClntFiltChk;
+        cxdata().IFCU_data.FcClntSplChk = _IFCU6.FcClntSplChk;
+        _IFCU_has_Initialized |= 0x20;
+#if DEBUG_IFCU == 1
+        gcs().send_text(MAV_SEVERITY_INFO, "IFCU6-i : %.2f, %.2f, %d",
+            cxdata().IFCU_data.FcMxCurLim, cxdata().IFCU_data.FcNetCustCurLim, cxdata().IFCU_data.H2MidPrs);
+#endif
+    }
+    //PMS1
+    if(_NewDMI_msg & 0x01) {
+        cxdata().DMI_PMS_data.AlivCnt = _PMS1.AlivCnt;
+        cxdata().DMI_PMS_data.PMS_State = _PMS1.State;
+        cxdata().DMI_PMS_data.LDC_State = _PMS1.LDC_State;
+        cxdata().DMI_PMS_data.Fault_LDC_No = _PMS1.Fault_LDC_No;
+        cxdata().DMI_PMS_data.Batt_SW_On = _PMS1.Batt_SW_On;
+        cxdata().DMI_PMS_data.Mv_SW_On = _PMS1.Mv_SW_On;
+        cxdata().DMI_PMS_data.Lv_SW_On = _PMS1.Lv_SW_On;
+        cxdata().DMI_PMS_data.Batt_Charger_On = _PMS1.Batt_Charger_On;
+        _DMI_has_Initialized |= 0x01;
+    }
+    //PMS2
+    if(_NewDMI_msg & 0x02) {
+        cxdata().DMI_PMS_data.Batt_Output_Current = (float)_PMS2.Batt_Output_Current_raw * 0.1;
+        cxdata().DMI_PMS_data.LDC_Output_Current = (float)_PMS2.LDC_Output_Current_raw * 0.1;
+        cxdata().DMI_PMS_data.Mv_Output_Current = (float)_PMS2.Mv_Output_Current_raw * 0.1;
+        cxdata().DMI_PMS_data.Mv_Battery_Voltage = (float)_PMS2.Mv_Battery_Voltage_raw * 0.1;
+        _DMI_has_Initialized |= 0x02;
+#if DEBUG_PMS == 1
+        gcs().send_text(MAV_SEVERITY_INFO, "PMS2-i : %.1f, %.1f, %.1f, %.1f",
+            cxdata().DMI_PMS_data.Batt_Output_Current, cxdata().DMI_PMS_data.LDC_Output_Current, 
+            cxdata().DMI_PMS_data.Mv_Output_Current, cxdata().DMI_PMS_data.Mv_Battery_Voltage);
+#endif
+    }
+    //PMS3
+    if(_NewDMI_msg & 0x04) {
+        cxdata().DMI_PMS_data.HDC_OutputVoltage = (float)_PMS3.OutputVoltage_raw * 0.1;
+        cxdata().DMI_PMS_data.HDC_OutputCurrent = (float)_PMS3.OutputCurrent_raw * 0.1;// - 350.0;
+        cxdata().DMI_PMS_data.HDC_InputVoltage = (float)_PMS3.InputVoltage_raw * 0.1;
+        cxdata().DMI_PMS_data.HDC_InputCurrent = (float)_PMS3.InputCurrent_raw * 0.1;// - 350.0;
+        _DMI_has_Initialized |= 0x02;
+#if DEBUG_PMS == 1
+        gcs().send_text(MAV_SEVERITY_INFO, "PMS2-i : %.1f, %.1f, %.1f, %.1f",
+            cxdata().DMI_PMS_data.Batt_Output_Current, cxdata().DMI_PMS_data.LDC_Output_Current, 
+            cxdata().DMI_PMS_data.Mv_Output_Current, cxdata().DMI_PMS_data.Mv_Battery_Voltage);
+#endif
+    }
+    //FDC1
+    if(_NewDMI_msg & 0x08) {
+        cxdata().DMI_PMS_data.FDC_State = _FDC1.State;
+        cxdata().DMI_PMS_data.FDC_Aux_Volt = (float)_FDC1.Aux_Volt_raw * 0.1;
+        cxdata().DMI_PMS_data.FDC_Max_Temp = (int16_t)_FDC1.Max_Temp - 40;
+        cxdata().DMI_PMS_data.FDC_Flag1.ALL = _FDC1.Flag1.ALL;
+        cxdata().DMI_PMS_data.FDC_Flag2.ALL = _FDC1.Flag2.ALL;
+        _DMI_has_Initialized |= 0x04;
+#if DEBUG_IFCU == 1
+        gcs().send_text(MAV_SEVERITY_INFO, "FDC1-i : AuxV %.1f, MaxTemp %d",
+            cxdata().DMI_PMS_data.FDC_Aux_Volt, cxdata().DMI_PMS_data.FDC_Max_Temp);
+#endif
+    }
+    //FDC2 => not really used, just initialize it
+    if(_NewDMI_msg & 0x10) {
+        _DMI_has_Initialized |= 0x10;
+    }
+    //VCUF1 => not really used, just initialize it
+    if(_NewDMI_msg & 0x20) {
+        _DMI_has_Initialized |= 0x20;
+    }
+
+    _NewIFCU_msg = 0;
+    _NewDMI_msg = 0;
 }
 
 // -------------------------------------------------------------------------
@@ -623,22 +769,6 @@ int  AP_COAXCAN2::CAN_TX_std(uint16_t can_id, uint8_t data_cmd[], uint8_t msgdlc
 
     out_frame       = {can_id, can_data, msgdlc};                                               // id, data[8], dlc
     cmd_send_res    = _can_iface->send(out_frame, timeout, AP_HAL::CANIface::AbortOnError);
-
-    if(cmd_send_res==1)
-	{
-		//success
-	    _cmd_tx_cnt++;
-	}
-	else if(cmd_send_res==0)
-	{
-		_cmd_tx_err++;
-		//CMD TX buffer full
-	}
-	else
-	{
-		_cmd_tx_err++;
-		//CMD TX error
-	}
 
     return cmd_send_res;
     

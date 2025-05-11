@@ -6285,8 +6285,17 @@
       <field type="uint16_t" name="V_dc" units="V">Voltage input x0.1</field>
       <field type="uint16_t" name="Fault_Flags" units="N/A">Fault flag set</field>
     </message>
+    <message id="62001" name="SYS_ICD_FLCC_GCS_HBSYS">
+      <description>TC2 (Hybrid System state1).</description>
+      <field type="uint8_t" name="PMS_State" units="N/A">PMS State. 0:Init, 1:Run, 2:Warning, 3:Fault, 4:Reset</field>
+      <field type="uint8_t" name="IFCU_State" units="N/A">IFCU State. 0:Init, 1:Starting, 2:Run, 3:Shutdown</field>
+      <field type="float" name="HDC_Vout" units="V">HDC Out Voltage. %.1f</field>
+      <field type="float" name="HDC_Cout" units="A">HDC Out Current. %.1f</field>
+      <field type="float" name="HDC_Vin" units="V">HDC Input Voltage. %.1f</field>
+      <field type="float" name="HDC_Cin" units="A">HDC Input Current. %.1f</field>
+    </message>
     <message id="62002" name="SYS_ICD_FLCC_GCS_CCB_STATE">
-      <description>TC1 (Inverter).</description>
+      <description>TC3 (Inverter).</description>
       <field type="uint8_t" name="Active_Mode" units="N/A">Active mode on/off</field>
       <field type="uint8_t" name="Motor_ON" units="N/A">Motor On/off</field>
       <field type="uint8_t" name="Motor_MAX" units="rpm">Motor forced to max</field>

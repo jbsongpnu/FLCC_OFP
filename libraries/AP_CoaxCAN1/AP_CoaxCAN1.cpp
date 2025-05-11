@@ -40,16 +40,8 @@ AP_COAXCAN1::AP_COAXCAN1()
     _initialized    = false;
     _iface                  = nullptr;
 
-    _rx_ex1_data1 = 0;
-    _rx_ex1_data2 = 0;
-    _rtr_tx_cnt = 0;
-
-    _coaxcan1_last_send_us = 0;
-
     coaxcan1_period_us = 1000000UL / COAXCAN1_LOOP_HZ;
 
-    _cmd_id[TX_ID::TX_ID_EX1]         = 0               | coaxcan1::CanFrame::FlagEFF;
-    _cmd_id[TX_ID::TX_ID_EX2]         = 1               | coaxcan1::CanFrame::FlagEFF;
     _cmd_id[TX_ID::TX_ID_INV_SET_CMD] = ID_INV_SET_CMD  | coaxcan1::CanFrame::FlagEFF;
     _cmd_id[TX_ID::TX_ID_INV_SET_CC]  = ID_INV_SET_CC   | coaxcan1::CanFrame::FlagEFF;
     _cmd_id[TX_ID::TX_ID_INV_SET_SC]  = ID_INV_SET_SC   | coaxcan1::CanFrame::FlagEFF;
@@ -166,23 +158,19 @@ void AP_COAXCAN1::run(void)
     // if(_AP_COAXCAN1_loop_cnt%100==0)
     // {
     //     //TX_INV_SETCMD_MSG();
-    //     _rtr_tx_cnt++;
     // }
     // // else if(_AP_COAXCAN1_loop_cnt%20 == 5)
     // else if(_AP_COAXCAN1_loop_cnt%100 == 20)
     // {
     //     TX_INV_SETCC_MSG();
-    //     _rtr_tx_cnt++;
     // }
     // else if(_AP_COAXCAN1_loop_cnt%100 == 40)
     // {
     //     TX_INV_SETSC_MSG();
-    //     _rtr_tx_cnt++;
     // }
     // else if(_AP_COAXCAN1_loop_cnt%100 == 60)
     // {
     //     TX_INV_SETFLT_MSG();
-    //     _rtr_tx_cnt++;
     // }
 
     TXspin();
@@ -765,22 +753,6 @@ int  AP_COAXCAN1::CAN_TX_Ext(uint32_t can_id, uint8_t data_cmd[], uint8_t msgdlc
 
     out_frame       = {can_id, can_data, msgdlc};                                               // id, data[8], dlc
     cmd_send_res    = _can_iface->send(out_frame, timeout, AP_HAL::CANIface::AbortOnError);
-
-    if(cmd_send_res==1)
-	{
-		//success
-	    _cmd_tx_cnt++;
-	}
-	else if(cmd_send_res==0)
-	{
-		_cmd_tx_err++;
-		//CMD TX buffer full
-	}
-	else
-	{
-		_cmd_tx_err++;
-		//CMD TX error
-	}
 
     return cmd_send_res;
     

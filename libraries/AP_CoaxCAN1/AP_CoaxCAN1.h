@@ -106,47 +106,18 @@ private:
     class TX_ID
 	{
         public:
-        //CCB Test
-        static constexpr unsigned TX_ID_EX1 = 0U; //example 1
-        static constexpr unsigned TX_ID_EX2 = 1U; //example 2
         //Inverter
-        static constexpr unsigned TX_ID_INV_SET_CMD    = 2U; //Set Command
-        static constexpr unsigned TX_ID_INV_SET_CC     = 3U; //Set Current control
-        static constexpr unsigned TX_ID_INV_SET_SC     = 4U; //Set Speed control
-        static constexpr unsigned TX_ID_INV_SET_FLT    = 5U; //Set Fault
-        static constexpr unsigned TX_ID_NUM = 6U;
+        static constexpr unsigned TX_ID_INV_SET_CMD    = 0U; //Set Command
+        static constexpr unsigned TX_ID_INV_SET_CC     = 1U; //Set Current control
+        static constexpr unsigned TX_ID_INV_SET_SC     = 2U; //Set Speed control
+        static constexpr unsigned TX_ID_INV_SET_FLT    = 3U; //Set Fault
+        static constexpr unsigned TX_ID_NUM = 4U;
     };
-    //example data state
-    uint16_t _rx_ex1_data1;
-    uint16_t _rx_ex1_data2;
-    //Receive data for Cooling Control Board by NextFoam
-    uint16_t _rx_raw_thermist1; //Thermist 1 temperature x10 deg 0~10,237 deg
-    uint16_t _rx_raw_thermist2; //Thermist 2 temperature x10 deg 0~10,237 deg
-    uint16_t _rx_raw_thermist3; //Thermist 3 temperature x10 deg 0~10,237 deg
-    uint16_t _rx_raw_thermist4; //Thermist 4 temperature x10 deg 0~10,237 deg
-    uint16_t _rx_raw_thermocp1; //Thermocouple 1 temperature x10 deg 0~10,237 deg
-    uint16_t _rx_raw_thermocp2; //Thermocouple 2 temperature x10 deg 0~10,237 deg
-    uint16_t _rx_raw_wflow;     //(Water)Flow sensor 0~30,000 mL/min 
-    uint16_t _rx_raw_bdtemp;    //Board temperature 0~99 deg
-    uint16_t _rx_raw_state;     //Cooling controller state
 
     uint32_t _cmd_id[TX_ID::TX_ID_NUM];
-    uint32_t _rx_id[RX_ID_NUM];
-
-    uint32_t RX_MSG;   //Received message
-    uint32_t _rx_idx;  //Received message index
-    uint32_t _cmd_idx;  //Command index
 
     //COAX1_CTRL_CMD _coax1_ctrl_cmd;
     //COAX1_CTRL_CMD _coax1_ctrl_cmd_prv;
-
-    uint32_t _handleFrame_cnt;
-	uint32_t _rtr_tx_cnt;
-	uint32_t _cmd_tx_cnt;
-	uint32_t _rtr_tx_err;
-	uint32_t _cmd_tx_err;
-
-    uint32_t _coaxcan1_last_send_us;
 
     uint64_t _AP_COAXCAN1_loop_cnt = 0;
     uint32_t coaxcan1_period_us;
@@ -165,9 +136,6 @@ private:
     
     uint16_t COAXCAN1_ErrCnt;
     uint16_t COAXCAN1_RcvrCnt;
-
-    uint8_t COAXCAN1_Ctrl_Seq;
-    //CAN ICD
 
 };
 

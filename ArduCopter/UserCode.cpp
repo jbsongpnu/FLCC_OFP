@@ -4,6 +4,7 @@
 
 extern mavlink_sys_icd_flcc_gcs_inv_state_t MAV_GCSTX_INV_State;
 extern mavlink_sys_icd_flcc_gcs_ccb_state_t MAV_GCSTX_CCB_State;
+extern mavlink_sys_icd_flcc_gcs_hbsys_t MAV_GCSTX_HBSYS;
 
 void Copter::userhook_init()
 {
@@ -36,6 +37,13 @@ void Copter::userhook_init()
     MAV_GCSTX_CCB_State.Thermistor2x10 = 2;
     MAV_GCSTX_CCB_State.Thermistor3x10 = 3;
     MAV_GCSTX_CCB_State.Thermistor4x10 = 4;
+
+    MAV_GCSTX_HBSYS.IFCU_State = 1;
+    MAV_GCSTX_HBSYS.PMS_State = 0;
+    MAV_GCSTX_HBSYS.HDC_Vout = 0.1;
+    MAV_GCSTX_HBSYS.HDC_Cout = 0.2;
+    MAV_GCSTX_HBSYS.HDC_Vin = 0.3;
+    MAV_GCSTX_HBSYS.HDC_Cin = 0.4;
 }
 #endif
 
@@ -62,8 +70,10 @@ void Copter::userhook_MediumLoop()
     //Send to GCS at 5Hz
     if (Count == 1) {
         gcs().send_message(MSG_INV_STATE); //
-    }else if(Count == 5) {
+    }else if(Count == 3) {
         gcs().send_message(MSG_CCB_STATE);
+    }else if(Count == 6) {
+        gcs().send_message(MSG_HBSYS);
         Count = 0;
     }
     Count++;
@@ -101,6 +111,15 @@ void Copter::userhook_MediumLoop()
         MAV_GCSTX_CCB_State.Thermistor2x10,
         MAV_GCSTX_CCB_State.Thermistor3x10,
         MAV_GCSTX_CCB_State.Thermistor4x10
+    );
+    AP::logger().Write("HBSYS", "TimeUS,ISTAT,PSTAT,HVOUT,HCOUT,HVIN,HCIN", "QBBffff",
+        AP_HAL::micros64(),
+        MAV_GCSTX_HBSYS.IFCU_State,
+        MAV_GCSTX_HBSYS.PMS_State,
+        MAV_GCSTX_HBSYS.HDC_Vout,
+        MAV_GCSTX_HBSYS.HDC_Cout,
+        MAV_GCSTX_HBSYS.HDC_Cout,
+        MAV_GCSTX_HBSYS.HDC_Cin
     );
     /*
     Format characters in the format string for binary log messages

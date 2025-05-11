@@ -107,6 +107,7 @@ GCS *GCS::_singleton = nullptr;
 
 extern mavlink_sys_icd_flcc_gcs_inv_state_t MAV_GCSTX_INV_State;
 extern mavlink_sys_icd_flcc_gcs_ccb_state_t MAV_GCSTX_CCB_State;
+extern mavlink_sys_icd_flcc_gcs_hbsys_t MAV_GCSTX_HBSYS;
 
 GCS_MAVLINK_InProgress GCS_MAVLINK_InProgress::in_progress_tasks[1];
 uint32_t GCS_MAVLINK_InProgress::last_check_ms;
@@ -998,6 +999,7 @@ ap_message GCS_MAVLINK::mavlink_id_to_ap_message_id(const uint32_t mavlink_id) c
 #endif
         {MAVLINK_MSG_ID_SYS_ICD_FLCC_GCS_INV_STATE, MSG_INV_STATE},
         {MAVLINK_MSG_ID_SYS_ICD_FLCC_GCS_CCB_STATE, MSG_CCB_STATE},
+        {MAVLINK_MSG_ID_SYS_ICD_FLCC_GCS_HBSYS, MSG_HBSYS},
             };
 
     for (uint8_t i=0; i<ARRAY_SIZE(map); i++) {
@@ -5893,8 +5895,13 @@ bool GCS_MAVLINK::try_send_message(const enum ap_message id)
         CHECK_PAYLOAD_SIZE(SYS_ICD_FLCC_GCS_INV_STATE);
         send_message_flcc_gcs_inv_state();
         break;
+    case MSG_HBSYS :
+        CHECK_PAYLOAD_SIZE(SYS_ICD_FLCC_GCS_HBSYS);
+        send_message_flcc_gcs_hbsys();
+        break;
     case MSG_CCB_STATE :
         CHECK_PAYLOAD_SIZE(SYS_ICD_FLCC_GCS_CCB_STATE);
+        send_message_flcc_gcs_ccb_state();
         break;
     case MSG_WATER_DEPTH:
 #if APM_BUILD_TYPE(APM_BUILD_Rover)
@@ -6667,4 +6674,17 @@ void GCS_MAVLINK::send_message_flcc_gcs_ccb_state() const
         MAV_GCSTX_CCB_State.Brd_temp
     );
 
+}
+
+void GCS_MAVLINK::send_message_flcc_gcs_hbsys() const
+{
+    mavlink_msg_sys_icd_flcc_gcs_hbsys_send(
+        chan, 
+        MAV_GCSTX_HBSYS.PMS_State, 
+        MAV_GCSTX_HBSYS.IFCU_State, 
+        MAV_GCSTX_HBSYS.HDC_Vout, 
+        MAV_GCSTX_HBSYS.HDC_Cout, 
+        MAV_GCSTX_HBSYS.HDC_Vin, 
+        MAV_GCSTX_HBSYS.HDC_Cin);
+        
 }

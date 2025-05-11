@@ -14,19 +14,6 @@
 #define COAXCAN2_MALVINK_INTERVAL     (20U)       // 10Hz  5ms*20=100ms
 #define COAXCAN2_ONRUNNING_INTERVAL   (200U)      // 1Hz   5ms*200=1000ms
 
-class COAX2_CTRL_CMD
-{
-public:
-	COAX2_CTRL_CMD()
-	{
-        EX1 = 0;
-        EX2 = 84;
-	}
-
-	uint32_t EX1;
-	uint32_t EX2;
-};
-
 class AP_COAXCAN2 : public AP_CANDriver {
 public:
 
@@ -55,6 +42,8 @@ public:
     void TX_FCC1_MSG(void); //0x720
     void TX_FCC2_MSG(void); //0x721
 
+    void Check_ALL_data(void);
+
     IFCU1_msg _IFCU1;
     IFCU2_msg _IFCU2;
     IFCU3_msg _IFCU3;
@@ -69,6 +58,11 @@ public:
     VCUFDC1_msg _VCUFDC1;
 
 private:
+
+    uint8_t _NewIFCU_msg = 0; //bit0~bit6 : IFCU1 ~ 6
+    uint8_t _NewDMI_msg = 0; //bit0~2 : PMS1~3, bit3 : FDC1, bit4 : FDC2, bit5 : VCUFDC1
+    uint8_t _IFCU_has_Initialized = 0;  //0 : not connected, each bit corresponds to _NewIFCU_msg
+    uint8_t _DMI_has_Initialized = 0;   //0 : not connected, each bit corresponds to _NewDMI_msg
 
     char _thread_name[9];
     bool _initialized;
@@ -112,9 +106,6 @@ private:
         static constexpr unsigned TX_ID_NUM  = 3U; //Number of CMD_ID
 	};
 
-    //example data state
-    uint16_t _rx_ex1_data1;
-    uint16_t _rx_ex1_data2;
     //Receive data for Cooling Control Board by NextFoam
     uint16_t _rx_raw_thermist1; //Thermist 1 temperature x10 deg 0~10,237 deg
     uint16_t _rx_raw_thermist2; //Thermist 2 temperature x10 deg 0~10,237 deg
@@ -128,21 +119,6 @@ private:
 
     uint32_t _cmd_id[TX_ID::TX_ID_NUM];
     //uint32_t _rx_id[RX_ID_NUM];
-
-    uint32_t RX_MSG;   //Received message
-    uint32_t _rx_idx;  //Received message index
-    uint32_t _cmd_idx;  //Command index
-
-    COAX2_CTRL_CMD _coax2_ctrl_cmd;
-    COAX2_CTRL_CMD _coax2_ctrl_cmd_prv;
-
-    uint32_t _handleFrame_cnt;
-	uint32_t _rtr_tx_cnt;
-	uint32_t _cmd_tx_cnt;
-	uint32_t _rtr_tx_err;
-	uint32_t _cmd_tx_err;
-
-    uint32_t _coaxcan2_last_send_us;
 
     uint64_t _AP_COAXCAN2_loop_cnt = 0;
     uint32_t coaxcan2_period_us;
@@ -162,7 +138,6 @@ private:
     uint16_t COAXCAN2_ErrCnt;
     uint16_t COAXCAN2_RcvrCnt;
 
-    uint8_t COAXCAN2_Ctrl_Seq;
     //CAN ICD
     uint8_t _FCC_AlivCnt;
     uint8_t _FCC_CmdFcRunStop;

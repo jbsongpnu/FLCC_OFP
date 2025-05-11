@@ -131,6 +131,104 @@ struct datadef_CCB_data {
     uint8_t isNew;              //bit0 : MSG1, bit1 : MSG2
 };
 
+typedef union {
+    uint8_t ALL;
+    struct {
+        uint8_t Ind1_OC_Fault : 1;
+        uint8_t Ind2_OC_Fault : 1;
+        uint8_t Ind3_OC_Fault : 1;
+        uint8_t Ind4_OC_Fault : 1;
+        uint8_t Current_Unbalance_Fault : 1;
+        uint8_t Output_OC_Fault : 1;
+        uint8_t SiC1_Fault : 1;
+        uint8_t SiC2_Fault : 1;
+        
+    }bits;
+}gUni_FDC1_Flag1;
+
+typedef union {
+    uint8_t ALL;
+    struct {
+        uint8_t SiC3_Fault : 1;
+        uint8_t SiC4_Fault : 1;
+        uint8_t Communication_Fault : 1;
+        uint8_t Input_OV_Fault : 1;
+        uint8_t Output_OV_Fault : 1;
+        uint8_t Heatsink_OT_Fault : 1;
+        uint8_t Input_UV_Fault : 1;
+        uint8_t Output_UV_Fault : 1;
+        
+    }bits;
+}gUni_FDC1_Flag2;
+
+struct datadef_PMS_data {
+    uint8_t isAlive;
+    //PMS1
+    uint8_t AlivCnt;        //looping 0 ~ 15 at 10Hz
+    uint8_t PMS_State;          //0:Init, 1:Run, 2:Warning, 3:Fault, 4:Reset
+    uint8_t LDC_State;      //0:Off, 1:Run, 2:Warning, 3:Fault (Warning:1.2kW, Fault:900W)
+    uint8_t Fault_LDC_No;   //1:0x01, 2:0x02, 3:0x04, 4:0x08, 5:0x10
+    bool    Batt_SW_On;     //0:Off, 1:On
+    bool    Mv_SW_On;       //0:Off, 1:On
+    bool    Lv_SW_On;       //0:Off, 1:On
+    bool    Batt_Charger_On;//0:Off, 1:On
+    //PMS2
+    float Batt_Output_Current;    //
+    float LDC_Output_Current;     //16bit : Byte2 ~ Byte3
+    float Mv_Output_Current;      //16bit : Byte4 ~ Byte5
+    float Mv_Battery_Voltage;     //16bit : Byte6 ~ Byte7
+    //PMS3
+    float HDC_OutputVoltage;     //16bit : Byte0 ~ Byte1
+    float HDC_OutputCurrent;     //16bit : Byte2 ~ Byte3
+    float HDC_InputVoltage;      //16bit : Byte4 ~ Byte5
+    float HDC_InputCurrent;      //16bit : Byte6 ~ Byte7
+    //FDC1
+    uint8_t FDC_State;              //8bit : Byte1
+    float FDC_Aux_Volt;           //8bit : Byte2
+    uint16_t FDC_Max_Temp;           //8bit : Byte3
+    gUni_FDC1_Flag1 FDC_Flag1;       //8 Flag bits : Byte4
+    gUni_FDC1_Flag2 FDC_Flag2;       //8 Flag bits : Byte5
+    //FDC2
+        //Not needed
+    //VCUFDC1
+        //Not needed
+};
+
+struct datadef_IFCU_data {
+    uint8_t isAlive;
+    //IFCU1
+    float PpVlt;         //16bit : Byte0 ~ Byte1
+    float PpCur;         //16bit : Byte2 ~ Byte3
+    float PpCurLim;      //16bit : Byte4 ~ Byte5
+    float PpH2Sof;       //8bit : Byte6
+    //IFCU2
+    uint8_t State;          //8bit : Byte0
+    uint8_t FltSts;         //2bit : Byte1 - bit 0~1
+    uint8_t DTC;            //8bit : Byte2
+    uint8_t H2LkLmp;        //2bit : Byte3 - bit 0~1
+    uint16_t SvmlsoRVlu;    //16bit : Byte4 ~ Byte5
+    //IFCU3
+    float FcNetVlt;      //16bit : Byte0 ~ Byte1
+    float FcNetCur;      //16bit : Byte2 ~ Byte3
+    float LdcVlt;        //16bit : Byte4 ~ Byte5
+    float LdcCur;        //16bit : Byte6 ~ Byte7
+    //IFCU4
+    int8_t FcInClntTmp;     //8bit : Byte0
+    int8_t AmbTemp;         //8bit : Byte1
+    int8_t RoomTemp;        //8bit : Byte2
+    float H2TnkPrs;       //8bit : Byte3
+    int16_t H2TnkTmp;       //8bit : Byte4
+    uint16_t H2TnkFillCnt;  //16bit : Byte5 ~ Byte6
+    //IFCU5
+        //Not needed
+    //IFCU6
+    float FcMxCurLim;     
+    float FcNetCustCurLim;
+    uint16_t H2MidPrs;
+    uint8_t FcClntFiltChk;
+    uint8_t FcClntSplChk; 
+};
+
 class CoaxData
 {
 public:
@@ -139,6 +237,8 @@ public:
 
     //====IFCU and PMU====
     uint8_t fcrdy = 0;
+    datadef_PMS_data DMI_PMS_data;
+    datadef_IFCU_data IFCU_data;
     //End of IFCU and PMU
     //====Inverter====
     datadef_INV INV_data;

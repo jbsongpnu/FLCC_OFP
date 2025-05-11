@@ -17,18 +17,18 @@ struct PMS1_msg {
 
 struct PMS2_msg {
     //0x6F1 DLC = 8
-    int16_t Batt_Output_Current;    //16bit : Byte0 ~ Byte1
-    uint16_t LDC_Output_Current;     //16bit : Byte2 ~ Byte3
-    int16_t Mv_Output_Current;      //16bit : Byte4 ~ Byte5
-    uint16_t Mv_Battery_Voltage;     //16bit : Byte6 ~ Byte7
+    int16_t Batt_Output_Current_raw;    //16bit : Byte0 ~ Byte1
+    uint16_t LDC_Output_Current_raw;     //16bit : Byte2 ~ Byte3
+    int16_t Mv_Output_Current_raw;      //16bit : Byte4 ~ Byte5
+    uint16_t Mv_Battery_Voltage_raw;     //16bit : Byte6 ~ Byte7
 };
 
 struct PMS3_msg {
     //0x6F2 DLC = 8
-    uint16_t OutputVoltage;     //16bit : Byte0 ~ Byte1
-    int16_t OutputCurrent;     //16bit : Byte2 ~ Byte3
-    uint16_t InputVoltage;      //16bit : Byte4 ~ Byte5
-    int16_t InputCurrent;      //16bit : Byte6 ~ Byte7
+    uint16_t OutputVoltage_raw;     //16bit : Byte0 ~ Byte1
+    int16_t OutputCurrent_raw;     //16bit : Byte2 ~ Byte3
+    uint16_t InputVoltage_raw;      //16bit : Byte4 ~ Byte5
+    int16_t InputCurrent_raw;      //16bit : Byte6 ~ Byte7
 };
 
 typedef union {
@@ -65,7 +65,7 @@ struct FDC1_msg {
     //0x300 DLC = 8
     uint8_t AliveCnt;            //8bit : Byte0
     uint8_t State;              //8bit : Byte1
-    uint8_t Aux_Volt;           //8bit : Byte2
+    uint8_t Aux_Volt_raw;           //8bit : Byte2
     uint8_t Max_Temp;           //8bit : Byte3
     Uni_FDC1_Flag1 Flag1;       //8 Flag bits : Byte4
     Uni_FDC1_Flag2 Flag2;       //8 Flag bits : Byte5
@@ -73,10 +73,10 @@ struct FDC1_msg {
 
 struct FDC2_msg {
     //0x301 DLC = 8
-    uint16_t OutputVoltage;     //16bit : Byte0 ~ Byte1
-    int16_t OutputCurrent;     //16bit : Byte2 ~ Byte3
-    uint16_t InputVoltage;      //16bit : Byte4 ~ Byte5
-    int16_t InputCurrent;      //16bit : Byte6 ~ Byte7
+    uint16_t OutputVoltage_raw;     //16bit : Byte0 ~ Byte1
+    int16_t OutputCurrent_raw;     //16bit : Byte2 ~ Byte3
+    uint16_t InputVoltage_raw;      //16bit : Byte4 ~ Byte5
+    int16_t InputCurrent_raw;      //16bit : Byte6 ~ Byte7
 };
 
 struct VCUFDC1_msg {
@@ -84,17 +84,17 @@ struct VCUFDC1_msg {
     uint8_t AliveCnt;           //8bit : Byte0
     uint8_t SET_CMD;                //4bit : Byte1 - Bit 0~3
     uint8_t Fault_Reset;            //4bit : Byte1 - Bit 4~7
-    uint16_t Target_OutputVoltage;  //16bit : Byte2 ~ Byte3
-    uint16_t Target_InputCurrent;   //16bit : Byte4 ~ Byte5
-    uint16_t Target_InputPower;     //16bit : Byte6 ~ Byte7
+    uint16_t Target_OutputVoltage_raw;  //16bit : Byte2 ~ Byte3
+    uint16_t Target_InputCurrent_raw;   //16bit : Byte4 ~ Byte5
+    uint16_t Target_InputPower_raw;     //16bit : Byte6 ~ Byte7
 };
 
 struct IFCU1_msg {
     //0x1F0 DLC = 8
-    uint16_t PpVlt;         //16bit : Byte0 ~ Byte1
-    uint16_t PpCur;         //16bit : Byte2 ~ Byte3
-    uint16_t PpCurLim;      //16bit : Byte4 ~ Byte5
-    uint8_t  PpH2Sof;       //8bit : Byte6
+    uint16_t PpVlt_raw;         //16bit : Byte0 ~ Byte1
+    uint16_t PpCur_raw;         //16bit : Byte2 ~ Byte3
+    uint16_t PpCurLim_raw;      //16bit : Byte4 ~ Byte5
+    uint8_t  PpH2Sof_raw;       //8bit : Byte6
     uint8_t  reserved;      //8bit : Byte7
 };
 
@@ -111,10 +111,10 @@ struct IFCU2_msg {
 
 struct IFCU3_msg {
     //0x2F1 DLC = 8
-    uint16_t FcNetVlt;      //16bit : Byte0 ~ Byte1
-    uint16_t FcNetCur;      //16bit : Byte2 ~ Byte3
-    uint16_t LdcVlt;        //16bit : Byte4 ~ Byte5
-    uint16_t LdcCur;        //16bit : Byte6 ~ Byte7
+    uint16_t FcNetVlt_raw;      //16bit : Byte0 ~ Byte1
+    uint16_t FcNetCur_raw;      //16bit : Byte2 ~ Byte3
+    uint16_t LdcVlt_raw;        //16bit : Byte4 ~ Byte5
+    uint16_t LdcCur_raw;        //16bit : Byte6 ~ Byte7
 };
 
 struct IFCU4_msg {
@@ -122,7 +122,7 @@ struct IFCU4_msg {
     int8_t FcInClntTmp;     //8bit : Byte0
     int8_t AmbTemp;         //8bit : Byte1
     int8_t RoomTemp;        //8bit : Byte2
-    uint8_t H2TnkPrs;       //8bit : Byte3
+    uint8_t H2TnkPrs_raw;       //8bit : Byte3
     uint8_t H2TnkTmp;       //8bit : Byte4
     uint16_t H2TnkFillCnt;  //16bit : Byte5 ~ Byte6
     // uint8_t  reserved4;     //8bit : Byte7
@@ -130,19 +130,19 @@ struct IFCU4_msg {
 
 struct IFCU5_msg {
     //0x4F0 DLC = 8
-    uint16_t HvBsaVlt;      //16bit : Byte0 ~ Byte1
-    uint16_t HvBsaCur;      //16bit : Byte2 ~ Byte3
-    uint8_t HvBsaSoC;       //8bit : Byte4
-    uint8_t HvBsaSoH;       //8bit : Byte5
+    uint16_t HvBsaVlt_raw;      //16bit : Byte0 ~ Byte1
+    uint16_t HvBsaCur_raw;      //16bit : Byte2 ~ Byte3
+    uint8_t HvBsaSoC_raw;       //8bit : Byte4
+    uint8_t HvBsaSoH_raw;       //8bit : Byte5
     uint8_t ExWtrTrpFill;   //1bit : Byte6 - bit 0
     // uint8_t  reserved5;     //8bit : Byte7
 };
 
 struct IFCU6_msg {
     //0x5F0 DLC = 8
-    uint16_t FcMxCurLim;     //16bit : Byte0 ~ Byte1
-    uint16_t FcNetCustCurLim;//16bit : Byte2 ~ Byte3
-    uint8_t H2MidPrs;        //8bit : Byte4
+    uint16_t FcMxCurLim_raw;     //16bit : Byte0 ~ Byte1
+    uint16_t FcNetCustCurLim_raw;//16bit : Byte2 ~ Byte3
+    uint8_t H2MidPrs_raw;        //8bit : Byte4
     uint8_t FcClntFiltChk;   //1bit : Byte5 - bit 0
     uint8_t FcClntSplChk;    //1bit : Byte5 - bit 1
     //uint8_t reserved6       //8bit : Byte6
