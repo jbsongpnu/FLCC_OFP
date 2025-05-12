@@ -106,6 +106,19 @@ bool check_payload_size(mavlink_channel_t chan, uint16_t max_payload_len);
         return (subclass_name *)_chan[ofs];                        \
     }
 
+//CoaxServo actuator port with Pixhawk6X 
+//----Serial port map------
+// SERIAL0 -> USB
+// SERIAL1 -> UART7 (Telem1) RTS/CTS pins
+// SERIAL2 -> UART5 (Telem2) RTS/CTS pins
+// SERIAL3 -> USART1 (GPS1)
+// SERIAL4 -> UART8 (GPS2)
+// SERIAL5 -> USART2 (Telem3) RTS/CTS pins
+#define Actuator_UART   hal.serial(5)
+// SERIAL6 -> UART4 (User)
+// SERIAL7 -> USART3 (Debug)
+// SERIAL8 -> USB (MAVLink, can be used for SLCAN with protocol change)
+
 
 #define GCS_MAVLINK_NUM_STREAM_RATES 10
 class GCS_MAVLINK_Parameters

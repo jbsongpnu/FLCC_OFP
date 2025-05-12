@@ -10,7 +10,7 @@
 extern const AP_HAL::HAL& hal;
 
 #define TEMP_EXP 0		//Initial value
-#define DEBUG_INVERTER 0
+#define DEBUG_INVERTER 1
 #define DEBUG_CCB 1
 
 // Table of user settable CAN bus parameters
@@ -533,7 +533,7 @@ void AP_COAXCAN1::Check_INV_data(void)
         cxdata().INV_data.Reference2 = INV_GET_CMD.Reference2;
         if(INV_GET_CMD.BYTE0.bits.Ctrl_Mode==4){
             cxdata().INV_data.Motor_RPM_CMD = INV_GET_CMD.Ref1_RAW / 10;
-            cxdata().INV_data.Motor_RPM_CMD = INV_GET_CMD.Ref1_RAW / 10;
+            cxdata().INV_data.Motor_ACC_CMD = INV_GET_CMD.Ref2_RAW / 10;
         }
         cxdata().INV_data.isNew = cxdata().INV_data.isNew | 0x01;
         _INV_has_Initialized |= 0x01;

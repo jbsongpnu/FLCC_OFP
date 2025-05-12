@@ -33,6 +33,7 @@ def build(bld):
             'AP_KDECAN',
             'AP_CoaxCAN1',
             'AP_CoaxCAN2',
+            'AP_CoaxServo',
         ],
     )
 

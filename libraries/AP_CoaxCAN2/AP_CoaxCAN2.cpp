@@ -782,12 +782,10 @@ void AP_COAXCAN2::TX_FCC1_MSG(void)
     uint8_t tempjoin = 0;
 
     //_FCC_AlivCnt : looping 0~15
-    _FCC_CmdFcRunStop = 1;
+    _FCC_CmdFcRunStop = 0;
     _FCC_CmdPmsBatCut = 0;
     _FCC_Ready = cxdata().fcrdy;
     _FCC_Reserved1 = 0;
-
-    _FCC_Ready = 1;//Temp debugging
 
     tempjoin = _FCC_AlivCnt + ((_FCC_CmdFcRunStop & 0x01) << 4) 
             + ((_FCC_CmdPmsBatCut & 0x01) << 5) + ((_FCC_Ready & 0x01) << 6)
@@ -795,8 +793,7 @@ void AP_COAXCAN2::TX_FCC1_MSG(void)
 
     temp_data[0] = tempjoin;
 
-    CAN_TX_std(TX_ID::TX_ID_FCC1, temp_data, 1);
-
+    CAN_TX_std(_cmd_id[TX_ID::TX_ID_FCC1], temp_data, 1);
     _FCC_AlivCnt++;
     _FCC_AlivCnt = _FCC_AlivCnt%16;
 }
@@ -809,8 +806,8 @@ void AP_COAXCAN2::TX_FCC2_MSG(void)
     uint8_t temp_data[8] = {0,0,0,0,0,0,0,0} ;
 
     _FCC_FcPwrReq = 35000;
-    _FCC_FcThrottle = 100;
-    _FCC_FcThrottlePrdct = 100;
+    _FCC_FcThrottle = 10;
+    _FCC_FcThrottlePrdct = 20;
 
     temp_data[0] = _FCC_FcPwrReq & 0x00FF;
     temp_data[1] = (_FCC_FcPwrReq >> 8) & 0x00FF;
@@ -819,6 +816,6 @@ void AP_COAXCAN2::TX_FCC2_MSG(void)
     temp_data[4] = _FCC_FcThrottlePrdct & 0x00FF;
     temp_data[5] = (_FCC_FcThrottlePrdct >> 8) & 0x00FF;
 
-    CAN_TX_std(TX_ID::TX_ID_FCC2, temp_data, 6);
+    CAN_TX_std(_cmd_id[TX_ID::TX_ID_FCC2], temp_data, 6);
 
 }

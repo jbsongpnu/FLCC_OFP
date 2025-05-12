@@ -115,6 +115,11 @@
 #define AP_SERIALMANAGER_MSP_BUFSIZE_TX     256
 #define AP_SERIALMANAGER_MSP_BAUD           115200
 
+//Pegasus Actuator
+#define AP_SERIALMANAGER_PEGASUS_BAUD       115200
+#define AP_SERIALMANAGER_PEGASUS_BUFSIZE_RX 256
+#define AP_SERIALMANAGER_PEGASUS_BUFSIZE_TX 256
+
 class AP_SerialManager {
 public:
     AP_SerialManager();
@@ -169,6 +174,7 @@ public:
         SerialProtocol_MSP_DisplayPort = 42,
         SerialProtocol_MAVLinkHL = 43,
         SerialProtocol_Tramp = 44,
+        SerialProtocol_CoaxPegasus = 45,
         SerialProtocol_NumProtocols                    // must be the last value
     };
 
