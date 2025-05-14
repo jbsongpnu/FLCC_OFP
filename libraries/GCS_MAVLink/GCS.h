@@ -23,6 +23,7 @@
 #include <AP_GPS/AP_GPS.h>
 #include <AP_Mount/AP_Mount.h>
 #include <AP_SerialManager/AP_SerialManager.h>
+#include <AP_CoaxServo/AP_CoaxServo.h>
 
 #include "ap_message.h"
 

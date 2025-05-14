@@ -3,6 +3,7 @@
 ***
 
 ## Version History
+- V0.01.27 Added functions to transmit commands to Pegasus servo motors. Added basic UART receive testing functions. Modefied common.xml.
 - V0.01.26 Adding basic structure of library for a new CoaxServo with Pegasus Actuators' servo motor. Also modifying CoaxialCAN1 and CoaxialCAN2
 - V0.01.25 Updating IFCU and PMS data processing functions. Added SYS_ICD_FLCC_GCS_HBSYS and logging. Also fixed bug for sending MSG_CCB_STATE.
 - V0.01.24 Added CCB ICD with AP_CoaxialCAN1. Added Mavlink processing MAV_CMD_CCB_CONTROL, SYS_ICD_FLCC_GCS_CCB_STATE. Added logging too.

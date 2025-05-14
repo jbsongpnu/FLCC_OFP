@@ -9,12 +9,12 @@ extern mavlink_sys_icd_flcc_gcs_hbsys_t MAV_GCSTX_HBSYS;
 void Copter::userhook_init()
 {
     //Initialize UART port for Pegasus Actuators
-    if (1 == Actuator_UART->is_initialized())
-    {
-        Actuator_UART->end();
-    }
-    Actuator_UART->begin(115200);
-    gcs().send_text(MAV_SEVERITY_INFO, "Coaxial Actuator UART port initialized");
+    // if (1 == Actuator_UART->is_initialized())
+    // {
+    //     Actuator_UART->end();
+    // }
+    // Actuator_UART->begin(115200);
+    // gcs().send_text(MAV_SEVERITY_INFO, "Coaxial Actuator UART port initialized");
 
     MAV_GCSTX_INV_State.Inverter_OnOff = 2;
     MAV_GCSTX_INV_State.Control_Mode = 4;
@@ -78,6 +78,10 @@ void Copter::userhook_MediumLoop()
     //static variables
     static uint16_t Count1Hz = 0;
     static uint8_t Count5Hz = 0;
+    static uint16_t temp_Pegasus_setting = 0;
+    uint8_t  CSBuf[128] = {0};
+    //Pegasus Servo 
+    AP_CoaxServo *Pegasus = AP::PegasusSV();
 
     //Send to GCS at 5Hz
     if(Count5Hz>1) {
@@ -129,6 +133,25 @@ void Copter::userhook_MediumLoop()
         Count1Hz = 0;
     }
     Count1Hz++;
+
+    //Pegasus Servo Testing
+    temp_Pegasus_setting++;
+    if(temp_Pegasus_setting >= 20) {
+        Pegasus->CMD_PADATA_PING(31);
+        gcs().send_text(MAV_SEVERITY_INFO, "Pegasus Ping test");
+        temp_Pegasus_setting = 0;
+    }
+
+    {
+        int32_t rcv = 0;
+        rcv = Pegasus->receive_CoaxServo_uart_data(CSBuf);
+        if(rcv) {
+            gcs().send_text(MAV_SEVERITY_INFO, "UART5 rcv=%ld, data = %X %X %X %X %X %X %X %X %X %X %X %X %X %X %X", 
+                        rcv, CSBuf[0], CSBuf[1], CSBuf[2], CSBuf[3], CSBuf[4],
+                            CSBuf[5], CSBuf[6], CSBuf[7], CSBuf[8], CSBuf[9],
+                            CSBuf[10], CSBuf[11], CSBuf[12], CSBuf[13], CSBuf[14]);
+        }
+    }
 
     AP::logger().Write("INV1", "TimeUS,ONOFF,RPM,RPMCMD,IA,IB,IC", "QBfffff",
         AP_HAL::micros64(),                             //Q     TimeUS

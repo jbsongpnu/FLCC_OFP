@@ -6276,13 +6276,13 @@
       <field type="uint16_t" name="Motor_Speed_Limit" units="rpm">Speed_Limit</field>
       <field type="uint16_t" name="Target_Motor_Acceleration" units="rpm/s">Motor_ACC_CMD</field>
       <field type="uint16_t" name="Theta_Offset" units="deg">Theta_Offset</field>
-      <field type="uint16_t" name="i_a" units="A">phase A current x0.01</field>
-      <field type="uint16_t" name="i_b" units="A">phase B current x0.01</field>
-      <field type="uint16_t" name="i_c" units="A">phase C current x0.01</field>
-      <field type="uint16_t" name="t_a" units="degC">phase A temperature x0.01</field>
-      <field type="uint16_t" name="t_b" units="degC">phase B temperature x0.01</field>
-      <field type="uint16_t" name="t_c" units="degC">phase C temperature x0.01</field>
-      <field type="uint16_t" name="V_dc" units="V">Voltage input x0.1</field>
+      <field type="uint16_t" name="i_a" units="A">phase A current x 100</field>
+      <field type="uint16_t" name="i_b" units="A">phase B current x 100</field>
+      <field type="uint16_t" name="i_c" units="A">phase C current x 100</field>
+      <field type="uint16_t" name="t_a" units="degC">phase A temperature x 100</field>
+      <field type="uint16_t" name="t_b" units="degC">phase B temperature x 100</field>
+      <field type="uint16_t" name="t_c" units="degC">phase C temperature x 100</field>
+      <field type="uint16_t" name="V_dc" units="V">Voltage input x 10</field>
       <field type="uint16_t" name="Fault_Flags" units="N/A">Fault flag set</field>
     </message>
     <message id="62001" name="SYS_ICD_FLCC_GCS_HBSYS">

@@ -61,8 +61,6 @@
 #include "MissionItemProtocol_Rally.h"
 #include "MissionItemProtocol_Fence.h"
 
-#include <AP_CoaxServo/AP_CoaxServo.h>
-
 #include <stdio.h>
 
 #if HAL_RCINPUT_WITH_AP_RADIO

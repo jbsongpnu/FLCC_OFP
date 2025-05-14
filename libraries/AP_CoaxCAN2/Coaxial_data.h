@@ -229,6 +229,19 @@ struct datadef_IFCU_data {
     uint8_t FcClntSplChk; 
 };
 
+struct TX_CoaxServo_data {
+    uint16_t SV_pos[6];
+};
+
+struct RX_CoaxServo_pos {
+    uint16_t SV[6];
+};
+
+struct Data_CoaxSerovs {
+    uint8_t ErrorCode[6];
+    uint8_t temperature[6];
+};
+
 class CoaxData
 {
 public:
@@ -247,6 +260,12 @@ public:
     datadef_CCB_data CCB_data;
     //End of CCB
     datadef_Control_CMD Command_Received;
+
+    TX_CoaxServo_data SV_TX;        //TX coaxial servo data @current session
+    TX_CoaxServo_data SV_TX_prev;   //TX coaxial servo data @previous session
+    RX_CoaxServo_pos SV_Pos;        //Current servo position
+    RX_CoaxServo_pos SV_Pos_prv;    //Previous servo position
+    Data_CoaxSerovs SV_state;       //Current servo states
 
 private:
     CoaxData();
