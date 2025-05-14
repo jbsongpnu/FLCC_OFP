@@ -26,7 +26,7 @@
 //2) Command Frame structure
 //      Byte1   START       0xFF
 //      Byte2   ID          0~30 (0x00~0x1E) assigned to each motor
-//                          Broadcasting ID is 31 (0x1F)
+//                          Broadcasting ID is 31 (0x1F), Initial ID 1
 //      Byte3   LENGTH      Command + num of params + checksum (=param+2)
 //      Byte4   COMMAND     Command ID
 //      Byte5~N Parameters  Additional parameters
@@ -48,12 +48,31 @@
 //      Bit5~7  Reserved
 //================================================
 
-struct TX_Command_Frame {
+struct CMD_Frame {
     uint8_t ID = 0;
     uint8_t LENGTH = 2;
     uint8_t COMMAND = 0;
     uint8_t Parameters[20] = {0};
     uint8_t Checksum = 0;
+};
+
+union Err_msg{
+    uint8_t ALL;
+    struct {
+        uint8_t Angle_limit_err : 1;
+        uint8_t Param_range_err : 1;
+        uint8_t Over_temperature : 1;
+        uint8_t Overloaded : 1;
+        uint8_t Power_stage_err : 1;
+        uint8_t rsvd : 3;
+    }bits;
+};
+
+struct RX_Frame {
+    uint8_t ID = 0;
+    uint8_t LENGTH = 2;
+    union Err_msg  ERROR;
+    uint8_t Parameters[20];
 };
 class AP_CoaxServo {
 public:
@@ -74,11 +93,17 @@ public:
     void Request_Servo_Pos(uint8_t id);
     void Request_Servo_Temp(uint8_t id);
     void Request_Servo_Current(uint8_t id);
+    void Reset_Servo(uint8_t id);
 
     int32_t receive_CoaxServo_uart_data(uint8_t* buffer);
+    uint8_t Parse_Buffer(uint8_t* buffer, uint16_t size);
+    void interprete_msg(uint16_t msg_box_id, uint8_t cmd);
 private:
 
-    TX_Command_Frame _TX_data;
+    CMD_Frame _TX_data;
+    RX_Frame _RX_data[6];
+
+    void reset_RX_data(void);
 
 };
 

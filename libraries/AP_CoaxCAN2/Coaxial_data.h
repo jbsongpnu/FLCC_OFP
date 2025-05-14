@@ -2,6 +2,21 @@
 
 #include <AP_Common/AP_Common.h>
 
+#define ID_CMD_PADATA_PING                      0x01
+#define ID_CMD_PADATA_SET_POSITION              0x02
+#define ID_CMD_PADATA_SET_PARAMETER             0x03
+#define ID_CMD_PADATA_GET_PARAMETER             0x04
+#define ID_CMD_PADATA_SET_MULTI_POSITIONS       0x07
+#define ID_CMD_PADATA_GET_POSITION              0x10
+#define ID_CMD_PADATA_GET_MOT_TEMP_C            0x11
+#define ID_CMD_PADATA_GET_MOT_TEMP_F            0x12
+#define ID_CMD_PADATA_GET_SW_REV                0x13
+#define ID_CMD_PADATA_GET_CURRENT               0x14
+#define ID_CMD_PADATA_GET_SIGNED_CURRENT        0x15
+#define ID_CMD_PADATA_POWERSTAGE_DISABLE        0x20
+#define ID_CMD_PADATA_RECALL_FACTORY_SETTING    0x21
+#define ID_CMD_PADATA_RESET                     0x22
+
 typedef union {
     uint8_t ALL;
     struct {
@@ -230,16 +245,37 @@ struct datadef_IFCU_data {
 };
 
 struct TX_CoaxServo_data {
-    uint16_t SV_pos[6];
+    uint16_t SV_pos;
 };
 
 struct RX_CoaxServo_pos {
-    uint16_t SV[6];
+    uint16_t raw;
+};
+
+union Err_msg_g{
+    uint8_t ALL;
+    struct {
+        uint8_t Angle_limit_err : 1;
+        uint8_t Param_range_err : 1;
+        uint8_t Over_temperature : 1;
+        uint8_t Overloaded : 1;
+        uint8_t Power_stage_err : 1;
+        uint8_t rsvd : 3;
+    }bits;
 };
 
 struct Data_CoaxSerovs {
-    uint8_t ErrorCode[6];
-    uint8_t temperature[6];
+    union Err_msg_g ErrorCode;
+    uint8_t temperature;
+    uint8_t connected;
+    uint16_t angle_limit_min;
+    uint16_t angle_limit_max;
+    uint8_t expansion;
+    uint8_t reverse;
+    int16_t offset;
+    uint16_t failsafe_pos;
+    uint8_t timeout;
+    float current;
 };
 
 class CoaxData
@@ -261,11 +297,12 @@ public:
     //End of CCB
     datadef_Control_CMD Command_Received;
 
-    TX_CoaxServo_data SV_TX;        //TX coaxial servo data @current session
-    TX_CoaxServo_data SV_TX_prev;   //TX coaxial servo data @previous session
-    RX_CoaxServo_pos SV_Pos;        //Current servo position
-    RX_CoaxServo_pos SV_Pos_prv;    //Previous servo position
-    Data_CoaxSerovs SV_state;       //Current servo states
+    //CoaxServo
+    TX_CoaxServo_data SV_TX[6];        //TX coaxial servo data @current session
+    TX_CoaxServo_data SV_TX_prev[6];   //TX coaxial servo data @previous session
+    RX_CoaxServo_pos SV_Pos[6];        //Current servo position
+    RX_CoaxServo_pos SV_Pos_prv[6];    //Previous servo position
+    Data_CoaxSerovs SV_state[6];       //Current servo states
 
 private:
     CoaxData();

@@ -138,19 +138,19 @@ void Copter::userhook_MediumLoop()
     temp_Pegasus_setting++;
     if(temp_Pegasus_setting >= 20) {
         Pegasus->CMD_PADATA_PING(31);
-        gcs().send_text(MAV_SEVERITY_INFO, "Pegasus Ping test");
+        //gcs().send_text(MAV_SEVERITY_INFO, "Pegasus Ping test");
         temp_Pegasus_setting = 0;
     }
 
     {
-        int32_t rcv = 0;
-        rcv = Pegasus->receive_CoaxServo_uart_data(CSBuf);
-        if(rcv) {
-            gcs().send_text(MAV_SEVERITY_INFO, "UART5 rcv=%ld, data = %X %X %X %X %X %X %X %X %X %X %X %X %X %X %X", 
-                        rcv, CSBuf[0], CSBuf[1], CSBuf[2], CSBuf[3], CSBuf[4],
-                            CSBuf[5], CSBuf[6], CSBuf[7], CSBuf[8], CSBuf[9],
-                            CSBuf[10], CSBuf[11], CSBuf[12], CSBuf[13], CSBuf[14]);
+        uint16_t rcv;
+        uint16_t messages;
+        rcv = (uint16_t)Pegasus->receive_CoaxServo_uart_data(CSBuf);
+        messages = Pegasus->Parse_Buffer(CSBuf, rcv);
+        for(int i=0; i<messages; i++){
+            Pegasus->interprete_msg(i, 1);
         }
+        
     }
 
     AP::logger().Write("INV1", "TimeUS,ONOFF,RPM,RPMCMD,IA,IB,IC", "QBfffff",
