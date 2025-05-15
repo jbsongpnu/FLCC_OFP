@@ -3,6 +3,7 @@
 ***
 
 ## Version History
+- V0.01.29 Added CoaxServo initialization, checking parameters, scheduled broadcasting and reading data
 - V0.01.28 Added function to receive response from Pegasus servo motors.
 - V0.01.27 Added functions to transmit commands to Pegasus servo motors. Added basic UART receive testing functions. Modefied common.xml.
 - V0.01.26 Adding basic structure of library for a new CoaxServo with Pegasus Actuators' servo motor. Also modifying CoaxialCAN1 and CoaxialCAN2

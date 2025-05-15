@@ -19,7 +19,7 @@
 // SERIAL8 -> USB (MAVLink, can be used for SLCAN with protocol change)
 
 #define START_BYTE  255U
-#define COAXSV_UART_BUFFER_SIZE 128
+#define COAXSV_UART_BUFFER_SIZE 64
 
 //====Description of Pegasus Actuators Protocol===
 //1) 2 types of frames : Command and Response
@@ -95,9 +95,10 @@ public:
     void Request_Servo_Current(uint8_t id);
     void Reset_Servo(uint8_t id);
 
-    int32_t receive_CoaxServo_uart_data(uint8_t* buffer);
+    uint16_t receive_CoaxServo_uart_data(uint8_t* buffer);
     uint8_t Parse_Buffer(uint8_t* buffer, uint16_t size);
     void interprete_msg(uint16_t msg_box_id, uint8_t cmd);
+    uint8_t GET_RX_data_Length(uint8_t msgbox);
 private:
 
     CMD_Frame _TX_data;

@@ -266,8 +266,9 @@ union Err_msg_g{
 
 struct Data_CoaxSerovs {
     union Err_msg_g ErrorCode;
-    uint8_t temperature;
     uint8_t connected;
+    uint8_t got_param;
+    uint8_t temperature;
     uint16_t angle_limit_min;
     uint16_t angle_limit_max;
     uint8_t expansion;
@@ -276,6 +277,19 @@ struct Data_CoaxSerovs {
     uint16_t failsafe_pos;
     uint8_t timeout;
     float current;
+};
+
+//Coaxial State-machine state
+enum class CoaxState {
+    CXSTATE_0_INIT,
+    CXSTATE_1_CHECK,
+    CXSTATE_2_WAIT,
+    CXSTATE_3_READY,
+    CXSTATE_4_GNDTEST,
+    CXSTATE_5_MOTSPOOL,
+    CXSTATE_6_IDLERPM,
+    CXSTATE_7_ONFLIGHT,
+    CXSTATE_8_LANDED
 };
 
 class CoaxData
@@ -292,18 +306,21 @@ public:
     //====Inverter====
     datadef_INV INV_data;
     //End of Inverter
-    //====CCB : Cooling Control Board===
+    //====CCB : Cooling Control Board====
     datadef_CCB_data CCB_data;
     //End of CCB
     datadef_Control_CMD Command_Received;
 
-    //CoaxServo
+    //====CoaxServo====
     TX_CoaxServo_data SV_TX[6];        //TX coaxial servo data @current session
     TX_CoaxServo_data SV_TX_prev[6];   //TX coaxial servo data @previous session
     RX_CoaxServo_pos SV_Pos[6];        //Current servo position
     RX_CoaxServo_pos SV_Pos_prv[6];    //Previous servo position
     Data_CoaxSerovs SV_state[6];       //Current servo states
-
+    uint8_t SVinitialized;              //All-motors responded to Ping, comm link initialized
+    
+    //====State Machine
+    CoaxState CX_State; //Coaxial State-machine state
 private:
     CoaxData();
     
@@ -312,9 +329,8 @@ private:
 
     static CoaxData* _instance;
     // static CoaxData *_singleton;
+    
 };
 
 CoaxData &cxdata();
-
-//CoaxData &coaxdata();
 

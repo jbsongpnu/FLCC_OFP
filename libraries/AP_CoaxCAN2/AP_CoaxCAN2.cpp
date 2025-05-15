@@ -8,9 +8,8 @@
 #include "Coaxial_data.h"
 
 //Debug Control
-#define DEBUG_IFCU  1   //IFCU Test
-#define DEBUG_PMS   1   //PMS Test
-#define DEBUG_FC_TX 1   //FC TX Test
+#define DEBUG_IFCU  0   //IFCU Test
+#define DEBUG_PMS   0   //PMS Test
 
 extern const AP_HAL::HAL& hal;
 

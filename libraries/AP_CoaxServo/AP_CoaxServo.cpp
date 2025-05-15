@@ -1,6 +1,10 @@
 #include "AP_CoaxServo.h"
 #include <AP_CoaxCAN2/Coaxial_data.h>
 
+//Will use Copter's motors_output(400Hz FAST_TASK) to send out CMD_PADATA_SET_MULTI_POSITIONS
+//motors_output() @/ArduCopter/motors.cpp
+//Due to nature of RS-485 communication, all communitions should be scheduled in a single thread
+
 extern const AP_HAL::HAL& hal;
 
 AP_CoaxServo::AP_CoaxServo()
@@ -311,9 +315,9 @@ void AP_CoaxServo::Reset_Servo(uint8_t id) {
 // -------------------------------------------------------------------------
 // Receive Data from CoaxServo UART
 // -------------------------------------------------------------------------
-int32_t AP_CoaxServo::receive_CoaxServo_uart_data(uint8_t* buffer)
+uint16_t AP_CoaxServo::receive_CoaxServo_uart_data(uint8_t* buffer)
 {
-    int32_t recv_size = 0;
+    int16_t recv_size = 0;
 
     while ((Actuator_UART->available() > 0) && (COAXSV_UART_BUFFER_SIZE > recv_size))
     {
@@ -435,6 +439,11 @@ void AP_CoaxServo::reset_RX_data(void) {
     
 }
 
+// ===== Get length of _RX_data
+uint8_t AP_CoaxServo::GET_RX_data_Length(uint8_t msgbox) {
+    return _RX_data[msgbox].LENGTH;
+}
+
 // ===== interprete_msg
 // Inerprete parsed message box
 // Response frame has no reference message ID, but responds to each command differently
@@ -495,8 +504,9 @@ void AP_CoaxServo::interprete_msg(uint16_t msg_box_id, uint8_t cmd) {
             uint16_temp2 = _RX_data[msg_box_id].Parameters[10];
             cxdata().SV_state[id].failsafe_pos = (int16_t)(uint16_temp1 + (uint16_temp2 << 8));
             cxdata().SV_state[id].timeout = _RX_data[msg_box_id].Parameters[11];
+            cxdata().SV_state[id].got_param = 1;
             break;
-            case ID_CMD_PADATA_GET_POSITION:
+        case ID_CMD_PADATA_GET_POSITION:
             uint16_temp1 = _RX_data[msg_box_id].Parameters[0];
             uint16_temp2 = _RX_data[msg_box_id].Parameters[1];
             cxdata().SV_Pos[id].raw = uint16_temp1 + (uint16_temp2 << 8);

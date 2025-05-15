@@ -52,13 +52,83 @@ void Copter::userhook_init()
     MAV_GCSTX_HBSYS.HDC_Cout = 0.2;
     MAV_GCSTX_HBSYS.HDC_Vin = 0.3;
     MAV_GCSTX_HBSYS.HDC_Cin = 0.4;
+
+    cxdata().SVinitialized = 0;
+    cxdata().CX_State = CoaxState::CXSTATE_0_INIT;
 }
 #endif
 
 #ifdef USERHOOK_FASTLOOP
+//100Hz
 void Copter::userhook_FastLoop()
 {
-    // put your 100Hz code here
+    static uint8_t SV_num = 0;
+    uint8_t  CSBuf[64] = {0};
+
+    AP_CoaxServo *ServoUART = AP::PegasusSV();
+
+    switch (cxdata().CX_State) {
+        case CoaxState::CXSTATE_0_INIT: {
+            //1)Check for buffered data first
+            uint16_t rcv = (uint16_t)ServoUART->receive_CoaxServo_uart_data(CSBuf);
+            if(ServoUART->Parse_Buffer(CSBuf, rcv)) {
+                uint8_t length = ServoUART->GET_RX_data_Length(0);
+                if (length <=5) {
+                    ServoUART->interprete_msg(0, ID_CMD_PADATA_PING);//Only expecting one message of ping-response
+                }
+            }
+            //Expecting cxdata().SV_state[id].connected sets to 1 for all motors
+            if ((cxdata().SV_state[0].connected) &&
+                (cxdata().SV_state[1].connected) &&
+                (cxdata().SV_state[2].connected) &&
+                (cxdata().SV_state[3].connected) &&
+                (cxdata().SV_state[4].connected) &&
+                (cxdata().SV_state[5].connected) ) {
+                cxdata().SVinitialized = 1;
+            }
+            
+            //2) Send Ping to a Servo motor 1~6
+            SV_num++; //looping 1~6 instead of 0~5
+            ServoUART->CMD_PADATA_PING(SV_num);
+            
+            SV_num = (SV_num + 1) % 6;
+
+            //3) Condition for next phase
+            if(cxdata().SVinitialized) {
+                cxdata().CX_State = CoaxState::CXSTATE_1_CHECK;
+            }
+        }break;
+        case CoaxState::CXSTATE_1_CHECK: {
+            //1)Check for buffered data first
+            uint16_t rcv = ServoUART->receive_CoaxServo_uart_data(CSBuf);
+            uint16_t messages = ServoUART->Parse_Buffer(CSBuf, rcv);
+            for (int i=0; i<messages; i++) {
+                uint8_t length = ServoUART->GET_RX_data_Length(i);
+                if (length <= 5) {
+                    ServoUART->interprete_msg(i, ID_CMD_PADATA_PING);
+                } else {
+                    ServoUART->interprete_msg(i, ID_CMD_PADATA_GET_PARAMETER);
+                }
+            }
+            //3) Condition for next phase
+            if ((cxdata().SV_state[0].got_param) &&
+                (cxdata().SV_state[1].got_param) &&
+                (cxdata().SV_state[2].got_param) &&
+                (cxdata().SV_state[3].got_param) &&
+                (cxdata().SV_state[4].got_param) &&
+                (cxdata().SV_state[5].got_param)) {
+                cxdata().CX_State = CoaxState::CXSTATE_2_WAIT;
+            }
+        }break;
+        //Frome CXSTATE_2, servos will be controlled from 400Hz loop
+        default:
+            
+        break;
+    }
+    
+        
+
+    
 }
 #endif
 
@@ -78,10 +148,11 @@ void Copter::userhook_MediumLoop()
     //static variables
     static uint16_t Count1Hz = 0;
     static uint8_t Count5Hz = 0;
-    static uint16_t temp_Pegasus_setting = 0;
-    uint8_t  CSBuf[128] = {0};
-    //Pegasus Servo 
-    AP_CoaxServo *Pegasus = AP::PegasusSV();
+    
+    //Pegasus Servo testing
+    // static uint16_t temp_Pegasus_setting = 0;
+    // uint8_t  CSBuf[128] = {0};
+    // AP_CoaxServo *Pegasus = AP::PegasusSV();
 
     //Send to GCS at 5Hz
     if(Count5Hz>1) {
@@ -134,24 +205,24 @@ void Copter::userhook_MediumLoop()
     }
     Count1Hz++;
 
-    //Pegasus Servo Testing
-    temp_Pegasus_setting++;
-    if(temp_Pegasus_setting >= 20) {
-        Pegasus->CMD_PADATA_PING(31);
-        //gcs().send_text(MAV_SEVERITY_INFO, "Pegasus Ping test");
-        temp_Pegasus_setting = 0;
-    }
+    // //Pegasus Servo Testing
+    // temp_Pegasus_setting++;
+    // if(temp_Pegasus_setting >= 20) {
+    //     Pegasus->CMD_PADATA_PING(31);
+    //     //gcs().send_text(MAV_SEVERITY_INFO, "Pegasus Ping test");
+    //     temp_Pegasus_setting = 0;
+    // }
 
-    {
-        uint16_t rcv;
-        uint16_t messages;
-        rcv = (uint16_t)Pegasus->receive_CoaxServo_uart_data(CSBuf);
-        messages = Pegasus->Parse_Buffer(CSBuf, rcv);
-        for(int i=0; i<messages; i++){
-            Pegasus->interprete_msg(i, 1);
-        }
+    // {
+    //     uint16_t rcv;
+    //     uint16_t messages;
+    //     rcv = (uint16_t)Pegasus->receive_CoaxServo_uart_data(CSBuf);
+    //     messages = Pegasus->Parse_Buffer(CSBuf, rcv);
+    //     for(int i=0; i<messages; i++){
+    //         Pegasus->interprete_msg(i, 1);
+    //     }
         
-    }
+    // }
 
     AP::logger().Write("INV1", "TimeUS,ONOFF,RPM,RPMCMD,IA,IB,IC", "QBfffff",
         AP_HAL::micros64(),                             //Q     TimeUS

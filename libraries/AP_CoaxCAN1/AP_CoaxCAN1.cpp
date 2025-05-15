@@ -10,8 +10,8 @@
 extern const AP_HAL::HAL& hal;
 
 #define TEMP_EXP 0		//Initial value
-#define DEBUG_INVERTER 1
-#define DEBUG_CCB 1
+#define DEBUG_INVERTER 0
+#define DEBUG_CCB 0
 
 // Table of user settable CAN bus parameters
 const AP_Param::GroupInfo AP_COAXCAN1::var_info[] = {

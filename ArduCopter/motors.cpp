@@ -134,6 +134,12 @@ void Copter::auto_disarm_check()
 // motors_output - send output to motors library which will adjust and send to ESCs and servos
 void Copter::motors_output()
 {
+    static uint8_t CX_Scheduler = 0;    //Will send and receive CoaxServo data in 50Hz
+    static uint8_t SRQ_sv = 1;  //State-requesting servo 1~6
+
+    AP_CoaxServo *ServoUART = AP::PegasusSV();
+    static uint8_t  CSBuf[64] = {0};
+
 #if ADVANCED_FAILSAFE == ENABLED
     // this is to allow the failsafe module to deliberately crash
     // the vehicle. Only used in extreme circumstances to meet the
@@ -181,6 +187,100 @@ void Copter::motors_output()
 
     // push all channels
     SRV_Channels::push();
+
+    //return from this function and wait until servos are initialized
+    if(cxdata().CX_State < CoaxState::CXSTATE_2_WAIT)
+    return;
+    //CoaxServo scheduling
+    CX_Scheduler++;
+    //CX_Scheduler is looping 1~8 => 400/8 = 50Hz
+    switch(CX_Scheduler) {
+    case 1: { //Broadcast to 6 servos
+        //Check RX data first
+        uint16_t rcv = (uint16_t)ServoUART->receive_CoaxServo_uart_data(CSBuf);
+        if(ServoUART->Parse_Buffer(CSBuf, rcv)) {
+            if ( 4 == ServoUART->GET_RX_data_Length(0)) {
+                ServoUART->interprete_msg(0, ID_CMD_PADATA_GET_POSITION);//Expecting response from step 8 
+            }
+        }
+        //TX
+        ServoUART->Set_Coax_ServoPosition();
+        //No response from broadcasting
+        }break;
+    case 2: { //Check current 
+        SRQ_sv++;
+        ServoUART->Request_Servo_Current(SRQ_sv);
+        }break;
+    case 3: {//Check servo 1 position
+        int16_t rcv = (uint16_t)ServoUART->receive_CoaxServo_uart_data(CSBuf);
+        if(ServoUART->Parse_Buffer(CSBuf, rcv)) {
+            if ( 4 == ServoUART->GET_RX_data_Length(0)) {
+                ServoUART->interprete_msg(0, ID_CMD_PADATA_GET_CURRENT);//Expecting response from step 2 
+            }
+        }
+        SRQ_sv = (SRQ_sv + 1) % 6;
+        //TX
+        ServoUART->Request_Servo_Pos(1);
+        }break;
+    case 4: {//Check servo 2 position
+        //Check RX data first
+        uint16_t rcv = (uint16_t)ServoUART->receive_CoaxServo_uart_data(CSBuf);
+        if(ServoUART->Parse_Buffer(CSBuf, rcv)) {
+            if ( 4 == ServoUART->GET_RX_data_Length(0)) {
+                ServoUART->interprete_msg(0, ID_CMD_PADATA_GET_POSITION);//Expecting response from step 3 
+            }
+        }
+        //TX
+        ServoUART->Request_Servo_Pos(2);
+        }break;
+    case 5: {//Check servo 3 position
+        //Check RX data first
+        uint16_t rcv = (uint16_t)ServoUART->receive_CoaxServo_uart_data(CSBuf);
+        if(ServoUART->Parse_Buffer(CSBuf, rcv)) {
+            if ( 4 == ServoUART->GET_RX_data_Length(0)) {
+                ServoUART->interprete_msg(0, ID_CMD_PADATA_GET_POSITION);//Expecting response from step 4 
+            }
+        }
+        //TX
+        ServoUART->Request_Servo_Pos(3);
+        }break;
+    case 6: {//Check servo 4 position
+        //Check RX data first
+        uint16_t rcv = (uint16_t)ServoUART->receive_CoaxServo_uart_data(CSBuf);
+        if(ServoUART->Parse_Buffer(CSBuf, rcv)) {
+            if ( 4 == ServoUART->GET_RX_data_Length(0)) {
+                ServoUART->interprete_msg(0, ID_CMD_PADATA_GET_POSITION);//Expecting response from step 5 
+            }
+        }
+        //TX
+        ServoUART->Request_Servo_Pos(4);
+        }break;
+    case 7: {//Check servo 5 position
+        //Check RX data first
+        uint16_t rcv = (uint16_t)ServoUART->receive_CoaxServo_uart_data(CSBuf);
+        if(ServoUART->Parse_Buffer(CSBuf, rcv)) {
+            if ( 4 == ServoUART->GET_RX_data_Length(0)) {
+                ServoUART->interprete_msg(0, ID_CMD_PADATA_GET_POSITION);//Expecting response from step 6 
+            }
+        }
+        //TX
+        ServoUART->Request_Servo_Pos(5);
+        }break;
+    case 8: {//Check servo 6 position
+        //Check RX data first
+        uint16_t rcv = (uint16_t)ServoUART->receive_CoaxServo_uart_data(CSBuf);
+        if(ServoUART->Parse_Buffer(CSBuf, rcv)) {
+            if ( 4 == ServoUART->GET_RX_data_Length(0)) {
+                ServoUART->interprete_msg(0, ID_CMD_PADATA_GET_POSITION);//Expecting response from step 7 
+            }
+        }
+        //TX
+        ServoUART->Request_Servo_Pos(6);
+        }break;
+    default: {
+        }break;
+    }
+    CX_Scheduler = CX_Scheduler % 8;
 }
 
 // check for pilot stick input to trigger lost vehicle alarm
