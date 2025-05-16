@@ -30,7 +30,9 @@ const AP_Param::GroupInfo AP_COAXCAN2::var_info[] = {
     AP_GROUPEND
 };
 
-mavlink_sys_icd_flcc_gcs_hbsys_t MAV_GCSTX_HBSYS = {0};
+mavlink_sys_icd_flcc_gcs_hbsys_t        MAV_GCSTX_HBSYS = {0};
+mavlink_sys_icd_flcc_gcs_dmi_data_t     MAV_GCSTX_DMI_data = {0};
+mavlink_sys_icd_flcc_gcs_hdm_data_t     MAV_GCSTX_HDM_data = {0};
 
 AP_COAXCAN2::AP_COAXCAN2()
 {

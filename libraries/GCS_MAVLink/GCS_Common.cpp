@@ -105,9 +105,13 @@ uint8_t GCS_MAVLINK::mavlink_private = 0;
 
 GCS *GCS::_singleton = nullptr;
 
-extern mavlink_sys_icd_flcc_gcs_inv_state_t MAV_GCSTX_INV_State;
-extern mavlink_sys_icd_flcc_gcs_ccb_state_t MAV_GCSTX_CCB_State;
-extern mavlink_sys_icd_flcc_gcs_hbsys_t MAV_GCSTX_HBSYS;
+extern mavlink_sys_icd_flcc_gcs_inv_state_t     MAV_GCSTX_INV_State;
+extern mavlink_sys_icd_flcc_gcs_ccb_state_t     MAV_GCSTX_CCB_State;
+extern mavlink_sys_icd_flcc_gcs_hbsys_t         MAV_GCSTX_HBSYS;
+extern mavlink_sys_icd_flcc_gcs_cxsv_pos_t      MAV_GCSTX_CXSV_POS;
+extern mavlink_sys_icd_flcc_gcs_cxsv_swash_t    MAV_GCSTX_CXSV_SWASH;
+extern mavlink_sys_icd_flcc_gcs_dmi_data_t      MAV_GCSTX_DMI_data;
+extern mavlink_sys_icd_flcc_gcs_hdm_data_t      MAV_GCSTX_HDM_data;
 
 GCS_MAVLINK_InProgress GCS_MAVLINK_InProgress::in_progress_tasks[1];
 uint32_t GCS_MAVLINK_InProgress::last_check_ms;
@@ -997,9 +1001,14 @@ ap_message GCS_MAVLINK::mavlink_id_to_ap_message_id(const uint32_t mavlink_id) c
 #if HAL_ADSB_ENABLED
         { MAVLINK_MSG_ID_UAVIONIX_ADSB_OUT_STATUS, MSG_UAVIONIX_ADSB_OUT_STATUS},
 #endif
-        {MAVLINK_MSG_ID_SYS_ICD_FLCC_GCS_INV_STATE, MSG_INV_STATE},
-        {MAVLINK_MSG_ID_SYS_ICD_FLCC_GCS_CCB_STATE, MSG_CCB_STATE},
-        {MAVLINK_MSG_ID_SYS_ICD_FLCC_GCS_HBSYS, MSG_HBSYS},
+        {MAVLINK_MSG_ID_SYS_ICD_FLCC_GCS_INV_STATE,     MSG_INV_STATE},
+        {MAVLINK_MSG_ID_SYS_ICD_FLCC_GCS_HBSYS,         MSG_HBSYS},
+        {MAVLINK_MSG_ID_SYS_ICD_FLCC_GCS_CCB_STATE,     MSG_CCB_STATE},
+        {MAVLINK_MSG_ID_SYS_ICD_FLCC_GCS_CXSV_POS,      MSG_CXSV_POS},
+        {MAVLINK_MSG_ID_SYS_ICD_FLCC_GCS_CXSV_POS,      MSG_CXSV_POS},
+        {MAVLINK_MSG_ID_SYS_ICD_FLCC_GCS_CXSV_SWASH,    MSG_CXSV_SWASH},
+        {MAVLINK_MSG_ID_SYS_ICD_FLCC_GCS_DMI_DATA,      MSG_DMI_DATA},
+        {MAVLINK_MSG_ID_SYS_ICD_FLCC_GCS_HDM_DATA,      MSG_HDM_DATA},
             };
 
     for (uint8_t i=0; i<ARRAY_SIZE(map); i++) {
@@ -5903,6 +5912,22 @@ bool GCS_MAVLINK::try_send_message(const enum ap_message id)
         CHECK_PAYLOAD_SIZE(SYS_ICD_FLCC_GCS_CCB_STATE);
         send_message_flcc_gcs_ccb_state();
         break;
+    case MSG_CXSV_POS :
+        CHECK_PAYLOAD_SIZE(SYS_ICD_FLCC_GCS_CXSV_POS);
+        send_message_flcc_gcs_cxsv_pos();
+        break;
+    case MSG_CXSV_SWASH :
+        CHECK_PAYLOAD_SIZE(SYS_ICD_FLCC_GCS_CXSV_SWASH);
+        send_message_flcc_gcs_cxsv_swash();
+        break;
+    case MSG_DMI_DATA :
+        CHECK_PAYLOAD_SIZE(SYS_ICD_FLCC_GCS_DMI_DATA);
+        send_message_flcc_gcs_dmi_data();
+        break;
+    case MSG_HDM_DATA :
+        CHECK_PAYLOAD_SIZE(SYS_ICD_FLCC_GCS_HDM_DATA);
+        send_message_flcc_gcs_hdm_data();
+        break;
     case MSG_WATER_DEPTH:
 #if APM_BUILD_TYPE(APM_BUILD_Rover)
         CHECK_PAYLOAD_SIZE(WATER_DEPTH);
@@ -6687,4 +6712,63 @@ void GCS_MAVLINK::send_message_flcc_gcs_hbsys() const
         MAV_GCSTX_HBSYS.HDC_Vin, 
         MAV_GCSTX_HBSYS.HDC_Cin);
 
+}
+
+void GCS_MAVLINK::send_message_flcc_gcs_cxsv_pos() const
+{
+    mavlink_msg_sys_icd_flcc_gcs_cxsv_pos_send(
+        chan, 
+        MAV_GCSTX_CXSV_POS.Servo_State, 
+        MAV_GCSTX_CXSV_POS.SV1_POS_RAW, 
+        MAV_GCSTX_CXSV_POS.SV2_POS_RAW, 
+        MAV_GCSTX_CXSV_POS.SV3_POS_RAW, 
+        MAV_GCSTX_CXSV_POS.SV4_POS_RAW, 
+        MAV_GCSTX_CXSV_POS.SV5_POS_RAW, 
+        MAV_GCSTX_CXSV_POS.SV6_POS_RAW);
+}
+
+void GCS_MAVLINK::send_message_flcc_gcs_cxsv_swash() const
+{
+    mavlink_msg_sys_icd_flcc_gcs_cxsv_swash_send(
+        chan, 
+        MAV_GCSTX_CXSV_SWASH.Swash_State, 
+        MAV_GCSTX_CXSV_SWASH.Collective, 
+        MAV_GCSTX_CXSV_SWASH.Cyclic_Lon, 
+        MAV_GCSTX_CXSV_SWASH.Cyclic_Lat, 
+        MAV_GCSTX_CXSV_SWASH.Pedal, 
+        MAV_GCSTX_CXSV_SWASH.CMD_Collective, 
+        MAV_GCSTX_CXSV_SWASH.CMD_Cyclic_Lon, 
+        MAV_GCSTX_CXSV_SWASH.CMD_Cyclic_Lat, 
+        MAV_GCSTX_CXSV_SWASH.CMD_Pedal);
+}
+
+void GCS_MAVLINK::send_message_flcc_gcs_dmi_data() const
+{
+    mavlink_msg_sys_icd_flcc_gcs_dmi_data_send(
+        chan, 
+        MAV_GCSTX_DMI_data.LDC_State, 
+        MAV_GCSTX_DMI_data.PMS_Mv_Battery_VoltageX10, 
+        MAV_GCSTX_DMI_data.PMS_Mv_Output_CurrentX10, 
+        MAV_GCSTX_DMI_data.PMS_Batt_Out_CurrentX10, 
+        MAV_GCSTX_DMI_data.PMS_LDC_Output_CurrentX10, 
+        MAV_GCSTX_DMI_data.PMS_LDC_Output_VoltageX10,
+        MAV_GCSTX_DMI_data.PMS_Output_PowerX10, 
+        MAV_GCSTX_DMI_data.PMS_Input_PowerX10,
+        MAV_GCSTX_DMI_data.PMS_MAX_TempX10);
+
+}
+void GCS_MAVLINK::send_message_flcc_gcs_hdm_data() const
+{
+    mavlink_msg_sys_icd_flcc_gcs_hdm_data_send(
+        chan, 
+        MAV_GCSTX_HDM_data.Ifcu_PpCurLimX100, 
+        MAV_GCSTX_HDM_data.Ifcu_PpH2SofX2, 
+        MAV_GCSTX_HDM_data.Ifcu_H2LkLmp, 
+        MAV_GCSTX_HDM_data.Ifcu_FcNetVltX10, 
+        MAV_GCSTX_HDM_data.Ifcu_FcNetCurx10, 
+        MAV_GCSTX_HDM_data.Ifcu_FcInClntTmp, 
+        MAV_GCSTX_HDM_data.Ifcu_AmbTemp, 
+        MAV_GCSTX_HDM_data.Ifcu_RoomTemp, 
+        MAV_GCSTX_HDM_data.Ifcu_H2TnkTmp, 
+        MAV_GCSTX_HDM_data.Ifcu_H2TnkPrsX10);
 }

@@ -279,6 +279,13 @@ struct Data_CoaxSerovs {
     float current;
 };
 
+struct CoaxSwashState {
+    float Col;
+    float Lat;
+    float Lon;
+    float Rud;
+};
+
 //Coaxial State-machine state
 enum class CoaxState {
     CXSTATE_0_INIT,
@@ -318,7 +325,10 @@ public:
     RX_CoaxServo_pos SV_Pos_prv[6];    //Previous servo position
     Data_CoaxSerovs SV_state[6];       //Current servo states
     uint8_t SVinitialized;              //All-motors responded to Ping, comm link initialized
-    
+    CoaxSwashState Swash;
+    CoaxSwashState Swash_prev;
+    CoaxSwashState Swash_CMD;
+
     //====State Machine
     CoaxState CX_State; //Coaxial State-machine state
 private:

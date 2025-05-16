@@ -84,7 +84,11 @@ enum ap_message : uint8_t {
     MSG_HYGROMETER,
     MSG_AUTOPILOT_STATE_FOR_GIMBAL_DEVICE,
     MSG_INV_STATE,  // mavlink message to send Inverter state
-    MSG_CCB_STATE,  // mavlink message to send CCB state
     MSG_HBSYS,      // mavlink message to send Hybrid-system state1
+    MSG_CCB_STATE,  // mavlink message to send CCB state
+    MSG_CXSV_POS,   // CoaxServo Position
+    MSG_CXSV_SWASH, // CoaxServo Swash-plate Angle
+    MSG_DMI_DATA,   // Data Requested by DMI
+    MSG_HDM_DATA,   // Data Requested by Hyundai Car
     MSG_LAST // MSG_LAST must be the last entry in this enum
 };

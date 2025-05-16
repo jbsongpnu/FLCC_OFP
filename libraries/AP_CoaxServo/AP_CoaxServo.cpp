@@ -7,6 +7,9 @@
 
 extern const AP_HAL::HAL& hal;
 
+mavlink_sys_icd_flcc_gcs_cxsv_pos_t     MAV_GCSTX_CXSV_POS = {0};
+mavlink_sys_icd_flcc_gcs_cxsv_swash_t   MAV_GCSTX_CXSV_SWASH = {0};
+
 AP_CoaxServo::AP_CoaxServo()
 {
     if (_singleton) {

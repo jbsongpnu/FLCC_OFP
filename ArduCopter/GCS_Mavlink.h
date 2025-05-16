@@ -39,6 +39,8 @@ protected:
     
     //Custom COAX commands
     MAV_RESULT handle_command_COAX_FCC_READY(const mavlink_command_long_t &msg);
+    MAV_RESULT handle_command_CXSV_SET_PARAM(const mavlink_command_long_t &msg);
+    MAV_RESULT handle_command_CXSV_SWASH_OVERRIDE(const mavlink_command_long_t &msg);
     MAV_RESULT handle_command_COAX_SET_MOTOR(const mavlink_command_long_t &msg);
     MAV_RESULT handle_command_INVERTER_OPTION(const mavlink_command_long_t &msg);
     MAV_RESULT handle_command_CCB_CONTROL(const mavlink_command_long_t &msg);

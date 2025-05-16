@@ -1031,6 +1031,12 @@ MAV_RESULT GCS_MAVLINK_Copter::handle_command_long_packet(const mavlink_command_
     case MAV_CMD_COAX_FCC_READY : {
         return handle_command_COAX_FCC_READY(packet);
     }
+    case MAV_CMD_CXSV_SET_PARAM : {
+        return handle_command_CXSV_SET_PARAM(packet);
+    }
+    case MAV_CMD_CXSV_SWASH_OVERRIDE : {
+        return handle_command_CXSV_SWASH_OVERRIDE(packet);
+    }
     case MAV_CMD_COAX_SET_MOTOR : {
         return handle_command_COAX_SET_MOTOR(packet);
     }
@@ -1071,6 +1077,61 @@ MAV_RESULT GCS_MAVLINK_Copter::handle_command_COAX_FCC_READY(const mavlink_comma
         break;
     }
 
+}
+
+// PARM_PADATA_ANGLE_LIMIT_MIN_L   0x02
+// PARM_PADATA_ANGLE_LIMIT_MIN_H   0x03
+// PARM_PADATA_ANGLE_LIMIT_MAX_L   0x04
+// PARM_PADATA_ANGLE_LIMIT_MAX_H   0x05
+// PARM_PADATA_REVERSE             0x07
+// PARM_PADATA_NEUTRAL_OFFSET_L    0x08
+// PARM_PADATA_NEUTRAL_OFFSET_H    0x09
+// PARM_PADATA_FAILSAFE_POSITION_L 0x0A
+// PARM_PADATA_FAILSAFE_POSITION_H 0x0B
+// PARM_PADATA_FAILSAFE_TIMEOUT    0x0C
+MAV_RESULT GCS_MAVLINK_Copter::handle_command_CXSV_SET_PARAM(const mavlink_command_long_t &msg)
+{
+    uint8_t SvID = (uint8_t)msg.param1;
+    uint8_t ParamID = (uint8_t)msg.param2;
+    int16_t value = (int16_t)msg.param2;
+
+    AP_CoaxServo *ServoUART = AP::PegasusSV();
+    gcs().send_text(MAV_SEVERITY_INFO, "Got Coax Set CXSV %u %u %d", SvID, ParamID, value);
+    if ((SvID > 6) || (ParamID > 14) || (value > 4048) || (value < -4048)){
+        return MAV_RESULT_ACCEPTED;
+    } else {
+        switch (ParamID) {
+            case 0x02 : {
+                uint16_t known_max = cxdata().SV_state[SvID].angle_limit_max; //take max param
+                ServoUART->Set_Angle_limit(SvID, (uint16_t)value, known_max);
+                //TBD : Should wait and check response here
+                }break;
+            case 0x04 : {
+                uint16_t known_min = cxdata().SV_state[SvID].angle_limit_min; //take max param
+                ServoUART->Set_Angle_limit(SvID, known_min, (uint16_t)value);
+                //TBD : Should wait and check response here
+                }break;
+            case 0x07 : {
+                ServoUART->Set_Reverse(SvID, (bool)value);
+                }break;
+            case 0x08 : {
+                ServoUART->Set_Neutral(SvID, value);
+            }
+            default :
+            //Other values are ignore, but I need Failsafe timeout later
+                break;
+        }
+    }
+    return MAV_RESULT_ACCEPTED;
+}
+MAV_RESULT GCS_MAVLINK_Copter::handle_command_CXSV_SWASH_OVERRIDE(const mavlink_command_long_t &msg)
+{
+    gcs().send_text(MAV_SEVERITY_INFO, "Swash Overriden");
+    cxdata().Swash_CMD.Col = msg.param1;
+    cxdata().Swash_CMD.Lon = msg.param2;
+    cxdata().Swash_CMD.Lat = msg.param3;
+    cxdata().Swash_CMD.Rud = msg.param4;
+    return MAV_RESULT_ACCEPTED;
 }
 
 // -------------------------------------------------------------------------

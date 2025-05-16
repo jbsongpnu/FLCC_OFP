@@ -1085,6 +1085,10 @@ private:
     void send_message_flcc_gcs_inv_state() const;
     void send_message_flcc_gcs_ccb_state() const;
     void send_message_flcc_gcs_hbsys() const;
+    void send_message_flcc_gcs_cxsv_pos() const;
+    void send_message_flcc_gcs_cxsv_swash() const;
+    void send_message_flcc_gcs_dmi_data() const;
+    void send_message_flcc_gcs_hdm_data() const;
 };
 
 /// @class GCS
