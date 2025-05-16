@@ -1993,6 +1993,26 @@
         <param index="6">Reserved (set to 0)</param>
         <param index="7">Reserved (set to 0)</param>
       </entry>
+      <entry value="61001" name="MAV_CMD_CXSV_SET_PARAM" hasLocation="false" isDestination="false">
+        <description>Coaxial Project - Custom command to set CoaxServo Parameters.</description>
+        <param index="1" label="Servo_ID" minValue="1" maxValue="6" increment="1">Servo ID ranges from 1 to 6.</param>
+        <param index="2" label="PARAM_ID" minValue="2" maxValue="14" increment="1">Parameter ID value</param>
+        <param index="3" label="PARAM_VALUE" minValue="-4048" maxValue="4048" increment="1">Parameter setting value.</param>
+        <param index="4">Reserved (set to 0)</param>
+        <param index="5">Reserved (set to 0)</param>
+        <param index="6">Reserved (set to 0)</param>
+        <param index="7">Reserved (set to 0)</param>
+      </entry>
+      <entry value="61002" name="MAV_CMD_CXSV_SWASH_OVERRIDE" hasLocation="false" isDestination="false">
+        <description>Coaxial Project - Custom command to set CoaxServo swash-plate angles.</description>
+        <param index="1" label="Collective" minValue="-30.00" maxValue="30.00">Collective pitch angle .2%f format.</param>
+        <param index="2" label="Cyclic_Lon" minValue="-30.00" maxValue="30.00">Collective pitch angle .2%f format.</param>
+        <param index="3" label="Cyclic_Lat" minValue="-30.00" maxValue="30.00">Collective pitch angle .2%f format.</param>
+        <param index="4" label="Pedal" minValue="-30.00" maxValue="30.00">Pedal represented as angle. Same as differential pitch angle .2%f format.</param>
+        <param index="5">Reserved (set to 0)</param>
+        <param index="6">Reserved (set to 0)</param>
+        <param index="7">Reserved (set to 0)</param>
+      </entry>
       <entry value="61110" name="MAV_CMD_COAX_SET_MOTOR" hasLocation="false" isDestination="false">
         <description>Coaxial Project - Custom command to send a motor control command for inveter.</description>
         <param index="1" label="Inverter On/Off" minValue="0" maxValue="2" increment="1">Inverter ON/OFF. 0 : No change, 1 : On, 2 : Off.</param>
@@ -6307,6 +6327,53 @@
       <field type="uint16_t" name="ThCp2x10" units="degC">Thermocoupler 2 temperature x 10</field>
       <field type="uint16_t" name="Flow_mL" units="mL/min">Flow rate in mL/min</field>
       <field type="uint8_t" name="Brd_temp" units="degC">Board temperature 0~100</field>
+    </message>
+    <message id="62003" name="SYS_ICD_FLCC_GCS_CXSV_POS">
+      <description>TC4 (CoaxServo Position).</description>
+      <field type="uint8_t" name="Servo_State" units="N/A">Servo State. 0:Init, 1:Checking, 2:Ready</field>
+      <field type="uint16_t" name="SV1_POS_RAW" units="N/A">Servo 1 position bit value 0 ~ 4048</field>
+      <field type="uint16_t" name="SV2_POS_RAW" units="N/A">Servo 2 position bit value 0 ~ 4048</field>
+      <field type="uint16_t" name="SV3_POS_RAW" units="N/A">Servo 3 position bit value 0 ~ 4048</field>
+      <field type="uint16_t" name="SV4_POS_RAW" units="N/A">Servo 4 position bit value 0 ~ 4048</field>
+      <field type="uint16_t" name="SV5_POS_RAW" units="N/A">Servo 5 position bit value 0 ~ 4048</field>
+      <field type="uint16_t" name="SV6_POS_RAW" units="N/A">Servo 6 position bit value 0 ~ 4048</field>
+    </message>
+    <message id="62004" name="SYS_ICD_FLCC_GCS_CXSV_SWASH">
+      <description>TC4 (CoaxServo Swash-plate Angle).</description>
+      <field type="uint8_t" name="Swash_State" units="N/A">Swash State. 0:Init, 1:Ground Test, 2:Manual Override, 3: Auto</field>
+      <field type="float" name="Collective" units="deg">Collective pitch angle - mean value for upper/lower</field>
+      <field type="float" name="Cyclic_Lon" units="deg">Longitudinal Cyclic pitch angle - rotating from Y axis</field>
+      <field type="float" name="Cyclic_Lat" units="deg">Lateral Cyclic pitch angle - rotating from X axis</field>
+      <field type="float" name="Pedal" units="deg">Pedal in angle. Same as differential pitch angle</field>
+      <field type="float" name="CMD_Collective" units="deg">Commanded Collective pitch angle</field>
+      <field type="float" name="CMD_Cyclic_Lon" units="deg">Commanded Longitudinal Cyclic pitch angle</field>
+      <field type="float" name="CMD_Cyclic_Lat" units="deg">Commanded Lateral Cyclic pitch angle</field>
+      <field type="float" name="CMD_Pedal" units="deg">Commanded Pedal(differential pitch) angle. </field>
+    </message>
+    <message id="62005" name="SYS_ICD_FLCC_GCS_DMI_DATA">
+      <description>TC4 (Data Requested by DMI).</description>
+      <field type="uint8_t" name="LDC_State" units="N/A">Low-voltage DC State. 0:Off, 1:Run, 2:Warning, 3:Fault (Warning:1.2kW, Fault:900W)</field>
+      <field type="uint16_t" name="PMS_Mv_Battery_VoltageX10" units="V">Mv_Battery Voltage X 10</field>
+      <field type="int16_t" name="PMS_Mv_Output_CurrentX10" units="A">Mv Out Current X 10</field>
+      <field type="int16_t" name="PMS_Batt_Out_CurrentX10" units="A">PMS_Battery Current X 10</field>
+      <field type="int16_t" name="PMS_LDC_Output_CurrentX10" units="A">LDC Out Current X 10</field>
+      <field type="uint16_t" name="PMS_LDC_Output_VoltageX10" units="V">LDC Out Voltage X 10</field>
+      <field type="uint16_t" name="PMS_Output_PowerX10" units="W">PMS_Output_Power X 10</field>
+      <field type="uint16_t" name="PMS_Input_PowerX10" units="W">PMS_Input_Power X 10</field>
+      <field type="int16_t" name="PMS_MAX_TempX10" units="degC">Maximum temperature X 10</field>
+    </message>
+    <message id="62006" name="SYS_ICD_FLCC_GCS_HDM_DATA">
+      <description>TC4 (Data Requested by Hyundai Car).</description>
+      <field type="uint16_t" name="Ifcu_PpCurLimX100" units="A">Power plnat system current limit x 100</field>
+      <field type="uint8_t" name="Ifcu_PpH2SofX2" units="%">% of Hydrogen Tank filled X 2</field>
+      <field type="uint8_t" name="Ifcu_H2LkLmp" units="N/A">Hydrogen leaking detected. 0:No Leak, 1: small leak, 2:large leak</field>
+      <field type="uint16_t" name="Ifcu_FcNetVltX10" units="V">Stack Net Voltage X 10</field>
+      <field type="int16_t" name="Ifcu_FcNetCurx10" units="A">Stack Net Current X 10</field>
+      <field type="int8_t" name="Ifcu_FcInClntTmp" units="degC">Stack inlet coolant temperature -40 ~ 127 </field>
+      <field type="int8_t" name="Ifcu_AmbTemp" units="degC">Ambient temperature -40 ~ 127</field>
+      <field type="int8_t" name="Ifcu_RoomTemp" units="degC">Room temperature -40 ~ 127</field>
+      <field type="int16_t" name="Ifcu_H2TnkTmp" units="degC">Hydrogen tank temperature -50 ~ 205</field>
+      <field type="uint16_t" name="Ifcu_H2TnkPrsX10" units="MPa">Hydrogen tank pressure x 10</field>
     </message>
   </messages>
 </mavlink>
