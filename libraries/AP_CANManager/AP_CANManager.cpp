@@ -74,14 +74,14 @@ const AP_Param::GroupInfo AP_CANManager::var_info[] = {
 #if HAL_MAX_CAN_PROTOCOL_DRIVERS > 0
     // @Group: D1_
     // @Path: ../AP_CANManager/AP_CANDriver.cpp
-    AP_SUBGROUPINFO(_drv_param[0], "D1_", 4, AP_CANManager, AP_CANManager::CANDriver_Params),
-#endif
+    AP_SUBGROUPINFO(_drv_param[0], "D1_", 13, AP_CANManager, AP_CANManager::CANDriver_Params),
+#endif  //Default is 13 : CoaxCAN1
 
 #if HAL_MAX_CAN_PROTOCOL_DRIVERS > 1
     // @Group: D2_
     // @Path: ../AP_CANManager/AP_CANDriver.cpp
-    AP_SUBGROUPINFO(_drv_param[1], "D2_", 5, AP_CANManager, AP_CANManager::CANDriver_Params),
-#endif
+    AP_SUBGROUPINFO(_drv_param[1], "D2_", 14, AP_CANManager, AP_CANManager::CANDriver_Params),
+#endif  //Default is 14 : CoaxCAN2
 
 #if HAL_MAX_CAN_PROTOCOL_DRIVERS > 2
     // @Group: D3_

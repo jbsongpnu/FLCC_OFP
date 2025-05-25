@@ -3,6 +3,7 @@
 ***
 
 ## Version History
+- V0.01.32 Fixing error: "Internal_Error 0x4000020". Also, working with CoaxServo tests and finding swashplate logics.
 - V0.01.31 Added Mavlink processing functions related to V0.01.30
 - V0.01.30 Updating common.xml for CoaxServo, IFCU and PMS
 - V0.01.29 Added CoaxServo initialization, checking parameters, scheduled broadcasting and reading data

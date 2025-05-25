@@ -205,6 +205,8 @@ void AP_MotorsHeli::output_min()
 }
 
 // output - sends commands to the servos
+// #Checkpoint 01 : Coaxial heli uses AP_MotorHeli_Dual class, but it uses this function too
+//FAST_TASK(motors_output) => Copter::motors_output()  =>  flightmode->output_to_motors();  => motors->output();  => AP_MotorsHeli_Dual::output_to_motors()
 void AP_MotorsHeli::output()
 {
     // update throttle filter

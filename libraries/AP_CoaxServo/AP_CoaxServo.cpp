@@ -1,6 +1,8 @@
 #include "AP_CoaxServo.h"
 #include <AP_CoaxCAN2/Coaxial_data.h>
 
+#define DEBUG_COAXSERVO 1
+
 //Will use Copter's motors_output(400Hz FAST_TASK) to send out CMD_PADATA_SET_MULTI_POSITIONS
 //motors_output() @/ArduCopter/motors.cpp
 //Due to nature of RS-485 communication, all communitions should be scheduled in a single thread
@@ -24,51 +26,53 @@ AP_CoaxServo *AP_CoaxServo::get_singleton()
     return _singleton;
 }
 
-void AP_CoaxServo::Send_CMD_Frame(void) {
-    uint8_t buffer[30]={0U};
-    uint8_t size = 0;
-    uint8_t i = 0;
-    uint32_t temp_checksum = 0;
+// Following function created critical error since version 0.01.27
+// Internal error code 0x4000020 => mem_guard + panic
+// void AP_CoaxServo::Send_CMD_Frame(void) {
+    // uint8_t buffer[30]={0U};
+    // uint8_t size = 0;
+    // uint8_t i = 0;
+    // uint32_t temp_checksum = 0;
 
-    //Check following 
-        // _TX_data.ID = 2;
-        // _TX_data.LENGTH = 5;
-        // _TX_data.COMMAND = 1;
-        // _TX_data.Parameters[0] = 0x30;
-        // _TX_data.Parameters[1] = 0x31;
-        // _TX_data.Parameters[2] = 0x32;
-    //Should send with Checksum = 0x64
+    // //Check following 
+    //     // _TX_data.ID = 2;
+    //     // _TX_data.LENGTH = 5;
+    //     // _TX_data.COMMAND = 1;
+    //     // _TX_data.Parameters[0] = 0x30;
+    //     // _TX_data.Parameters[1] = 0x31;
+    //     // _TX_data.Parameters[2] = 0x32;
+    // //Should send with Checksum = 0x64
 
-    if(_TX_data.LENGTH < 2) {
-        gcs().send_text(MAV_SEVERITY_ERROR, "Error! CoaxServo Length < 2");
-        return;
-    } else if (_TX_data.LENGTH > 27){
-        gcs().send_text(MAV_SEVERITY_ERROR, "Error! CoaxServo TX Buffer overflow");
-        return;
-    } else {
-        size = _TX_data.LENGTH - 2;//3
-    }
-    // Initialize Buffer
-    memset(buffer, 0, size+5);
+    // if(_TX_data.LENGTH < 2) {
+    //     gcs().send_text(MAV_SEVERITY_ERROR, "Error! CoaxServo Length < 2");
+    //     return;
+    // } else if (_TX_data.LENGTH > 27){
+    //     gcs().send_text(MAV_SEVERITY_ERROR, "Error! CoaxServo TX Buffer overflow");
+    //     return;
+    // } else {
+    //     size = _TX_data.LENGTH - 2;//3
+    // }
+    // // Initialize Buffer
+    // memset(buffer, 0, size+5);
 
-    // Set Start Command
-    buffer[0]= START_BYTE;
-    buffer[1]=_TX_data.ID;
-    buffer[2]=_TX_data.LENGTH;
-    buffer[3]=_TX_data.COMMAND;
-    temp_checksum += (_TX_data.ID + _TX_data.LENGTH + _TX_data.COMMAND);
-    for (i=0;i<size;i++) {
-        buffer[i+4] = _TX_data.Parameters[i];
-        temp_checksum += _TX_data.Parameters[i];
-    }
-    temp_checksum = temp_checksum & 0x000000FF;
-    buffer[i+4] = ~temp_checksum; 
-    // Send Buffer
-    Actuator_UART->write(buffer, (size+5));
+    // // Set Start Command
+    // buffer[0]= START_BYTE;
+    // buffer[1]=_TX_data.ID;
+    // buffer[2]=_TX_data.LENGTH;
+    // buffer[3]=_TX_data.COMMAND;
+    // temp_checksum += (_TX_data.ID + _TX_data.LENGTH + _TX_data.COMMAND);
+    // for (i=0;i<size;i++) {
+    //     buffer[i+4] = _TX_data.Parameters[i];
+    //     temp_checksum += _TX_data.Parameters[i];
+    // }
+    // temp_checksum = temp_checksum & 0x000000FF;
+    // buffer[i+4] = ~temp_checksum; 
+    // // Send Buffer
+    // Actuator_UART->write(buffer, (size+5));
 
     // gcs().send_text(MAV_SEVERITY_INFO, "BufTx %02x %02x %02x %02x %02x %02x %02x %02x",
     //     buffer[0], buffer[1], buffer[2], buffer[3], buffer[4], buffer[5], buffer[6], buffer[7]);
-}
+// }
 
 // COMMAND                              Command ID  Number of   Number of Response
 //                                                  Parameters  Parameters
@@ -95,12 +99,15 @@ void AP_CoaxServo::Send_CMD_Frame(void) {
 void AP_CoaxServo::CMD_PADATA_PING(uint8_t id) {
     //check validity
     if(id>31) return; //if id is 31(=0x1F), ping is broadcasted to all servos
-    //Set TX data
-    _TX_data.ID = id;
-    _TX_data.LENGTH = 2;
-    _TX_data.COMMAND = ID_CMD_PADATA_PING;
-    //Send command
-    Send_CMD_Frame();
+
+    uint8_t buffer[5];
+    buffer[0] = 0xFF;       //Header
+    buffer[1] = id;         //Target ID
+    buffer[2] = 0x02;       //Length
+    buffer[3] = 0x01;       //Command
+    buffer[4] = ~(buffer[1] + buffer[2] + buffer[3]) ;  //Checksum : NOT(sum(id+length+command+parms))
+
+    Actuator_UART->write(buffer, 5);
 }
 
 // ====== CMD_PADATA_SET_POSITION
@@ -111,16 +118,19 @@ void AP_CoaxServo::CMD_PADATA_PING(uint8_t id) {
 // Answered by Response Frame
 void AP_CoaxServo::CMD_PADATA_SET_POSITION(uint8_t id, uint16_t setpoint) {
     //check validity
-    if(id>30) return;
+    if(id>30) return; //No broadcasting, only 30 is allowed
     if(setpoint>4048) return;
-    //Set TX data
-    _TX_data.ID = id;
-    _TX_data.LENGTH = 4;
-    _TX_data.COMMAND = ID_CMD_PADATA_SET_POSITION;
-    _TX_data.Parameters[0] = (uint8_t)(setpoint & 0x00FF);
-    _TX_data.Parameters[1] = (uint8_t)((setpoint >> 8) & 0x00FF);
-    //Send command
-    Send_CMD_Frame();
+
+    uint8_t buffer[7];
+    buffer[0] = 0xFF;       //Header
+    buffer[1] = id;         //Target ID
+    buffer[2] = 0x04;       //Length
+    buffer[3] = 0x02;       //Command
+    buffer[4] = (uint8_t)(setpoint & 0x00FF);
+    buffer[5] = (uint8_t)((setpoint >> 8) & 0x00FF);
+    buffer[6] = ~(buffer[1] + buffer[2] + buffer[3] + buffer[4] + buffer[5]);   //Checksum : NOT(sum(id+length+command+parms))
+
+    Actuator_UART->write(buffer, 7);
 }
 
 // ====== CMD_PADATA_SET_PARAMETER or CMD_PADATA_GET_PARAMETER
@@ -146,14 +156,17 @@ void AP_CoaxServo::CMD_PADATA_SET_POSITION(uint8_t id, uint16_t setpoint) {
 void AP_CoaxServo::Set_Servo_ID(uint8_t pre_id, uint8_t aft_id) {
     //check validity
     if((pre_id>30)||(aft_id>30)) return;
-    //Set TX data
-    _TX_data.ID = pre_id;
-    _TX_data.LENGTH = 4;
-    _TX_data.COMMAND = ID_CMD_PADATA_SET_PARAMETER;
-    _TX_data.Parameters[0] = 1;
-    _TX_data.Parameters[1] = aft_id;
-    //Send command
-    Send_CMD_Frame();
+    
+    uint8_t buffer[7];
+    buffer[0] = 0xFF;       //Header
+    buffer[1] = pre_id;     //Target ID
+    buffer[2] = 0x04;       //Length
+    buffer[3] = 0x03;       //Command
+    buffer[4] = 0x01;       //Parameter starting location
+    buffer[5] = aft_id;
+    buffer[6] = ~(buffer[1] + buffer[2] + buffer[3] + buffer[4] + buffer[5]);   //Checksum : NOT(sum(id+length+command+parms))
+
+    Actuator_UART->write(buffer, 7);
 }
 // ===== CMD_PADATA_SET_PARAMETER : PARM_PADATA_ANGLE_LIMIT_MIN_x and PARM_PADATA_ANGLE_LIMIT_MAX_x
 // Answered by Response Frame
@@ -162,17 +175,20 @@ void AP_CoaxServo::Set_Angle_limit(uint8_t id, uint16_t min, uint16_t max) {
     if(id>30) return;
     if(min<48) return;
     if(max>4048) return;
-    //Set TX data
-    _TX_data.ID = id;
-    _TX_data.LENGTH = 7;
-    _TX_data.COMMAND = ID_CMD_PADATA_SET_PARAMETER;
-    _TX_data.Parameters[0] = 2;
-    _TX_data.Parameters[1] = (uint8_t)(min & 0x00FF);
-    _TX_data.Parameters[2] = (uint8_t)((min >> 8) & 0x00FF);
-    _TX_data.Parameters[3] = (uint8_t)(max & 0x00FF);
-    _TX_data.Parameters[4] = (uint8_t)((max >> 8) & 0x00FF);
-    //Send command
-    Send_CMD_Frame();
+    
+    uint8_t buffer[10];
+    buffer[0] = 0xFF;       //Header
+    buffer[1] = id;         //Target ID
+    buffer[2] = 0x07;       //Length
+    buffer[3] = 0x03;       //Command
+    buffer[4] = 0x02;       //Parameter starting location
+    buffer[5] = (uint8_t)(min & 0x00FF);        //low byte of min
+    buffer[6] = (uint8_t)((min >> 8) & 0x00FF); //high byte of min
+    buffer[7] = (uint8_t)(max & 0x00FF);
+    buffer[8] = (uint8_t)((max >> 8) & 0x00FF);
+    buffer[9] = ~(buffer[1] + buffer[2] + buffer[3] + buffer[4] + buffer[5] + buffer[6] + buffer[7] + buffer[8]);   //Checksum : NOT(sum(id+length+command+parms))
+
+    Actuator_UART->write(buffer, 10);
 }
 
 // ===== CMD_PADATA_SET_PARAMETER : PARM_PADATA_REVERSE
@@ -180,14 +196,17 @@ void AP_CoaxServo::Set_Angle_limit(uint8_t id, uint16_t min, uint16_t max) {
 void AP_CoaxServo::Set_Reverse(uint8_t id, bool rev) {
     //check validity
     if(id>30) return;
-    //Set TX data
-    _TX_data.ID = id;
-    _TX_data.LENGTH = 4;
-    _TX_data.COMMAND = ID_CMD_PADATA_SET_PARAMETER;
-    _TX_data.Parameters[0] = 6;
-    _TX_data.Parameters[1] = rev;
-    //Send command
-    Send_CMD_Frame();
+      
+    uint8_t buffer[7];
+    buffer[0] = 0xFF;       //Header
+    buffer[1] = id;         //Target ID
+    buffer[2] = 0x04;       //Length
+    buffer[3] = 0x03;       //Command
+    buffer[4] = 0x07;       //Parameter starting location
+    buffer[5] = rev;
+    buffer[6] = ~(buffer[1] + buffer[2] + buffer[3] + buffer[4] + buffer[5]);   //Checksum : NOT(sum(id+length+command+parms))
+
+    Actuator_UART->write(buffer, 7);
 }
 
 // ===== CMD_PADATA_SET_PARAMETER : PARM_PADATA_NEUTRAL_OFFSET_x
@@ -196,15 +215,18 @@ void AP_CoaxServo::Set_Neutral(uint8_t id, int16_t neutral) {
     //check validity
     if(id>30) return;
     if((neutral < -500)||(neutral>500)) return;
-    //Set TX data
-    _TX_data.ID = id;
-    _TX_data.LENGTH = 5;
-    _TX_data.COMMAND = ID_CMD_PADATA_SET_PARAMETER;
-    _TX_data.Parameters[0] = 8;
-    _TX_data.Parameters[1] = (uint8_t)(neutral & 0x00FF);
-    _TX_data.Parameters[2] = (uint8_t)((neutral >> 8) & 0x00FF);
-    //Send command
-    Send_CMD_Frame();
+
+    uint8_t buffer[8];
+    buffer[0] = 0xFF;       //Header
+    buffer[1] = id;         //Target ID
+    buffer[2] = 0x05;       //Length
+    buffer[3] = 0x03;       //Command
+    buffer[4] = 0x08;       //Parameter starting location
+    buffer[5] = (uint8_t)(neutral & 0x00FF);
+    buffer[6] = (uint8_t)((neutral >> 8) & 0x00FF);
+    buffer[7] = ~(buffer[1] + buffer[2] + buffer[3] + buffer[4] + buffer[5] + buffer[6]);   //Checksum : NOT(sum(id+length+command+parms))
+
+    Actuator_UART->write(buffer, 8);
 }
 
 // ===== PARM_PADATA_SENSOR_DB
@@ -216,14 +238,17 @@ void AP_CoaxServo::Set_Neutral(uint8_t id, int16_t neutral) {
 void AP_CoaxServo::Request_all_Param(uint8_t id) {
     //check validity
     if(id>30) return;
-    //Set TX data
-    _TX_data.ID = id;
-    _TX_data.LENGTH = 0x10;
-    _TX_data.COMMAND = ID_CMD_PADATA_GET_PARAMETER;
-    _TX_data.Parameters[0] = 1;
-    _TX_data.Parameters[1] = 0x0E; //All param
-    //Send command
-    Send_CMD_Frame();
+
+    uint8_t buffer[7];
+    buffer[0] = 0xFF;       //Header
+    buffer[1] = id;         //Target ID
+    buffer[2] = 0x04;       //Length
+    buffer[3] = 0x04;       //Command
+    buffer[4] = 0x01;       //Parameter starting location
+    buffer[5] = 0x0E;
+    buffer[6] = ~(buffer[1] + buffer[2] + buffer[3] + buffer[4] + buffer[5]);   //Checksum : NOT(sum(id+length+command+parms))
+
+    Actuator_UART->write(buffer, 7);
 }
 
 // ===== CMD_PADATA_SET_MULTI_POSITIONS
@@ -239,19 +264,23 @@ void AP_CoaxServo::Request_all_Param(uint8_t id) {
 // parameters apply.
 // NOT answered by Response Frame
 void AP_CoaxServo::Set_Coax_ServoPosition(void) {
-    //check validity
     
-    //Set TX data
-    _TX_data.ID = 0x1F;
-    _TX_data.LENGTH = 20;//3bytes for each servo, X6 servos + 2
-    _TX_data.COMMAND = ID_CMD_PADATA_SET_MULTI_POSITIONS;
+    uint8_t buffer[23];
+    uint8_t chcksm;
+    buffer[0] = 0xFF;       //Header
+    buffer[1] = 0x1F;       //Target ID
+    buffer[2] = 0x02;       //Length
+    buffer[3] = 0x01;       //Command
+    chcksm = buffer[1] + buffer[2] + buffer[3];
     for(int i=0; i<6; i++) {
-        _TX_data.Parameters[(i * 3)] = i+1;
-        _TX_data.Parameters[(i * 3)+1] = (uint8_t)(cxdata().SV_TX[i].SV_pos & 0x00FF); 
-        _TX_data.Parameters[(i * 3)+2] = (uint8_t)((cxdata().SV_TX[i].SV_pos >> 8) & 0x00FF);    
+        buffer[(i * 3)+4] = i+1;
+        buffer[(i * 3)+5] = (uint8_t)(cxdata().SV_TX[i].SV_pos & 0x00FF); 
+        buffer[(i * 3)+6] = (uint8_t)((cxdata().SV_TX[i].SV_pos >> 8) & 0x00FF);
+        chcksm += buffer[(i * 3)+4] + buffer[(i * 3)+5] + buffer[(i * 3)+6];
     }
-    //Send command
-    Send_CMD_Frame();
+    buffer[22] = ~(chcksm) ;  //Checksum : NOT(sum(id+length+command+parms))
+
+    Actuator_UART->write(buffer, 23);
 }
 
 // ===== CMD_PADATA_GET_POSITION
@@ -260,12 +289,15 @@ void AP_CoaxServo::Set_Coax_ServoPosition(void) {
 void AP_CoaxServo::Request_Servo_Pos(uint8_t id) {
     //check validity
     if(id>30) return;
-    //Set TX data
-    _TX_data.ID = id;
-    _TX_data.LENGTH = 2;
-    _TX_data.COMMAND = ID_CMD_PADATA_GET_POSITION;
-    //Send command
-    Send_CMD_Frame();
+    
+    uint8_t buffer[5];
+    buffer[0] = 0xFF;       //Header
+    buffer[1] = id;         //Target ID
+    buffer[2] = 0x02;       //Length
+    buffer[3] = 0x10;       //Command
+    buffer[4] = ~(buffer[1] + buffer[2] + buffer[3]) ;  //Checksum : NOT(sum(id+length+command+parms))
+
+    Actuator_UART->write(buffer, 5);
 }
 
 // ===== CMD_PADATA_GET_MOT_TEMP_C
@@ -278,12 +310,15 @@ void AP_CoaxServo::Request_Servo_Pos(uint8_t id) {
 void AP_CoaxServo::Request_Servo_Temp(uint8_t id) {
     //check validity
     if(id>30) return;
-    //Set TX data
-    _TX_data.ID = id;
-    _TX_data.LENGTH = 2;
-    _TX_data.COMMAND = ID_CMD_PADATA_GET_MOT_TEMP_C;
-    //Send command
-    Send_CMD_Frame();
+    
+    uint8_t buffer[5];
+    buffer[0] = 0xFF;       //Header
+    buffer[1] = id;         //Target ID
+    buffer[2] = 0x02;       //Length
+    buffer[3] = 0x11;       //Command
+    buffer[4] = ~(buffer[1] + buffer[2] + buffer[3]) ;  //Checksum : NOT(sum(id+length+command+parms))
+
+    Actuator_UART->write(buffer, 5);
 }
 
 // ===== CMD_PADATA_GET_CURRENT
@@ -293,12 +328,15 @@ void AP_CoaxServo::Request_Servo_Temp(uint8_t id) {
 void AP_CoaxServo::Request_Servo_Current(uint8_t id) {
     //check validity
     if(id>30) return;
-    //Set TX data
-    _TX_data.ID = id;
-    _TX_data.LENGTH = 2;
-    _TX_data.COMMAND = ID_CMD_PADATA_GET_CURRENT;
-    //Send command
-    Send_CMD_Frame();
+
+    uint8_t buffer[5];
+    buffer[0] = 0xFF;       //Header
+    buffer[1] = id;         //Target ID
+    buffer[2] = 0x02;       //Length
+    buffer[3] = 0x14;       //Command
+    buffer[4] = ~(buffer[1] + buffer[2] + buffer[3]) ;  //Checksum : NOT(sum(id+length+command+parms))
+ 
+    Actuator_UART->write(buffer, 5);
 }
 // ===== CMD_PADATA_RESET
 // Reset the actuator
@@ -306,12 +344,15 @@ void AP_CoaxServo::Request_Servo_Current(uint8_t id) {
 void AP_CoaxServo::Reset_Servo(uint8_t id) {
     //check validity
     if(id>30) return;
-    //Set TX data
-    _TX_data.ID = id;
-    _TX_data.LENGTH = 2;
-    _TX_data.COMMAND = ID_CMD_PADATA_RESET;
-    //Send command
-    Send_CMD_Frame();
+    
+    uint8_t buffer[5];
+    buffer[0] = 0xFF;       //Header
+    buffer[1] = id;         //Target ID
+    buffer[2] = 0x02;       //Length
+    buffer[3] = ID_CMD_PADATA_RESET;       //Command
+    buffer[4] = ~(buffer[1] + buffer[2] + buffer[3]) ;  //Checksum : NOT(sum(id+length+command+parms))
+
+    Actuator_UART->write(buffer, 5);
 }
 
 // Handling RX frame
@@ -402,14 +443,14 @@ uint8_t AP_CoaxServo::Parse_Buffer(uint8_t* buffer, uint16_t size) {
             state = 0;
             temp_checksum = ~(temp_checksum & 0x000000FF);
             if (buffer[index] == (uint8_t)temp_checksum) {    //Checksum OK
-                
-                gcs().send_text(MAV_SEVERITY_INFO, "ID= %u, Len = %u, Err = %u, Param = %u %u %u %u", 
+#if DEBUG_COAXSERVO == 1
+                gcs().send_text(MAV_SEVERITY_INFO, "Parsing ID= %u, Len = %u, Err = %u, Param = %u %u %u %u", 
                     _RX_data[num_of_msgs].ID, 
                     _RX_data[num_of_msgs].LENGTH,
                     _RX_data[num_of_msgs].ERROR.ALL,
-                    _RX_data[num_of_msgs].Parameters[0], _RX_data[num_of_msgs].Parameters[1], _RX_data[num_of_msgs].Parameters[1],
-                    _RX_data[num_of_msgs].Parameters[4]);
-
+                    _RX_data[num_of_msgs].Parameters[0], _RX_data[num_of_msgs].Parameters[1], _RX_data[num_of_msgs].Parameters[2],
+                    _RX_data[num_of_msgs].Parameters[3]);
+#endif
                 num_of_msgs++;
                 if(num_of_msgs >= 6) {
                     gcs().send_text(MAV_SEVERITY_ERROR, "CoaxServo RX_Buffer full - may lose data");
@@ -483,6 +524,9 @@ void AP_CoaxServo::interprete_msg(uint16_t msg_box_id, uint8_t cmd) {
     switch(cmd) {
         case ID_CMD_PADATA_PING:
             cxdata().SV_state[id].connected = 1;
+#if DEBUG_COAXSERVO == 1
+            gcs().send_text(MAV_SEVERITY_INFO, "Ping Received");
+#endif
             break;
         case ID_CMD_PADATA_SET_POSITION: //CMD_PADATA_SET_POSITION
             //not used
@@ -508,14 +552,31 @@ void AP_CoaxServo::interprete_msg(uint16_t msg_box_id, uint8_t cmd) {
             cxdata().SV_state[id].failsafe_pos = (int16_t)(uint16_temp1 + (uint16_temp2 << 8));
             cxdata().SV_state[id].timeout = _RX_data[msg_box_id].Parameters[11];
             cxdata().SV_state[id].got_param = 1;
+#if DEBUG_COAXSERVO == 1
+            gcs().send_text(MAV_SEVERITY_INFO, "SV Param %u, %u, %u, %u, %u, %u, %u", 
+                cxdata().SV_state[id].angle_limit_min,
+                cxdata().SV_state[id].angle_limit_max, 
+                cxdata().SV_state[id].expansion,
+                cxdata().SV_state[id].reverse,
+                cxdata().SV_state[id].offset,
+                cxdata().SV_state[id].failsafe_pos,
+                cxdata().SV_state[id].timeout
+            );
+#endif
             break;
         case ID_CMD_PADATA_GET_POSITION:
             uint16_temp1 = _RX_data[msg_box_id].Parameters[0];
             uint16_temp2 = _RX_data[msg_box_id].Parameters[1];
             cxdata().SV_Pos[id].raw = uint16_temp1 + (uint16_temp2 << 8);
+#if DEBUG_COAXSERVO == 1
+            gcs().send_text(MAV_SEVERITY_INFO, "SV Pos ID %u, pos %u", id, cxdata().SV_Pos[id].raw);
+#endif
             break;
         case ID_CMD_PADATA_GET_MOT_TEMP_C:
             cxdata().SV_state[id].temperature = _RX_data[msg_box_id].Parameters[0];
+#if DEBUG_COAXSERVO == 1
+            gcs().send_text(MAV_SEVERITY_INFO, "SV Tmp ID %u, temp %u degC", id, cxdata().SV_state[id].temperature);
+#endif
             break;
         case ID_CMD_PADATA_GET_SW_REV:
             //not used
@@ -524,6 +585,9 @@ void AP_CoaxServo::interprete_msg(uint16_t msg_box_id, uint8_t cmd) {
             uint16_temp1 = _RX_data[msg_box_id].Parameters[0];
             uint16_temp2 = _RX_data[msg_box_id].Parameters[1];
             cxdata().SV_state[id].current = (float)(uint16_temp1 + (uint16_temp2 << 8)) / 100.0;
+#if DEBUG_COAXSERVO == 1
+            gcs().send_text(MAV_SEVERITY_INFO, "SV Cur ID %u, cur %.2f", id, cxdata().SV_state[id].current);
+#endif
             break;
         case ID_CMD_PADATA_GET_SIGNED_CURRENT:
         case ID_CMD_PADATA_POWERSTAGE_DISABLE:

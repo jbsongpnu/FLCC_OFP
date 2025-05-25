@@ -73,7 +73,7 @@ const AP_Param::GroupInfo AP_MotorsHeli_Swash::var_info[] = {
     // @Units: deg
     // @User: Advanced
     AP_GROUPINFO("H3_SV3_POS", 7, AP_MotorsHeli_Swash, _servo3_pos, 180),
-    
+
     // @Param: H3_PHANG
     // @DisplayName: Swashplate Phase Angle Compensation
     // @Description: Only for H3 swashplate.  If pitching the swash forward induces a roll, this can be correct the problem
@@ -82,7 +82,7 @@ const AP_Param::GroupInfo AP_MotorsHeli_Swash::var_info[] = {
     // @User: Advanced
     // @Increment: 1
     AP_GROUPINFO("H3_PHANG", 8, AP_MotorsHeli_Swash, _phase_angle, 0),
-   
+
     AP_GROUPEND
 };
 
@@ -101,6 +101,7 @@ void AP_MotorsHeli_Swash::configure()
 }
 
 // CCPM Mixers - calculate mixing scale factors by swashplate type
+// #Checkpoint 03-definition : this is the matrix
 void AP_MotorsHeli_Swash::calculate_roll_pitch_collective_factors()
 {
     if (_swash_type == SWASHPLATE_TYPE_H1) {
@@ -121,7 +122,7 @@ void AP_MotorsHeli_Swash::calculate_roll_pitch_collective_factors()
         _collectiveFactor[CH_3] = 1;
     }
 
-    if (_swash_type == SWASHPLATE_TYPE_H3) {
+    if (_swash_type == SWASHPLATE_TYPE_H3) {    //Checkpoint 03-H3 Generic
         // Three-servo roll/pitch mixer for adjustable servo position
         // can be any style swashplate, phase angle is adjustable
         _rollFactor[CH_1] = cosf(radians(_servo1_pos + 90 - _phase_angle));

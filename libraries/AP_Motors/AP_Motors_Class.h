@@ -65,9 +65,9 @@ public:
         MOTOR_FRAME_HELI = 6,
         MOTOR_FRAME_TRI = 7,
         MOTOR_FRAME_SINGLE = 8,
-        MOTOR_FRAME_COAX = 9,
+        MOTOR_FRAME_COAX = 9,           //This is not Coaxial rotor helicopter, but a coaxial multicopter
         MOTOR_FRAME_TAILSITTER = 10,
-        MOTOR_FRAME_HELI_DUAL = 11,
+        MOTOR_FRAME_HELI_DUAL = 11,     //This one includes intermeshing and coaxial helicopter
         MOTOR_FRAME_DODECAHEXA = 12,
         MOTOR_FRAME_HELI_QUAD = 13,
         MOTOR_FRAME_DECA = 14,

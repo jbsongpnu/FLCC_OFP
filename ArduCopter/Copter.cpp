@@ -121,6 +121,7 @@ const AP_Scheduler::Task Copter::scheduler_tasks[] = {
     FAST_TASK(heli_update_autorotation),
 #endif //HELI_FRAME
     // send outputs to the motors library immediately
+    //FAST_TASK(motors_output) => Copter::motors_output()  =>  flightmode->output_to_motors();  => motors->output();  => AP_MotorsHeli_Dual::output_to_motors()
     FAST_TASK(motors_output),
      // run EKF state estimator (expensive)
     FAST_TASK(read_AHRS),

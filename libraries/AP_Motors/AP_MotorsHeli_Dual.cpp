@@ -11,6 +11,46 @@
  *
  *  You should have received a copy of the GNU General Public License
  *  along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ 
+Note : Explanation about a coaxial rotor setup is described at https://ardupilot.org/copter/docs/dual-helicopter.html
+
+----Parameter Settings:----
+
+!! FRAME_CLASS to 11 (Heli_Dual)
+!! H_DUAL_MODE - Set to 2 for the intermeshing configuration
+H_DCP_SCALER - Scales the differential collective output to the rotors for a yaw axis input.
+H_YAW_SCALER - This parameter is set to zero for the coaxial configuration.
+H_COL_MAX- PWM for maximum collective pitch on counter clockwise rotor head that corresponds to H_COL_ANG_MAX
+H_COL_MIN - PWM for minimum collective pitch on counter clockwise rotor head that corresponds to H_COL_ANG_MIN
+H_SW_TYPE - Swashplate type for counter clockwise rotor head
+H_SW_COL_DIR - Swashplate collective direction for counter clockwise rotor head
+H_SW_LIN_SVO - Enables linear servo feature for counter clockwise rotor head
+H_COL2_MIN - PWM for minimum collective pitch on clockwise rotor head that corresponds to H_COL_ANG_MIN
+H_COL2_MAX- PWM for maximum collective pitch on clockwise rotor head that corresponds to H_COL_ANG_MAX
+H_SW2_TYPE - Swashplate type for clockwise rotor head
+H_SW2_COL_DIR - Swashplate collective direction for clockwise rotor head
+H_SW2_LIN_SVO - Enables linear servo feature for clockwise rotor head
+H_YAW_REV_EXPO - Yaw revereser smoothing exponent, smoothen transition near zero collective region. Increase this parameter to shink smoothing range. Set to -1 to disable reverser.
+
+@ These are only needed for the counter clockwise swashplate if H_SW_TYPE is set to H3 Generic.
+
+H_SW_H3_ENABLE - Do Not Set Manually! This is set automatically once H_SW_TYPE is set to H3 Generic
+H_SW_H3_SV1_POS
+H_SW_H3_SV2_POS
+H_SW_H3_SV3_POS
+H_SW_H3_PHANG
+
+@ These are only needed for the clockwise swashplate if H_SW2_TYPE is set to H3 Generic.
+
+H_SW2_H3_ENABLE - Do Not Set Manually! This is set automatically once H_SW2_TYPE is set to H3 Generic
+H_SW2_H3_SV1_POS
+H_SW2_H3_SV2_POS
+H_SW2_H3_SV3_POS
+H_SW2_H3_PHANG
+------------------------------
+<Structure>
+- Copter::init_ardupilot() => Copter::allocate_motors() (allocate_motors() is defined in /ArduCopter/system.cpp)
+- AP_MotorsHeli_Dual class is constructed from allocate_motors
  */
 
 #include <stdlib.h>
@@ -212,7 +252,7 @@ const AP_Param::GroupInfo AP_MotorsHeli_Dual::var_info[] = {
 void AP_MotorsHeli_Dual::set_update_rate( uint16_t speed_hz )
 {
     // record requested speed
-    _speed_hz = speed_hz;
+    _speed_hz = speed_hz; //_speed_hz was initialized when AP_MotorsHeli_Dual was constructed @allocate_motors()
 
     // setup fast channels
     uint32_t mask = 0;
@@ -312,7 +352,7 @@ void AP_MotorsHeli_Dual::set_desired_rotor_speed(float desired_speed)
     _main_rotor.set_desired_speed(desired_speed);
 }
 
-// calculate_armed_scalars
+// calculate_armed_scalars : called from {output() @AP_MotorsHeli}
 void AP_MotorsHeli_Dual::calculate_armed_scalars()
 {
     // Set rsc mode specific parameters
@@ -374,8 +414,8 @@ void AP_MotorsHeli_Dual::calculate_scalars()
     _collective2_zero_thrst_pct = _collective_zero_thrust_pct;
 
     // configure swashplate 1 and update scalars
-    _swashplate1.configure();
-    _swashplate1.calculate_roll_pitch_collective_factors();
+    _swashplate1.configure(); // #Checkpoint 02-use : configures swashplate type
+    _swashplate1.calculate_roll_pitch_collective_factors(); // #Checkpoint 03-use : set CCPM matrix scalars
 
     // configure swashplate 2 and update scalars
     _swashplate2.configure();

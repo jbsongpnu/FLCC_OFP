@@ -896,6 +896,7 @@ float Mode::get_avoidance_adjusted_climbrate(float target_rate)
 // send output to the motors, can be overridden by subclasses
 void Mode::output_to_motors()
 {
+    //FAST_TASK(motors_output) => Copter::motors_output()  =>  flightmode->output_to_motors();  => motors->output();  => AP_MotorsHeli_Dual::output_to_motors()
     motors->output();
 }
 

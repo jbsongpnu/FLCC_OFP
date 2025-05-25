@@ -132,6 +132,7 @@ void Copter::auto_disarm_check()
 }
 
 // motors_output - send output to motors library which will adjust and send to ESCs and servos
+//FAST_TASK(motors_output) => Copter::motors_output()  =>  flightmode->output_to_motors();  => motors->output();  => AP_MotorsHeli_Dual::output_to_motors()
 void Copter::motors_output()
 {
     static uint8_t CX_Scheduler = 0;    //Will send and receive CoaxServo data in 50Hz
@@ -182,7 +183,7 @@ void Copter::motors_output()
         motor_test_output();
     } else {
         // send output signals to motors
-        flightmode->output_to_motors();
+        flightmode->output_to_motors();//output_to_motors() for flight mode
     }
 
     // push all channels

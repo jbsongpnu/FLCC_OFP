@@ -48,14 +48,6 @@
 //      Bit5~7  Reserved
 //================================================
 
-struct CMD_Frame {
-    uint8_t ID = 0;
-    uint8_t LENGTH = 2;
-    uint8_t COMMAND = 0;
-    uint8_t Parameters[20] = {0};
-    uint8_t Checksum = 0;
-};
-
 union Err_msg{
     uint8_t ALL;
     struct {
@@ -81,7 +73,6 @@ public:
     static AP_CoaxServo *get_singleton();
     static AP_CoaxServo *_singleton;
     AP_CoaxServo *PegasusSV();
-    void Send_CMD_Frame(void);
     void CMD_PADATA_PING(uint8_t id);
     void CMD_PADATA_SET_POSITION(uint8_t id, uint16_t setpoint);
     void Set_Servo_ID(uint8_t pre_id, uint8_t aft_id);
@@ -101,7 +92,6 @@ public:
     uint8_t GET_RX_data_Length(uint8_t msgbox);
 private:
 
-    CMD_Frame _TX_data;
     RX_Frame _RX_data[6];
 
     void reset_RX_data(void);

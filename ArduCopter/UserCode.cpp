@@ -1,5 +1,7 @@
 #include "Copter.h"
 
+#define COAXSERVO_TEST 1
+#define COAXCAN_LOGGING 0
 #ifdef USERHOOK_INIT
 
 extern mavlink_sys_icd_flcc_gcs_inv_state_t     MAV_GCSTX_INV_State;
@@ -96,6 +98,7 @@ void Copter::userhook_init()
     MAV_GCSTX_HDM_data.Ifcu_H2TnkTmp = 14;
     MAV_GCSTX_HDM_data.Ifcu_H2TnkPrsX10 = 101;
 
+    cxdata().SV_TX[0].SV_pos = 2024;
     cxdata().SVinitialized = 0;
     cxdata().CX_State = CoaxState::CXSTATE_0_INIT;
     cxdata().Swash.Col = 2.1;
@@ -113,6 +116,7 @@ void Copter::userhook_init()
 //100Hz
 void Copter::userhook_FastLoop()
 {
+#if COAXSERVO_TEST == 0 //disabled during servo test
     static uint8_t SV_num = 0;
     uint8_t  CSBuf[64] = {0};
 
@@ -176,10 +180,7 @@ void Copter::userhook_FastLoop()
             
         break;
     }
-    
-        
-
-    
+#endif
 }
 #endif
 
@@ -198,19 +199,13 @@ void Copter::userhook_MediumLoop()
 
     //static variables
     static uint16_t Count1Hz = 0;
-    static uint8_t Count5Hz = 0;
-    
-    //Pegasus Servo testing
-    // static uint16_t temp_Pegasus_setting = 0;
-    // uint8_t  CSBuf[128] = {0};
-    // AP_CoaxServo *Pegasus = AP::PegasusSV();
 
-    //Send to GCS at 5Hz
-    if(Count5Hz>1) {
-        //gcs().send_message(MSG_COAXSERVO); 
-        Count5Hz = 0;
-    }
-    Count5Hz++;
+#if COAXSERVO_TEST == 1
+    // Pegasus Servo testing
+    static uint16_t temp_Pegasus_setting = 0;
+    uint8_t  CSBuf[128] = {0};  //this should be reduced, but can only be usded for temporary servo test
+    AP_CoaxServo *Pegasus = AP::PegasusSV();
+#endif
 
     //Send to GCS at 1Hz Testing
     // MSG_INV_STATE,  // mavlink message to send Inverter state
@@ -306,26 +301,38 @@ void Copter::userhook_MediumLoop()
         Count1Hz = 0;
     }
     Count1Hz++;
-
-    // //Pegasus Servo Testing
-    // temp_Pegasus_setting++;
-    // if(temp_Pegasus_setting >= 20) {
-    //     Pegasus->CMD_PADATA_PING(31);
-    //     //gcs().send_text(MAV_SEVERITY_INFO, "Pegasus Ping test");
-    //     temp_Pegasus_setting = 0;
-    // }
-
-    // {
-    //     uint16_t rcv;
-    //     uint16_t messages;
-    //     rcv = (uint16_t)Pegasus->receive_CoaxServo_uart_data(CSBuf);
-    //     messages = Pegasus->Parse_Buffer(CSBuf, rcv);
-    //     for(int i=0; i<messages; i++){
-    //         Pegasus->interprete_msg(i, 1);
-    //     }
+#if COAXSERVO_TEST == 1 //For temporary servo test. Disabled for normal operation
+    //Pegasus Servo Testing
+    temp_Pegasus_setting++;
+    {
+        uint16_t rcv;
+        rcv = (uint16_t)Pegasus->receive_CoaxServo_uart_data(CSBuf);
+        Pegasus->Parse_Buffer(CSBuf, rcv);
+        if(rcv == 5) {
+            Pegasus->interprete_msg(0, ID_CMD_PADATA_PING);
+        } else if (rcv > 5) {
+            Pegasus->interprete_msg(0, ID_CMD_PADATA_GET_MOT_TEMP_C); 
+        }
         
-    // }
+    }
+    //There was error since V0.01.27, some memory overflow that yields 0x400020 Internal Error+Panic
+    if((temp_Pegasus_setting % 5)==1) {
+        Pegasus->CMD_PADATA_PING(0x1F); 
+    } else if ((temp_Pegasus_setting % 5)==2) {
+        //Pegasus->Request_Servo_Pos(1);
+        //Pegasus->Request_Servo_Current(1);
+        //Pegasus->Request_all_Param(1);
+        Pegasus->Request_Servo_Temp(1);
 
+    } else {// ((temp_Pegasus_setting % 5)==3) {
+        cxdata().SV_TX[0].SV_pos = 2024;
+        //gcs().send_text(MAV_SEVERITY_ERROR, "TX SV : %u", cxdata().SV_TX[0].SV_pos);
+        Pegasus->Set_Coax_ServoPosition();
+    }
+    
+    temp_Pegasus_setting = temp_Pegasus_setting % 100;
+#endif
+#if COAXCAN_LOGGING == 1
     AP::logger().Write("INV1", "TimeUS,ONOFF,RPM,RPMCMD,IA,IB,IC", "QBfffff",
         AP_HAL::micros64(),                             //Q     TimeUS
         cxdata().INV_data.CMD_Flag.bits.Inverter_ONOFF, //B     ONOFF
@@ -373,6 +380,7 @@ void Copter::userhook_MediumLoop()
         cxdata().DMI_PMS_data.HDC_InputVoltage,         //f     HVIN
         cxdata().DMI_PMS_data.HDC_InputCurrent          //f     HCIN
     );
+#endif
     /*
     Format characters in the format string for binary log messages
     a   : int16_t[32]

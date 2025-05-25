@@ -77,7 +77,7 @@ void Copter::init_ardupilot()
     surface_tracking.init((SurfaceTracking::Surface)copter.g2.surftrak_mode.get());
 
     // allocate the motors class
-    allocate_motors();
+    allocate_motors(); //AP_MotorsHeli_Dual class is constructed from allocate_motors due to Frame_class being 11(Dual helicopters including coaxial rotor heli)
 
     // initialise rc channels including setting mode
     rc().convert_options(RC_Channel::AUX_FUNC::ARMDISARM_UNUSED, RC_Channel::AUX_FUNC::ARMDISARM_AIRMODE);
@@ -419,7 +419,7 @@ void Copter::allocate_motors(void)
             break;
 #else // FRAME_CONFIG == HELI_FRAME
         case AP_Motors::MOTOR_FRAME_HELI_DUAL:
-            motors = new AP_MotorsHeli_Dual(copter.scheduler.get_loop_rate_hz());
+            motors = new AP_MotorsHeli_Dual(copter.scheduler.get_loop_rate_hz());//constructing with {_speed_hz = _active_loop_rate_hz}
             motors_var_info = AP_MotorsHeli_Dual::var_info;
             AP_Param::set_frame_type_flags(AP_PARAM_FRAME_HELI);
             break;

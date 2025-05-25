@@ -7,6 +7,7 @@
 #include <AP_Param/AP_Param.h>
 
 // swashplate types
+// #Checkpoint 02-options : Swash plate option is defined here, may be Coaxial option should be defined
 enum SwashPlateType {
     SWASHPLATE_TYPE_H3 = 0,
     SWASHPLATE_TYPE_H1,
@@ -68,6 +69,10 @@ private:
     AP_Int16 _servo1_pos;                        // servo1 azimuth position on swashplate with front of heli being 0 deg
     AP_Int16 _servo2_pos;                        // servo2 azimuth position on swashplate with front of heli being 0 deg
     AP_Int16 _servo3_pos;                        // servo3 azimuth position on swashplate with front of heli being 0 deg
+    AP_Int16 _servo4_pos;    //Added for Coaxial Rotor
+    AP_Int16 _servo5_pos;    //Added for Coaxial Rotor
+    AP_Int16 _servo6_pos;    //Added for Coaxial Rotor
+
     AP_Int16 _phase_angle;                       // Phase angle correction for rotor head.  If pitching the swash forward induces 
                                                  // a roll, this can be negative depending on mechanics.
 
