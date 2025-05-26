@@ -115,6 +115,11 @@
 #define AP_SERIALMANAGER_MSP_BUFSIZE_TX     256
 #define AP_SERIALMANAGER_MSP_BAUD           115200
 
+//Loadcell Indicator
+#define AP_SERIALMANAGER_LCIND_BAUD         115200
+#define AP_SERIALMANAGER_LCIND_BUFSIZE_RX   128
+#define AP_SERIALMANAGER_LCIND_BUFSIZE_TX   128
+
 class AP_SerialManager {
 public:
     AP_SerialManager();
@@ -169,6 +174,8 @@ public:
         SerialProtocol_MSP_DisplayPort = 42,
         SerialProtocol_MAVLinkHL = 43,
         SerialProtocol_Tramp = 44,
+        SerialProtocol_CoaxPegasus = 45,
+        SerialProtocol_LCIND = 46,
         SerialProtocol_NumProtocols                    // must be the last value
     };
 
