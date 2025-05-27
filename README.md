@@ -3,23 +3,25 @@
 ***
 
 ## Version History
+- V1.00.00 Version-1 will get 4 Load-cell indicators' weight and display total weight on message display of mission planner
+  - This version had Internal Error 0x4000020 but had no problem functioning. 
+  - Coudn't find the reason for error, so it is disabled from displaying eeror
 - V0.01.01 Starting a basic structure for the Load-cell Indicator
-
 ***
 ## Parameter Setup (for Pixhawk6X)
 - SERIAL Port Setup
-SERIAL0_BAUD :      115     (115,200bps)
-SERIAL0_PROTOCOL :  2       (MAVLink2 - USB)
-SERIAL1_BAUD :      57      (57,600bps)
-SERIAL1_PROTOCOL :  2       (MAVLink2 - Telemetry1 - RF Modem)
-SERIAL2_BAUD :      115     (115,200bps)
-SERIAL2_PROTOCOL :  46      (LCIND - Telemetry2 - SI400-1)
-SERIAL3_BAUD :      115     (115,200bps)
-SERIAL3_PROTOCOL :  46      (LCIND - GPS1 - SI400-2)
-SERIAL4_BAUD :      115     (115,200bps)     
-SERIAL4_PROTOCOL :  46      (LCIND - GPS1 - SI400-3)
-SERIAL5_BAUD :      115     (115,200bps)     
-SERIAL5_PROTOCOL :  46      (LCIND - Telemetry3 - SI400-4)
+  - SERIAL0_BAUD :      115     (115,200bps)
+  - SERIAL0_PROTOCOL :  2       (MAVLink2 - USB)
+  - SERIAL1_BAUD :      57      (57,600bps)
+  - SERIAL1_PROTOCOL :  2       (MAVLink2 - Telemetry1 - RF Modem)
+  - SERIAL2_BAUD :      115     (115,200bps)
+  - SERIAL2_PROTOCOL :  46      (LCIND1 - Telemetry2 - SI400-1)
+  - SERIAL3_BAUD :      115     (115,200bps)
+  - SERIAL3_PROTOCOL :  46      (LCIND2 - GPS1 - SI400-2)
+  - SERIAL4_BAUD :      115     (115,200bps)     
+  - SERIAL4_PROTOCOL :  46      (LCIND3 - GPS1 - SI400-3)
+  - SERIAL5_BAUD :      115     (115,200bps)     
+  - SERIAL5_PROTOCOL :  46      (LCIND4 - Telemetry3 - SI400-4)
 
 ***
 # ArduPilot Project
