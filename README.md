@@ -1,8 +1,11 @@
 # Coaxial Rotor Heli Peripheral : Load-cell Indicator project
-- User "./waf copter" for buiding the code
+- Use "./waf copter" for building the code   
+@ Main Code Branch : CoaxialV2   
+@ Sub Code Branch : LoadCell_4p2p2
 ***
 
 ## Version History
+- V2.00.00 Version-2 will send data to GCS with new Mavlink messages. MAV_CMD_LCID_ZEROSET and LOADCELL_INDICATORS
 - V1.00.00 Version-1 will get 4 Load-cell indicators' weight and display total weight on message display of mission planner
   - This version had Internal Error 0x4000020 but had no problem functioning. 
   - Coudn't find the reason for error, so it is disabled from displaying eeror
@@ -22,6 +25,9 @@
   - SERIAL4_PROTOCOL :  46      (LCIND3 - GPS1 - SI400-3)
   - SERIAL5_BAUD :      115     (115,200bps)     
   - SERIAL5_PROTOCOL :  46      (LCIND4 - Telemetry3 - SI400-4)
+***
+## CGS for Coaxial Rotor
+- [https://github.com/Yisak2023/COAX_GCS/tree/master](https://github.com/Yisak2023/COAX_GCS/tree/master)   
 
 ***
 # ArduPilot Project

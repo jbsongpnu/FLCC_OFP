@@ -3,6 +3,7 @@
 #include "GCS_Mavlink.h"
 #include <AP_RPM/AP_RPM_config.h>
 #include <AP_EFI/AP_EFI_config.h>
+#include "LCIND.h"
 
 MAV_TYPE GCS_Copter::frame_type() const
 {
@@ -1028,9 +1029,20 @@ MAV_RESULT GCS_MAVLINK_Copter::handle_command_long_packet(const mavlink_command_
         GCS_MAVLINK_Copter::convert_COMMAND_LONG_to_COMMAND_INT(packet, packet_int);
         return handle_command_pause_continue(packet_int);
     }
+    case MAV_CMD_LCID_ZEROSET: {
+
+        return handle_command_lcid_zeroset();
+    }
     default:
         return GCS_MAVLINK::handle_command_long_packet(packet);
     }
+}
+
+MAV_RESULT GCS_MAVLINK_Copter::handle_command_lcid_zeroset() 
+{
+    LCIND_class *LCIND = AP::LCIND_g();
+    LCIND->TX_Set_Zero();
+    return MAV_RESULT_ACCEPTED;
 }
 
 MAV_RESULT GCS_MAVLINK_Copter::handle_command_pause_continue(const mavlink_command_int_t &packet)

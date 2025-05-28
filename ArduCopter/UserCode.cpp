@@ -3,7 +3,7 @@
 #include "LCIND.h"
 
 extern const AP_HAL::HAL& hal;
-
+extern mavlink_loadcell_indicators_t MAV_GCSTX_LCID;
 #ifdef USERHOOK_INIT
 void Copter::userhook_init()
 {
@@ -20,6 +20,7 @@ void Copter::userhook_FastLoop()
     static RingBuffer Rb2;
     static RingBuffer Rb3;
     static RingBuffer Rb4;
+    static uint32_t runcounter = 0;
 
     LCIND_class *LCIND = AP::LCIND_g();
     uint8_t parsebuff[BUF_SIZE_PARSE] = {0};
@@ -70,12 +71,31 @@ void Copter::userhook_FastLoop()
 
     if((LCIND->valid[0]) || (LCIND->valid[1]) || (LCIND->valid[2]) || (LCIND->valid[3])) {
         LCIND->total_weight = LCIND->weight[0] + LCIND->weight[1] + LCIND->weight[2] + LCIND->weight[3];
-        gcs().send_text(MAV_SEVERITY_INFO, "ID bit %u, %u, %u, %u, Totweight %.2f", LCIND->valid[0], LCIND->valid[1], LCIND->valid[2], LCIND->valid[3], LCIND->total_weight);
-        //gcs().send_text(MAV_SEVERITY_INFO, "Total Weight : %f", LCIND->total_weight);
+        
+        MAV_GCSTX_LCID.Total_weight = LCIND->total_weight;
+        MAV_GCSTX_LCID.LC1 = LCIND->weight[0];
+        MAV_GCSTX_LCID.LC2 = LCIND->weight[1];
+        MAV_GCSTX_LCID.LC3 = LCIND->weight[2];
+        MAV_GCSTX_LCID.LC4 = LCIND->weight[3];
+        //LC1 : FL, LC2 : FR, LC3 : RL, LC4 : RR
+        MAV_GCSTX_LCID.Qx = ((LCIND->weight[0]+LCIND->weight[2]) - (LCIND->weight[1]+LCIND->weight[3])) * 0.5 ;
+        MAV_GCSTX_LCID.Qy = ((LCIND->weight[0]+LCIND->weight[1]) - (LCIND->weight[2]+LCIND->weight[3])) * 0.5 ;
+
+        if((runcounter % 100) == 0) {
+            //debug message at 1Hz
+            gcs().send_text(MAV_SEVERITY_INFO, "ID bit %u%u%u%u, Total %.2f, Qx %.2f, Qy %.2f", LCIND->valid[0], LCIND->valid[1], LCIND->valid[2], LCIND->valid[3], LCIND->total_weight, MAV_GCSTX_LCID.Qx, MAV_GCSTX_LCID.Qy);
+        }
+        if((runcounter % 10) == 0) {
+            //Send to ground program at 10Hz
+            gcs().send_message(MSG_LCID);
+        }
+
         LCIND->valid[0] = LCIND->valid[1] = LCIND->valid[2] = LCIND->valid[3] = 0;
+        
     }
 
     LCIND->TX_request();
+    runcounter++;
 }
 #endif
 

@@ -1067,6 +1067,7 @@ private:
     // true if we should NOT do MAVLink on this port (usually because
     // someone's doing SERIAL_CONTROL over mavlink)
     bool _locked;
+    void send_message_loadcell_indicators() const;
 };
 
 /// @class GCS
