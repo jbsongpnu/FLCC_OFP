@@ -1,6 +1,6 @@
 #include "Copter.h"
 
-#define COAXSERVO_TEST 1
+#define COAXSERVO_TEST 0
 #define COAXCAN_LOGGING 0
 #ifdef USERHOOK_INIT
 

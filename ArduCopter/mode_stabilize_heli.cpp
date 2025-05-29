@@ -41,6 +41,7 @@ void ModeStabilize_Heli::run()
     // for operational checks. Also, unlike multicopters we do not set throttle (i.e. collective pitch) to zero
     // so the swash servos move.
 
+    //To Do : Allow idle state
     if (!motors->armed()) {
         // Motors should be Stopped
         motors->set_desired_spool_state(AP_Motors::DesiredSpoolState::SHUT_DOWN);

@@ -132,7 +132,7 @@ void Copter::auto_disarm_check()
 }
 
 // motors_output - send output to motors library which will adjust and send to ESCs and servos
-//FAST_TASK(motors_output) => Copter::motors_output()  =>  flightmode->output_to_motors();  => motors->output();  => AP_MotorsHeli_Dual::output_to_motors()
+//FAST_TASK(motors_output) => Copter::motors_output()  =>  flightmode->output_to_motors();  => motors->output();  => AP_MotorsHeli::output() => AP_MotorsHeli_Dual::output_to_motors()
 void Copter::motors_output()
 {
     static uint8_t CX_Scheduler = 0;    //Will send and receive CoaxServo data in 50Hz
@@ -160,7 +160,7 @@ void Copter::motors_output()
     }
 
     // output any servo channels
-    SRV_Channels::calc_pwm();
+    SRV_Channels::calc_pwm();   //Swash doens't seem to be calculated here
 
     // cork now, so that all channel outputs happen at once
     SRV_Channels::cork();
@@ -169,12 +169,17 @@ void Copter::motors_output()
     SRV_Channels::output_ch_all();
 
     // update motors interlock state
-    bool interlock = motors->armed() && !ap.in_arming_delay && (!ap.using_interlock || ap.motor_interlock_switch) && !SRV_Channels::get_emergency_stop();
-    if (!motors->get_interlock() && interlock) {
-        motors->set_interlock(true);
+    bool interlock = motors->armed() &&             //Motor is armed AND
+                    !ap.in_arming_delay &&          //NOT in arming delay AND
+                    (!ap.using_interlock ||         //(NOT using interlock OR
+                    ap.motor_interlock_switch) &&   //if used, the interlock is ON) AND
+                    !SRV_Channels::get_emergency_stop(); //NOT in emergency stop state
+                    //Then, interlock is true
+    if (!motors->get_interlock() && interlock) {        //if current interlock is off, and new interlock is on (rising edge detected)
+        motors->set_interlock(true);                    //Set interlock true and leave a log event
         AP::logger().Write_Event(LogEvent::MOTORS_INTERLOCK_ENABLED);
-    } else if (motors->get_interlock() && !interlock) {
-        motors->set_interlock(false);
+    } else if (motors->get_interlock() && !interlock) { //if current interlock is on, and new interlock is off (falling edge detected)
+        motors->set_interlock(false);                   //Set interlock false and leave a log event
         AP::logger().Write_Event(LogEvent::MOTORS_INTERLOCK_DISABLED);
     }
 
@@ -184,6 +189,7 @@ void Copter::motors_output()
     } else {
         // send output signals to motors
         flightmode->output_to_motors();//output_to_motors() for flight mode
+        // directed to AP_MotorsHeli::output() for Coaxial rotor heli
     }
 
     // push all channels

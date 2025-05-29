@@ -557,6 +557,7 @@ void AP_MotorsHeli_Dual::move_actuators(float roll_out, float pitch_out, float c
     limit.throttle_upper = false;
 
     if (_dual_mode == AP_MOTORS_HELI_DUAL_MODE_TRANSVERSE || _dual_mode == AP_MOTORS_HELI_DUAL_MODE_INTERMESHING) {
+        //Coaxial rotor heli uses AP_MOTORS_HELI_DUAL_MODE_INTERMESHING
         if (pitch_out < -_cyclic_max/4500.0f) {
             pitch_out = -_cyclic_max/4500.0f;
             limit.pitch = true;
@@ -566,7 +567,8 @@ void AP_MotorsHeli_Dual::move_actuators(float roll_out, float pitch_out, float c
             pitch_out = _cyclic_max/4500.0f;
             limit.pitch = true;
         }
-    } else {
+    }
+    if (_dual_mode != AP_MOTORS_HELI_DUAL_MODE_TRANSVERSE) { //Bug fixed : V1.01.33 latest AP update is applied in this line
         if (roll_out < -_cyclic_max/4500.0f) {
             roll_out = -_cyclic_max/4500.0f;
             limit.roll = true;
@@ -622,7 +624,7 @@ void AP_MotorsHeli_Dual::move_actuators(float roll_out, float pitch_out, float c
 
         if (_dual_mode == AP_MOTORS_HELI_DUAL_MODE_INTERMESHING) {
             // for intermeshing, reverse yaw in negative collective region and smoothen transition near zero collective
-            if (_yaw_rev_expo > 0.01f) {
+            if (_yaw_rev_expo > 0.01f) {    //H_YAW_REV_EXPO
                 // yaw_compensation range: (-1,1) S-shaped curve (Logistic Model) 1/(1 + e^kt)
                 yaw_compensation = 1.0f - (2.0f / (1.0f + powf(2.7182818f , _yaw_rev_expo * (collective_out-_collective_zero_thrust_pct))));
                 yaw_out = yaw_out * yaw_compensation;
@@ -646,7 +648,7 @@ void AP_MotorsHeli_Dual::move_actuators(float roll_out, float pitch_out, float c
         yaw_out = _cyclic_max/4500.0f;
         limit.yaw = true;
     }
-
+    //For coaxial rotor, calculate collective for upper and lower swash from yaw_out as differential pitch
     // scale collective pitch for front swashplate (servos 1,2,3)
     float collective_scaler = ((float)(_collective_max-_collective_min))*0.001f;
     float collective_out_scaled = collective_out * collective_scaler + (_collective_min - 1000)*0.001f;

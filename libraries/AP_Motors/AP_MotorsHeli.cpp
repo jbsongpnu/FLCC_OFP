@@ -206,19 +206,20 @@ void AP_MotorsHeli::output_min()
 
 // output - sends commands to the servos
 // #Checkpoint 01 : Coaxial heli uses AP_MotorHeli_Dual class, but it uses this function too
-//FAST_TASK(motors_output) => Copter::motors_output()  =>  flightmode->output_to_motors();  => motors->output();  => AP_MotorsHeli_Dual::output_to_motors()
+//FAST_TASK(motors_output) => Copter::motors_output()  =>  flightmode->output_to_motors();  => motors->output();  => AP_MotorsHeli::output() => AP_MotorsHeli_Dual::output_to_motors()
 void AP_MotorsHeli::output()
 {
     // update throttle filter
-    update_throttle_filter();
+    update_throttle_filter();   //apply filter to '_throttle_in'
 
-    // run spool logic
+    // run spool STATE MACHINE : SHUT_DOWN → GROUND_IDLE → SPOOLING_UP → THROTTLE_UNLIMITED
+    // THROTTLE_UNLIMITED → SPOOLING_DOWN → GROUND_IDLE → SHUT_DOWN
     output_logic();
 
     if (armed()) {
         // block servo_test from happening at disarm
         _servo_test_cycle_counter = 0;
-        calculate_armed_scalars();
+        calculate_armed_scalars(); // AP_MotorsHeli_Dual::calculate_armed_scalars() for Coaxial Rotor Motor for rotating rotors
         if (!get_interlock()) {
             output_armed_zero_throttle();
         } else {
@@ -327,7 +328,10 @@ void AP_MotorsHeli::output_disarmed()
     move_actuators(_roll_in, _pitch_in, get_throttle(), _yaw_in);
 }
 
-// run spool logic
+// run spool logic - Called from AP_MotorsHeli::output()
+// STATE MACHINE for Motor Spool State
+// SHUT_DOWN → GROUND_IDLE → SPOOLING_UP → THROTTLE_UNLIMITED
+// THROTTLE_UNLIMITED → SPOOLING_DOWN → GROUND_IDLE → SHUT_DOWN
 void AP_MotorsHeli::output_logic()
 {
     // force desired and current spool mode if disarmed and armed with interlock enabled
@@ -548,8 +552,8 @@ void AP_MotorsHeli::reset_flight_controls()
 // servo travel range is fixed to 1000 pwm and therefore the input is
 // multiplied by 500 to get PWM output.
 void AP_MotorsHeli::rc_write_swash(uint8_t chan, float swash_in)
-{
-    uint16_t pwm = (uint16_t)(1500 + 500 * swash_in);
+{   //This is the final destination of servo motor servo PWM calculation.
+    uint16_t pwm = (uint16_t)(1500 + 500 * swash_in);//This seems unfit with Pegasus
     SRV_Channel::Aux_servo_function_t function = SRV_Channels::get_motor_function(chan);
     SRV_Channels::set_output_pwm_trimmed(function, pwm);
 }
