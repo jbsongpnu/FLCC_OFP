@@ -265,15 +265,16 @@ void AP_CoaxServo::Request_all_Param(uint8_t id) {
 // NOT answered by Response Frame
 void AP_CoaxServo::Set_Coax_ServoPosition(void) {
     
-    uint8_t buffer[23];
+    //uint8_t buffer[23];
+    uint8_t buffer[26];//23 is enough, but trying to see if more length helps eliminating internal_error 0x4000020
     uint8_t chcksm;
     buffer[0] = 0xFF;       //Header
     buffer[1] = 0x1F;       //Target ID
-    buffer[2] = 0x02;       //Length
-    buffer[3] = 0x01;       //Command
+    buffer[2] = 0x14;       //Length (3 * 6) + 2 = 20 = 0x14
+    buffer[3] = 0x07;       //Command : bug fixed
     chcksm = buffer[1] + buffer[2] + buffer[3];
     for(int i=0; i<6; i++) {
-        buffer[(i * 3)+4] = i+1;
+        buffer[(i * 3)+4] = i; //Servos are numbered from 0 to 5 for six servos
         buffer[(i * 3)+5] = (uint8_t)(cxdata().SV_TX[i].SV_pos & 0x00FF); 
         buffer[(i * 3)+6] = (uint8_t)((cxdata().SV_TX[i].SV_pos >> 8) & 0x00FF);
         chcksm += buffer[(i * 3)+4] + buffer[(i * 3)+5] + buffer[(i * 3)+6];
@@ -525,7 +526,7 @@ void AP_CoaxServo::interprete_msg(uint16_t msg_box_id, uint8_t cmd) {
         case ID_CMD_PADATA_PING:
             cxdata().SV_state[id].connected = 1;
 #if DEBUG_COAXSERVO == 1
-            gcs().send_text(MAV_SEVERITY_INFO, "Ping Received");
+            gcs().send_text(MAV_SEVERITY_INFO, "Ping Received : %d", id);
 #endif
             break;
         case ID_CMD_PADATA_SET_POSITION: //CMD_PADATA_SET_POSITION

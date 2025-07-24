@@ -10,6 +10,7 @@
 //Debug Control
 #define DEBUG_IFCU  0   //IFCU Test
 #define DEBUG_PMS   0   //PMS Test
+#define DEBUG_CANTX 0   //Temporary debugging code enabled
 
 extern const AP_HAL::HAL& hal;
 
@@ -698,7 +699,7 @@ void AP_COAXCAN2::Check_ALL_data(void)
         cxdata().DMI_PMS_data.HDC_InputCurrent = (float)_PMS3.InputCurrent_raw * 0.1;// - 350.0;
         _DMI_has_Initialized |= 0x02;
 #if DEBUG_PMS == 1
-        gcs().send_text(MAV_SEVERITY_INFO, "PMS2-i : %.1f, %.1f, %.1f, %.1f",
+        gcs().send_text(MAV_SEVERITY_INFO, "PMS3-i : %.1f, %.1f, %.1f, %.1f",
             cxdata().DMI_PMS_data.Batt_Output_Current, cxdata().DMI_PMS_data.LDC_Output_Current, 
             cxdata().DMI_PMS_data.Mv_Output_Current, cxdata().DMI_PMS_data.Mv_Battery_Voltage);
 #endif
@@ -711,7 +712,7 @@ void AP_COAXCAN2::Check_ALL_data(void)
         cxdata().DMI_PMS_data.FDC_Flag1.ALL = _FDC1.Flag1.ALL;
         cxdata().DMI_PMS_data.FDC_Flag2.ALL = _FDC1.Flag2.ALL;
         _DMI_has_Initialized |= 0x04;
-#if DEBUG_IFCU == 1
+#if DEBUG_PMS == 1
         gcs().send_text(MAV_SEVERITY_INFO, "FDC1-i : AuxV %.1f, MaxTemp %d",
             cxdata().DMI_PMS_data.FDC_Aux_Volt, cxdata().DMI_PMS_data.FDC_Max_Temp);
 #endif
@@ -781,11 +782,20 @@ void AP_COAXCAN2::TX_FCC1_MSG(void)
 {
     uint8_t temp_data[8] = {0} ;
     uint8_t tempjoin = 0;
-
+#if DEBUG_CANTX == 1
+    static uint16_t temp_debug_count = 0;
+#endif
+#if DEBUG_CANTX == 1
+    if(temp_debug_count > 50) {
+        _FCC_Ready = (_FCC_Ready + 1) % 2;
+    }
+    temp_debug_count++;
+#else 
+    _FCC_Ready = cxdata().fcrdy;
+#endif
     //_FCC_AlivCnt : looping 0~15
     _FCC_CmdFcRunStop = 0;
-    _FCC_CmdPmsBatCut = 0;
-    _FCC_Ready = cxdata().fcrdy;
+    _FCC_CmdPmsBatCut = 0;//Unsure if this will be uesd
     _FCC_Reserved1 = 0;
 
     tempjoin = _FCC_AlivCnt + ((_FCC_CmdFcRunStop & 0x01) << 4) 

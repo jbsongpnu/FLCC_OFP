@@ -1,6 +1,8 @@
 #include "Copter.h"
 
-#define COAXSERVO_TEST 0
+//Pegasus suervo will be changed to HiTech servos. 
+//Following code contains temporary debugging 
+#define COAXSERVO_TEST 1
 #define COAXCAN_LOGGING 0
 #ifdef USERHOOK_INIT
 
@@ -199,12 +201,16 @@ void Copter::userhook_MediumLoop()
 
     //static variables
     static uint16_t Count1Hz = 0;
-
+    
 #if COAXSERVO_TEST == 1
+    uint16_t rcv = 0;
     // Pegasus Servo testing
     static uint16_t temp_Pegasus_setting = 0;
-    uint8_t  CSBuf[128] = {0};  //this should be reduced, but can only be usded for temporary servo test
+    uint8_t  CSBuf[16] = {0};  //this should be reduced, but can only be usded for temporary servo test
     AP_CoaxServo *Pegasus = AP::PegasusSV();
+
+    //static uint8_t ID_init = 0;
+    static uint8_t ID_Cycle = 0;
 #endif
 
     //Send to GCS at 1Hz Testing
@@ -303,34 +309,52 @@ void Copter::userhook_MediumLoop()
     Count1Hz++;
 #if COAXSERVO_TEST == 1 //For temporary servo test. Disabled for normal operation
     //Pegasus Servo Testing
-    temp_Pegasus_setting++;
-    {
-        uint16_t rcv;
-        rcv = (uint16_t)Pegasus->receive_CoaxServo_uart_data(CSBuf);
-        Pegasus->Parse_Buffer(CSBuf, rcv);
-        if(rcv == 5) {
-            Pegasus->interprete_msg(0, ID_CMD_PADATA_PING);
-        } else if (rcv > 5) {
-            Pegasus->interprete_msg(0, ID_CMD_PADATA_GET_MOT_TEMP_C); 
-        }
+    //-----Enable following block to set ID for each Pegasus servo ------
+    // if(ID_init==0) {
+    //     if(temp_Pegasus_setting > 50) {
+    //         ID_init = 1;
+    //         //Pegasus->Set_Servo_ID(1, 5);
+    //         //gcs().send_text(MAV_SEVERITY_INFO, "ID changed from 1 to 4");
+    //     }
         
+    // }
+    //------End of block------
+    
+    rcv = Pegasus->receive_CoaxServo_uart_data(CSBuf);
+    if(rcv) {
+        Pegasus->Parse_Buffer(CSBuf, rcv); //<====this part creates Interan_Error 0x400020
     }
+    if(rcv == 5) {
+        Pegasus->interprete_msg(0, ID_CMD_PADATA_PING);
+    // } else if (rcv > 5) {
+    //     //Pegasus->interprete_msg(0, ID_CMD_PADATA_GET_MOT_TEMP_C); 
+    //     Pegasus->interprete_msg(0, ID_CMD_PADATA_GET_POSITION);
+    }
+        
+    
     //There was error since V0.01.27, some memory overflow that yields 0x400020 Internal Error+Panic
     if((temp_Pegasus_setting % 5)==1) {
-        Pegasus->CMD_PADATA_PING(0x1F); 
-    } else if ((temp_Pegasus_setting % 5)==2) {
-        //Pegasus->Request_Servo_Pos(1);
-        //Pegasus->Request_Servo_Current(1);
-        //Pegasus->Request_all_Param(1);
-        Pegasus->Request_Servo_Temp(1);
+        //Pegasus->CMD_PADATA_PING(0x1F); 
+        Pegasus->CMD_PADATA_PING(ID_Cycle); 
+        ID_Cycle = (ID_Cycle + 1) % 6;
+    // } else if ((temp_Pegasus_setting % 5)==2) {
+    //     Pegasus->Request_Servo_Pos(1);
+    //     //Pegasus->Request_Servo_Current(1);
+    //     //Pegasus->Request_all_Param(1);
+    //     //Pegasus->Request_Servo_Temp(1);
 
-    } else {// ((temp_Pegasus_setting % 5)==3) {
+    } else if ((temp_Pegasus_setting % 5)==3) {
         cxdata().SV_TX[0].SV_pos = 2024;
+        cxdata().SV_TX[1].SV_pos = 2024;
+        cxdata().SV_TX[2].SV_pos = 2024;
+        cxdata().SV_TX[3].SV_pos = 2024;
+        cxdata().SV_TX[4].SV_pos = 2024;
+        cxdata().SV_TX[5].SV_pos = 2024;
         //gcs().send_text(MAV_SEVERITY_ERROR, "TX SV : %u", cxdata().SV_TX[0].SV_pos);
-        Pegasus->Set_Coax_ServoPosition();
+        Pegasus->Set_Coax_ServoPosition();//Bug fixed in this function that yields critical communication error from RS485
     }
     
-    temp_Pegasus_setting = temp_Pegasus_setting % 100;
+    temp_Pegasus_setting = (temp_Pegasus_setting + 1) % 100;
 #endif
 #if COAXCAN_LOGGING == 1
     AP::logger().Write("INV1", "TimeUS,ONOFF,RPM,RPMCMD,IA,IB,IC", "QBfffff",

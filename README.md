@@ -5,6 +5,7 @@
 ***
 
 ## Version History
+- V0.01.34 Fixing Errors from tests - CAN, Pegasus Servo. Also, Added some remarks for helicopter setting
 - V0.01.33 Bug fixed in AP_MotorsHeli_Dual::move_actuators(), organized code with many information
 - V0.01.32 Fixing error: "Internal_Error 0x4000020". Also, working with CoaxServo tests and finding swashplate logics.
 - V0.01.31 Added Mavlink processing functions related to V0.01.30
@@ -42,10 +43,10 @@
 ***
 ## Parameter Setup (for Pixhawk6X)
 ### CAN Port Setup
-- CAN_D1_PROTOCOL :   1       (CoaxCAN1)
-- CAN_D2_PROTOCOL :   2       (CoaxCAN2)
-- CAN_P1_DRIVER :     13      (CoaxCAN1 - CAN1)
-- CAN_P2_DRIVER :     14      (CoaxCAN2 - CAN2)
+- CAN_D1_PROTOCOL :   13       (CoaxCAN1)
+- CAN_D2_PROTOCOL :   14       (CoaxCAN2)
+- CAN_P1_DRIVER :     1      (CoaxCAN1 - CAN1)
+- CAN_P2_DRIVER :     2      (CoaxCAN2 - CAN2)
 - CAN_P1_BITRATE :    500000  (500Kbps)
 - CAN_P2_BITRATE :    500000  (500Kbps)
 ### SERIAL Port Setup
@@ -61,13 +62,27 @@
 - SERIAL4_PROTOCOL :  36      (AHRS - GPS2 - VN-200)
 - SERIAL5_BAUD :      115     (115,200bps)      
 - SERIAL5_PROTOCOL :  45      (CoaxServo - Telemetry3 - PegasusActuators)
-### More
-- For VectorNAV VN-200, refer to [https://ardupilot.org/copter/docs/common-external-ahrs-vectornav.html](https://ardupilot.org/copter/docs/common-external-ahrs-vectornav.html)
-- Helicopter Setup to Coaxial Rotor, refer to [https://ardupilot.org/copter/docs/dual-helicopter.html#coaxial](https://ardupilot.org/copter/docs/dual-helicopter.html#coaxial)
+### Coax Heli Specific
 - FRAME_CLASS :       11      (Heli_Dual including Coaxial Rotor)
 - H_DUAL_MODE :       2       (Intermeshing or Coaxial)
 - H_SW_TYPE :         0       (H3 Generic Swashplate : counter clockwise rotation)
 - H_SW2_TYPE :        0       (H3 Generic Swashplate : clockwise rotation)
+- H_COL_MAX :         TBD     Collective Max PWM (1750) - Upper Rotor - CCW
+- H_COL_MIN :         TBD     Collective Min PWM (1250)
+- H_COL2_MAX :        TBD     Collective Max PWM (1750) - Lower Rotor - CW
+- H_COL2_MIN :        TBD     Collective Min PWM (1250)
+- H_COL_ANG_MAX :     15      Collective Max Pitch Angle
+- H_COL_ANG_MIN :     -5       Collective Min Pitch Angle
+- H_COL_LAND_MIN :    2       Collective MIN when landed 
+- H_COL_ZERO_THRST :  0       Zero-thrust Col
+- H_CYC_MAX :         2500    Cyclic MAX 0 ~ 4500 
+- H_DCP_SCALER :      0.25    Scaling Factor of Rudder to Differential Pitch
+- H_HOVER_LEARN :     0       Disabled => Fixed H_COL_HOVER
+- H_COL_HOVER :       0.8     Hovering collective angle / (COL_MAX - COL_MIN)
+
+### More
+- For VectorNAV VN-200, refer to [https://ardupilot.org/copter/docs/common-external-ahrs-vectornav.html](https://ardupilot.org/copter/docs/common-external-ahrs-vectornav.html)
+- Helicopter Setup to Coaxial Rotor, refer to [https://ardupilot.org/copter/docs/dual-helicopter.html#coaxial](https://ardupilot.org/copter/docs/dual-helicopter.html#coaxial)
 ***
 ## Tuning Control Parameters
 - ATC_ACCEL_x_Max should be less than 36000 for heavy-weight helicopter
