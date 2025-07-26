@@ -1136,6 +1136,10 @@ MAV_RESULT GCS_MAVLINK_Copter::handle_command_CXSV_SWASH_OVERRIDE(const mavlink_
 
 // -------------------------------------------------------------------------
 // Handle Command 61110 MAV_CMD_COAX_SET_MOTOR
+// Param 1 : Ignore/ON/OFF => 0 / 1 / 2
+// Param 2 : Mode (Stop / Speed) => 0 / 4
+// Param 3 : RPM (Max 6000) => 0 ~ 6000
+// Param 4 : Acceleration (Max 3000) => 0 ~ 6000
 // -------------------------------------------------------------------------
 MAV_RESULT GCS_MAVLINK_Copter::handle_command_COAX_SET_MOTOR(const mavlink_command_long_t &msg)
 {
@@ -1146,8 +1150,15 @@ MAV_RESULT GCS_MAVLINK_Copter::handle_command_COAX_SET_MOTOR(const mavlink_comma
 
     if((param1 > 0) && (param1 < 3)) {
         //Only send On/Off if param1 is 1 or 2
-        cxdata().Command_Received.NewCMD.bits.Inverter_ONOFF = 1;
-        cxdata().Command_Received.Inv_On_Off = param1;
+        if(cxdata().INV_data.Rdy2useINV == 0) {//For first time to press RUN, just set Inverter ready to use
+            cxdata().Command_Received.Target_INV_RPM = 0;
+            cxdata().Command_Received.Target_INV_ACC = 0;
+            cxdata().INV_data.Rdy2useINV = 1;
+            gcs().send_text(MAV_SEVERITY_INFO, "Inverter is being notified with Ready-to-Use");
+        } else {
+            cxdata().Command_Received.NewCMD.bits.Inverter_ONOFF = 1;
+            cxdata().Command_Received.Inv_On_Off = param1;
+        }
     } else if (param1 == 0){
         //When param1 is 0
         if(param2 == 4) {

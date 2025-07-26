@@ -1,3 +1,4 @@
+//CoaxCAN1 is for the Inverter and CCB of Coaxial rotor helicopter
 #include <AP_Common/AP_Common.h>
 #include <AP_HAL/AP_HAL.h>
 #include "AP_CoaxCAN1.h"
@@ -12,6 +13,7 @@ extern const AP_HAL::HAL& hal;
 #define TEMP_EXP 0		//Initial value
 #define DEBUG_INVERTER 0
 #define DEBUG_CCB 0
+#define DEBUG_GCSCMD 0
 
 // Table of user settable CAN bus parameters
 const AP_Param::GroupInfo AP_COAXCAN1::var_info[] = {
@@ -534,6 +536,10 @@ void AP_COAXCAN1::Check_INV_data(void)
         if(INV_GET_CMD.BYTE0.bits.Ctrl_Mode==4){
             cxdata().INV_data.Motor_RPM_CMD = INV_GET_CMD.Ref1_RAW / 10;
             cxdata().INV_data.Motor_ACC_CMD = INV_GET_CMD.Ref2_RAW / 10;
+        } else {
+            //We don't use other modes : reset to zero for RPM and ACC
+            cxdata().INV_data.Motor_RPM_CMD = 0;
+            cxdata().INV_data.Motor_ACC_CMD = 0;
         }
         cxdata().INV_data.isNew = cxdata().INV_data.isNew | 0x01;
         _INV_has_Initialized |= 0x01;
@@ -634,52 +640,93 @@ void AP_COAXCAN1::Check_CCB_data(void)
 void AP_COAXCAN1::TXspin()
 {
     //====Send GCS 61110 command to Inverter
-    if(cxdata().Command_Received.NewCMD.bits.Inverter_ONOFF) {
-        //Command for Inverter On/Off only
-        cxdata().Command_Received.NewCMD.bits.Inverter_ONOFF = 0;
-        if(_INV_has_Initialized & 0x01) {
-            //when connection is established
-            INV_SET_CMD.BYTE0.bits.Inverter_ONOFF = cxdata().Command_Received.Inv_On_Off; //On/Off from GCS
-            INV_SET_CMD.BYTE0.bits.Ctrl_Mode = INV_GET_CMD.BYTE0.bits.Ctrl_Mode; //maintain control mode (usually 4 - speed control mode)
-            INV_SET_CMD.BYTE0.bits.Fault_Clear = 1; //clear fault
-            INV_SET_CMD.Reference1 = INV_GET_CMD.Reference1; //maintain previous values
-            INV_SET_CMD.Reference2 = INV_GET_CMD.Reference2;
-        }else {
-            //send On/Off even if no connection is established yet
-            INV_SET_CMD.BYTE0.bits.Inverter_ONOFF = cxdata().Command_Received.Inv_On_Off;
-            INV_SET_CMD.BYTE0.bits.Ctrl_Mode = 4;   //default mode
-            INV_SET_CMD.BYTE0.bits.Fault_Clear = 1; //clear fault
-            INV_SET_CMD.Reference1 = 0; //reset rpm
-            INV_SET_CMD.Reference2 = 0; //reset acc
-        }
+    //1) Check ready-to-use state
+    if(  (cxdata().INV_data.Rdy2useINV == 0) 
+      && (cxdata().INV_data.pre_Rdy2useINV==0) ) {   //Always send something until GCS command is given
+        INV_SET_CMD.BYTE0.bits.Inverter_ONOFF = 2;//off (1 is on)
+        INV_SET_CMD.BYTE0.bits.Ctrl_Mode = 4;
+        INV_SET_CMD.BYTE0.bits.Fault_Clear = 0;
+        INV_SET_CMD.Reference1 = 0; //reset rpm
+        INV_SET_CMD.Reference2 = 0; //reset acc
         TX_INV_SETCMD_MSG();
-    }else if(cxdata().Command_Received.NewCMD.bits.Motor_RPM){
-        //Send RPM and ACC command - can only be sent after connection
-        cxdata().Command_Received.NewCMD.bits.Motor_RPM = 0;
-        if(_INV_has_Initialized & 0x01) {
-            INV_SET_CMD.BYTE0.bits.Inverter_ONOFF = INV_GET_CMD.BYTE0.bits.Inverter_ONOFF;//maintain On/Off state
-            INV_SET_CMD.BYTE0.bits.Ctrl_Mode = 4; //speed mode
+    }else if ((cxdata().INV_data.Rdy2useINV == 0) 
+      && (cxdata().INV_data.pre_Rdy2useINV == 1) ){  //Detecting rise
+        INV_SET_CMD.BYTE0.bits.Inverter_ONOFF = 2;//off (1 is on)
+        INV_SET_CMD.BYTE0.bits.Ctrl_Mode = 4;
+        INV_SET_CMD.BYTE0.bits.Fault_Clear = 0;
+        INV_SET_CMD.Reference1 = 0; //reset rpm
+        INV_SET_CMD.Reference2 = 0; //reset acc
+        TX_INV_SETCMD_MSG();
+    } else {
+    //2) After set ready-to-use
+        if(cxdata().Command_Received.NewCMD.bits.Inverter_ONOFF) {
+            //Command for Inverter On/Off only
+            cxdata().Command_Received.NewCMD.bits.Inverter_ONOFF = 0;
+            if(_INV_has_Initialized & 0x01) {
+                //when connection is established
+                INV_SET_CMD.BYTE0.bits.Inverter_ONOFF = cxdata().Command_Received.Inv_On_Off; //On/Off from GCS
+                INV_SET_CMD.BYTE0.bits.Ctrl_Mode = INV_GET_CMD.BYTE0.bits.Ctrl_Mode; //maintain control mode (usually 4 - speed control mode)
+                INV_SET_CMD.BYTE0.bits.Fault_Clear = 1; //clear fault
+                INV_SET_CMD.Reference1 = INV_GET_CMD.Reference1; //maintain previous values
+                INV_SET_CMD.Reference2 = INV_GET_CMD.Reference2;
+#if DEBUG_GCSCMD == 1
+                gcs().send_text(MAV_SEVERITY_INFO, "INV SET OnOff=%u, M=%u, R1=%.0f, R2=%.0f ", 
+                    INV_SET_CMD.BYTE0.bits.Inverter_ONOFF, INV_SET_CMD.BYTE0.bits.Ctrl_Mode, 
+                    INV_SET_CMD.Reference1, INV_SET_CMD.Reference2);
+#endif
+            }else {
+                //send On/Off even if no connection is established yet
+                INV_SET_CMD.BYTE0.bits.Inverter_ONOFF = cxdata().Command_Received.Inv_On_Off;
+                INV_SET_CMD.BYTE0.bits.Ctrl_Mode = 4;   //default mode
+                INV_SET_CMD.BYTE0.bits.Fault_Clear = 1; //clear fault
+                INV_SET_CMD.Reference1 = 0; //reset rpm
+                INV_SET_CMD.Reference2 = 0; //reset acc
+#if DEBUG_GCSCMD == 1
+                gcs().send_text(MAV_SEVERITY_INFO, "Inverter is not connected");
+#endif
+            }
+            TX_INV_SETCMD_MSG();
+        }else if(cxdata().Command_Received.NewCMD.bits.Motor_RPM){
+            //Send RPM and ACC command - can only be sent after connection
+            cxdata().Command_Received.NewCMD.bits.Motor_RPM = 0;
+            if(_INV_has_Initialized & 0x01) {
+                INV_SET_CMD.BYTE0.bits.Inverter_ONOFF = INV_GET_CMD.BYTE0.bits.Inverter_ONOFF;//maintain On/Off state
+                INV_SET_CMD.BYTE0.bits.Ctrl_Mode = 4; //speed mode
+                INV_SET_CMD.BYTE0.bits.Fault_Clear = 0; //no need for fault-clear
+                INV_SET_CMD.Reference1 = cxdata().Command_Received.Target_INV_RPM;
+                INV_SET_CMD.Reference2 = cxdata().Command_Received.Target_INV_ACC;
+#if DEBUG_GCSCMD == 1
+                gcs().send_text(MAV_SEVERITY_INFO, "INV Motor SET OnOff=%u, R1=%.0f, R2=%.0f ", 
+                    INV_SET_CMD.BYTE0.bits.Inverter_ONOFF,  
+                    INV_SET_CMD.Reference1, INV_SET_CMD.Reference2);
+#endif
+                TX_INV_SETCMD_MSG();
+            }
+        }else if(cxdata().Command_Received.NewCMD.bits.Inverter_STOP){
+            //Emergency Stop
+            cxdata().Command_Received.NewCMD.bits.Inverter_STOP = 0;
+            INV_SET_CMD.BYTE0.bits.Inverter_ONOFF = 2;
+            INV_SET_CMD.BYTE0.bits.Ctrl_Mode = 4; //always maintain speed mode
             INV_SET_CMD.BYTE0.bits.Fault_Clear = 0; //no need for fault-clear
-            INV_SET_CMD.Reference1 = cxdata().Command_Received.Target_INV_RPM;
-            INV_SET_CMD.Reference2 = cxdata().Command_Received.Target_INV_ACC;
-
+            if(_INV_has_Initialized & 0x01) {
+                INV_SET_CMD.Reference1 = INV_GET_CMD.Reference1; //maintain previous values
+                INV_SET_CMD.Reference2 = INV_GET_CMD.Reference2;
+#if DEBUG_GCSCMD == 1
+                gcs().send_text(MAV_SEVERITY_INFO, "INV Stop command sent OnOff=%u, R1=%.0f, R2=%.0f ", 
+                    INV_SET_CMD.BYTE0.bits.Inverter_ONOFF,  
+                    INV_SET_CMD.Reference1, INV_SET_CMD.Reference2);
+#endif
+            } else {
+                INV_SET_CMD.Reference1 = 0; //reset rpm
+                INV_SET_CMD.Reference2 = 0; //reset acc
+#if DEBUG_GCSCMD == 1
+                gcs().send_text(MAV_SEVERITY_INFO, "Inverter is not connected");
+#endif
+            }
             TX_INV_SETCMD_MSG();
         }
-    }else if(cxdata().Command_Received.NewCMD.bits.Inverter_STOP){
-        //Emergency Stop
-        cxdata().Command_Received.NewCMD.bits.Inverter_STOP = 0;
-        INV_SET_CMD.BYTE0.bits.Inverter_ONOFF = INV_GET_CMD.BYTE0.bits.Inverter_ONOFF;//maintain On/Off state
-        INV_SET_CMD.BYTE0.bits.Ctrl_Mode = 0; //set stop mode
-        INV_SET_CMD.BYTE0.bits.Fault_Clear = 0; //no need for fault-clear
-        if(_INV_has_Initialized & 0x01) {
-            INV_SET_CMD.Reference1 = INV_GET_CMD.Reference1; //maintain previous values
-            INV_SET_CMD.Reference2 = INV_GET_CMD.Reference2;
-        } else {
-            INV_SET_CMD.Reference1 = 0; //reset rpm
-            INV_SET_CMD.Reference2 = 0; //reset acc
-        }
-        TX_INV_SETCMD_MSG();
     }
+    cxdata().INV_data.pre_Rdy2useINV = cxdata().INV_data.Rdy2useINV;
     //====End of GCS 61110 
 
     //====Send GCS 61111 command to Inverter

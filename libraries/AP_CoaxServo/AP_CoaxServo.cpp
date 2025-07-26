@@ -1,7 +1,7 @@
 #include "AP_CoaxServo.h"
 #include <AP_CoaxCAN2/Coaxial_data.h>
 
-#define DEBUG_COAXSERVO 1
+#define DEBUG_COAXSERVO 0
 
 //Will use Copter's motors_output(400Hz FAST_TASK) to send out CMD_PADATA_SET_MULTI_POSITIONS
 //motors_output() @/ArduCopter/motors.cpp

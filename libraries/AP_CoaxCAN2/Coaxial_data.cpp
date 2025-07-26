@@ -18,7 +18,7 @@ CoaxData::CoaxData() {
     INV_data.OCL = 200;
     INV_data.OTL = 80;
     INV_data.OSL = 6000;   //Over-speed limit rpm : 1 precision
-    INV_data.motor_Spd = 4123;
+    INV_data.motor_Spd = 0;//4123;
     INV_data.i_a = 10.11;
     INV_data.i_b = 10.22;
     INV_data.i_c = 10.33;
@@ -31,8 +31,8 @@ CoaxData::CoaxData() {
     INV_data.Motor_Align_flag = 0;
 
     INV_data.isNew = 0;
-    INV_data.Motor_RPM_CMD = 4124;
-    INV_data.Motor_ACC_CMD = 100;
+    INV_data.Motor_RPM_CMD = 0;//4124;
+    INV_data.Motor_ACC_CMD = 0;
 
     CCB_data.isNew = 0;
     CCB_data.Brd_temp = 1;

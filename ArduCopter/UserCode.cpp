@@ -111,6 +111,9 @@ void Copter::userhook_init()
     cxdata().Swash_CMD.Lat = 0.5;
     cxdata().Swash_CMD.Lon = -1.2;
     cxdata().Swash_CMD.Rud = 3.4;
+
+    cxdata().INV_data.Rdy2useINV = 0;
+    cxdata().INV_data.pre_Rdy2useINV = 0;
 }
 #endif
 

@@ -90,6 +90,8 @@ struct datadef_INV {
     uint8_t isNew; //bit0 : CMD, bit1 : CC, bit2 : SC, bit3 : FLT
                     //bit4 : st1, bit5 : st2, bit6 : st3, bit7 : st4
     //Application
+    uint8_t Rdy2useINV;//Until other systems are ready to use the inverter, this is cleared to zero
+    uint8_t pre_Rdy2useINV;//previous Rdy2useINV
     float Motor_RPM_CMD;
     float Motor_ACC_CMD;
 };
