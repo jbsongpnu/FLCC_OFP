@@ -5,7 +5,7 @@
 ***
 
 ## Version History
-- V0.01.35 Updating CoaxCAN1 for Inveter control
+- V0.01.35 Updating CoaxCAN1 for Inveter control : Adding GCS' ready-to-use flag, checking inverter communicaiton being initialized
 - V0.01.34 Fixing Errors from tests - CAN, Pegasus Servo. Also, Added some remarks for helicopter setting
 - V0.01.33 Bug fixed in AP_MotorsHeli_Dual::move_actuators(), organized code with many information
 - V0.01.32 Fixing error: "Internal_Error 0x4000020". Also, working with CoaxServo tests and finding swashplate logics.
