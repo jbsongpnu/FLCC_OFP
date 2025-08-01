@@ -13,7 +13,7 @@ extern const AP_HAL::HAL& hal;
 #define TEMP_EXP 0		//Initial value
 #define DEBUG_INVERTER 0
 #define DEBUG_CCB 0
-#define DEBUG_GCSCMD 0
+#define DEBUG_GCSCMD 1
 
 // Table of user settable CAN bus parameters
 const AP_Param::GroupInfo AP_COAXCAN1::var_info[] = {
@@ -152,10 +152,9 @@ void AP_COAXCAN1::run(void)
 	RXspin();
 
     //Check data 
-    if(_AP_COAXCAN1_loop_cnt%10==0) {
-        Check_INV_data();
-        Check_CCB_data();
-    }
+    Check_INV_data();
+    Check_CCB_data();
+    
     //if(_AP_COAXCAN1_loop_cnt%20==0)
     // if(_AP_COAXCAN1_loop_cnt%100==0)
     // {
@@ -174,8 +173,9 @@ void AP_COAXCAN1::run(void)
     // {
     //     TX_INV_SETFLT_MSG();
     // }
-
-    TXspin();
+    if(_AP_COAXCAN1_loop_cnt%20==0) {
+        TXspin();
+    }
     
 }
 
@@ -649,11 +649,11 @@ void AP_COAXCAN1::TXspin()
         INV_SET_CMD.Reference1 = 0; //reset rpm
         INV_SET_CMD.Reference2 = 0; //reset acc
         TX_INV_SETCMD_MSG();
-    }else if ((cxdata().INV_data.Rdy2useINV == 0) 
-      && (cxdata().INV_data.pre_Rdy2useINV == 1) ){  //Detecting rise
+    }else if ((cxdata().INV_data.Rdy2useINV == 1) 
+      && (cxdata().INV_data.pre_Rdy2useINV == 0) ){  //Detecting rise
         INV_SET_CMD.BYTE0.bits.Inverter_ONOFF = 2;//off (1 is on)
         INV_SET_CMD.BYTE0.bits.Ctrl_Mode = 4;
-        INV_SET_CMD.BYTE0.bits.Fault_Clear = 0;
+        INV_SET_CMD.BYTE0.bits.Fault_Clear = 1;
         INV_SET_CMD.Reference1 = 0; //reset rpm
         INV_SET_CMD.Reference2 = 0; //reset acc
         TX_INV_SETCMD_MSG();
@@ -665,10 +665,8 @@ void AP_COAXCAN1::TXspin()
             if(_INV_has_Initialized & 0x01) {
                 //when connection is established
                 INV_SET_CMD.BYTE0.bits.Inverter_ONOFF = cxdata().Command_Received.Inv_On_Off; //On/Off from GCS
-                INV_SET_CMD.BYTE0.bits.Ctrl_Mode = INV_GET_CMD.BYTE0.bits.Ctrl_Mode; //maintain control mode (usually 4 - speed control mode)
+                INV_SET_CMD.BYTE0.bits.Ctrl_Mode = 4; //maintain control mode (usually 4 - speed control mode)
                 INV_SET_CMD.BYTE0.bits.Fault_Clear = 1; //clear fault
-                INV_SET_CMD.Reference1 = INV_GET_CMD.Reference1; //maintain previous values
-                INV_SET_CMD.Reference2 = INV_GET_CMD.Reference2;
 #if DEBUG_GCSCMD == 1
                 gcs().send_text(MAV_SEVERITY_INFO, "INV SET OnOff=%u, M=%u, R1=%.0f, R2=%.0f ", 
                     INV_SET_CMD.BYTE0.bits.Inverter_ONOFF, INV_SET_CMD.BYTE0.bits.Ctrl_Mode, 
@@ -689,40 +687,30 @@ void AP_COAXCAN1::TXspin()
         }else if(cxdata().Command_Received.NewCMD.bits.Motor_RPM){
             //Send RPM and ACC command - can only be sent after connection
             cxdata().Command_Received.NewCMD.bits.Motor_RPM = 0;
-            if(_INV_has_Initialized & 0x01) {
-                INV_SET_CMD.BYTE0.bits.Inverter_ONOFF = INV_GET_CMD.BYTE0.bits.Inverter_ONOFF;//maintain On/Off state
-                INV_SET_CMD.BYTE0.bits.Ctrl_Mode = 4; //speed mode
-                INV_SET_CMD.BYTE0.bits.Fault_Clear = 0; //no need for fault-clear
-                INV_SET_CMD.Reference1 = cxdata().Command_Received.Target_INV_RPM;
-                INV_SET_CMD.Reference2 = cxdata().Command_Received.Target_INV_ACC;
+            INV_SET_CMD.BYTE0.bits.Inverter_ONOFF = INV_GET_CMD.BYTE0.bits.Inverter_ONOFF;//maintain On/Off state
+            INV_SET_CMD.BYTE0.bits.Ctrl_Mode = 4; //speed mode
+            INV_SET_CMD.BYTE0.bits.Fault_Clear = 1; //no need for fault-clear
+            INV_SET_CMD.Reference1 = cxdata().Command_Received.Target_INV_RPM;
+            INV_SET_CMD.Reference2 = cxdata().Command_Received.Target_INV_ACC;
 #if DEBUG_GCSCMD == 1
-                gcs().send_text(MAV_SEVERITY_INFO, "INV Motor SET OnOff=%u, R1=%.0f, R2=%.0f ", 
-                    INV_SET_CMD.BYTE0.bits.Inverter_ONOFF,  
-                    INV_SET_CMD.Reference1, INV_SET_CMD.Reference2);
+            gcs().send_text(MAV_SEVERITY_INFO, "INV Motor PRM OnOff=%u, R1=%.0f, R2=%.0f ", 
+                INV_SET_CMD.BYTE0.bits.Inverter_ONOFF,  
+                INV_SET_CMD.Reference1, INV_SET_CMD.Reference2);
 #endif
-                TX_INV_SETCMD_MSG();
-            }
+            TX_INV_SETCMD_MSG();
         }else if(cxdata().Command_Received.NewCMD.bits.Inverter_STOP){
             //Emergency Stop
             cxdata().Command_Received.NewCMD.bits.Inverter_STOP = 0;
             INV_SET_CMD.BYTE0.bits.Inverter_ONOFF = 2;
             INV_SET_CMD.BYTE0.bits.Ctrl_Mode = 4; //always maintain speed mode
             INV_SET_CMD.BYTE0.bits.Fault_Clear = 0; //no need for fault-clear
-            if(_INV_has_Initialized & 0x01) {
-                INV_SET_CMD.Reference1 = INV_GET_CMD.Reference1; //maintain previous values
-                INV_SET_CMD.Reference2 = INV_GET_CMD.Reference2;
+            INV_SET_CMD.Reference1 = INV_GET_CMD.Reference1; //maintain previous values
+            INV_SET_CMD.Reference2 = INV_GET_CMD.Reference2;
 #if DEBUG_GCSCMD == 1
-                gcs().send_text(MAV_SEVERITY_INFO, "INV Stop command sent OnOff=%u, R1=%.0f, R2=%.0f ", 
-                    INV_SET_CMD.BYTE0.bits.Inverter_ONOFF,  
-                    INV_SET_CMD.Reference1, INV_SET_CMD.Reference2);
+            gcs().send_text(MAV_SEVERITY_INFO, "INV Stop command sent OnOff=%u, R1=%.0f, R2=%.0f ", 
+                INV_SET_CMD.BYTE0.bits.Inverter_ONOFF,  
+                INV_SET_CMD.Reference1, INV_SET_CMD.Reference2);
 #endif
-            } else {
-                INV_SET_CMD.Reference1 = 0; //reset rpm
-                INV_SET_CMD.Reference2 = 0; //reset acc
-#if DEBUG_GCSCMD == 1
-                gcs().send_text(MAV_SEVERITY_INFO, "Inverter is not connected");
-#endif
-            }
             TX_INV_SETCMD_MSG();
         }
     }
@@ -761,34 +749,55 @@ void AP_COAXCAN1::TXspin()
     //====Send GCS 61112 command to CCB
     //if and else if should be used here : one command at a time to CCB
     //Therefore, if multiple commands are received, should run TXspin() multiple times.
-    if(cxdata().Command_Received.NewCMD.bits.CCB_ActiveON) {
-        //Active Mode on
-        cxdata().Command_Received.NewCMD.bits.CCB_ActiveON = 0;
-        CC_CMD.Command = 1;
+    if (_AP_COAXCAN1_loop_cnt%200 == 0){
+        CC_CMD.Command = 5;
         TX_CCB();
-    }else if(cxdata().Command_Received.NewCMD.bits.CCB_Motor_Off) {
-        //Motor off
-        cxdata().Command_Received.NewCMD.bits.CCB_Motor_Off = 0;
-        CC_CMD.Command = 2;
-        TX_CCB();
-    }else if(cxdata().Command_Received.NewCMD.bits.CCB_Motor_MAX) {
-        //Motor maximized
-        cxdata().Command_Received.NewCMD.bits.CCB_Motor_MAX = 0;
-        CC_CMD.Command = 3;
-        TX_CCB();
-    }else if(cxdata().Command_Received.NewCMD.bits.CCB_FAN_toggle) {
-        //Toggle FAN
-        cxdata().Command_Received.NewCMD.bits.CCB_FAN_toggle = 0;
-        CC_CMD.Command = 4;
-        TX_CCB();
-    }
-
+    } else {
+        if(cxdata().Command_Received.NewCMD.bits.CCB_ActiveON) {
+            //Active Mode on
+            cxdata().Command_Received.NewCMD.bits.CCB_ActiveON = 0;
+            CC_CMD.Command = 1;
+            TX_CCB();
+        }else if(cxdata().Command_Received.NewCMD.bits.CCB_Motor_Off) {
+            //Motor off
+            cxdata().Command_Received.NewCMD.bits.CCB_Motor_Off = 0;
+            CC_CMD.Command = 2;
+            TX_CCB();
+        }else if(cxdata().Command_Received.NewCMD.bits.CCB_Motor_MAX) {
+            //Motor maximized
+            cxdata().Command_Received.NewCMD.bits.CCB_Motor_MAX = 0;
+            CC_CMD.Command = 3;
+            TX_CCB();
+        }else if(cxdata().Command_Received.NewCMD.bits.CCB_FAN_toggle) {
+            //Toggle FAN
+            cxdata().Command_Received.NewCMD.bits.CCB_FAN_toggle = 0;
+            CC_CMD.Command = 4;
+            TX_CCB();
+        }
+        CC_CMD.Command = 0;
+    }    
 }
 
 // -------------------------------------------------------------------------
 // Transmit data
 // -------------------------------------------------------------------------
 int  AP_COAXCAN1::CAN_TX_Ext(uint32_t can_id, uint8_t data_cmd[], uint8_t msgdlc)
+{
+    int cmd_send_res    = 0;
+    uint8_t can_data[8] = {0,0,0,0,0,0,0,0};
+
+    memcpy(can_data, data_cmd, msgdlc);
+
+    AP_HAL::CANFrame out_frame;
+    uint64_t timeout = AP_HAL::native_micros64() + COAXCAN1_SEND_TIMEOUT_US;                      // Should have timeout value
+
+    out_frame       = {can_id, can_data, msgdlc};                                               // id, data[8], dlc
+    cmd_send_res    = _can_iface->send(out_frame, timeout, AP_HAL::CANIface::AbortOnError);
+
+    return cmd_send_res;
+    
+}
+int  AP_COAXCAN1::CAN_TX_Std(uint16_t can_id, uint8_t data_cmd[], uint8_t msgdlc)
 {
     int cmd_send_res    = 0;
     uint8_t can_data[8] = {0,0,0,0,0,0,0,0};
@@ -839,12 +848,12 @@ void AP_COAXCAN1::TX_INV_SETCMD_MSG(void)
     INV_SET_CMD.Ref2_RAW = (int16_t)(INV_SET_CMD.Reference2 * 10.0);
 
     temp_data[0] = INV_SET_CMD.BYTE0.ALL;
-    temp_data[1] = INV_SET_CMD.Ref1_RAW & 0x00FF;
-    temp_data[2] = (INV_SET_CMD.Ref1_RAW >> 8) & 0x00FF;
-    temp_data[3] = (INV_SET_CMD.Ref1_RAW >> 16) & 0x00FF;
-    temp_data[4] = (INV_SET_CMD.Ref1_RAW >> 24) & 0x00FF;
-    temp_data[5] = INV_SET_CMD.Ref2_RAW & 0x00FF;
-    temp_data[6] = (INV_SET_CMD.Ref2_RAW >> 8) & 0x00FF;
+    temp_data[1] = (uint8_t)(INV_SET_CMD.Ref1_RAW & 0x000000FF);
+    temp_data[2] = (uint8_t)((INV_SET_CMD.Ref1_RAW >> 8) & 0x000000FF);
+    temp_data[3] = (uint8_t)((INV_SET_CMD.Ref1_RAW >> 16) & 0x000000FF);
+    temp_data[4] = (uint8_t)((INV_SET_CMD.Ref1_RAW >> 24) & 0x000000FF);
+    temp_data[5] = (uint8_t)(INV_SET_CMD.Ref2_RAW & 0x00FF);
+    temp_data[6] = (uint8_t)((INV_SET_CMD.Ref2_RAW >> 8) & 0x00FF);
 
     CAN_TX_Ext(_cmd_id[TX_ID::TX_ID_INV_SET_CMD], temp_data, 7);//DLC changed to 5
 }
@@ -954,9 +963,14 @@ void AP_COAXCAN1::TX_INV_SETFLT_MSG(void)
 void AP_COAXCAN1::TX_CCB(void)
 {
     uint8_t temp_data[8] = {0} ;
+    uint16_t id = 0x0FE;// | coaxcan1::CanFrame::FlagEFF;
     
     temp_data[0] = CC_CMD.Command;
     //bytes 1 ~7 reserved => sent with zeros
 
-    CAN_TX_Ext(0xFE, temp_data, 6);//DLC changed to 6
+    CAN_TX_Std(id, temp_data, 8);
+
+#if DEBUG_CCB == 1
+    gcs().send_text(MAV_SEVERITY_NOTICE, "CCBTX %u", CC_CMD.Command);
+#endif
 }

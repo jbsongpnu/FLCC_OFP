@@ -5,6 +5,7 @@
 ***
 
 ## Version History
+- V0.01.36 Updating CoaxCAN1 and CoaxCAN2 : bug fixes for CCB, Inverter and IFCU
 - V0.01.35 Updating CoaxCAN1 for Inveter control : Adding GCS' ready-to-use flag, checking inverter communicaiton being initialized
 - V0.01.34 Fixing Errors from tests - CAN, Pegasus Servo. Also, Added some remarks for helicopter setting
 - V0.01.33 Bug fixed in AP_MotorsHeli_Dual::move_actuators(), organized code with many information

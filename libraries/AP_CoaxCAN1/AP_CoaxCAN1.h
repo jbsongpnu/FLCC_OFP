@@ -39,7 +39,7 @@ public:
     void handleFrame(const AP_HAL::CANFrame& can_rxframe);
     //TX Function to Devices
     int  CAN_TX_Ext(uint32_t can_id, uint8_t data_cmd[], uint8_t msgdlc);    //send with Ext ID
-
+    int  CAN_TX_Std(uint16_t can_id, uint8_t data_cmd[], uint8_t msgdlc);    //send with Std ID
     void TX_INV_SETCMD_MSG(void); 
     void TX_INV_SETCC_MSG(void);
     void TX_INV_SETSC_MSG(void);

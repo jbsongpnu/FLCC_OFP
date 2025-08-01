@@ -4,6 +4,7 @@
 //Following code contains temporary debugging 
 #define COAXSERVO_TEST 1
 #define COAXCAN_LOGGING 0
+#define CCB_AUTOSEQUENCE 1
 #ifdef USERHOOK_INIT
 
 extern mavlink_sys_icd_flcc_gcs_inv_state_t     MAV_GCSTX_INV_State;
@@ -114,6 +115,7 @@ void Copter::userhook_init()
 
     cxdata().INV_data.Rdy2useINV = 0;
     cxdata().INV_data.pre_Rdy2useINV = 0;
+    cxdata().Command_Received.NewCMD.bits.CCB_Motor_MAX = 0;
 }
 #endif
 
@@ -224,7 +226,7 @@ void Copter::userhook_MediumLoop()
     // MSG_CXSV_SWASH, // CoaxServo Swash-plate Angle
     // MSG_DMI_DATA,   // Data Requested by DMI
     // MSG_HDM_DATA,   // Data Requested by Hyundai Car
-    if (Count1Hz == 1) {
+    if (Count1Hz%10 == 1) {
         //Get latest Inverter data
         MAV_GCSTX_INV_State.Inverter_OnOff = cxdata().INV_data.CMD_Flag.bits.Inverter_ONOFF;
         MAV_GCSTX_INV_State.Control_Mode = cxdata().INV_data.CMD_Flag.bits.Ctrl_Mode;
@@ -242,7 +244,7 @@ void Copter::userhook_MediumLoop()
         MAV_GCSTX_INV_State.V_dc = (uint16_t)(cxdata().INV_data.V_dc_input * 10.0);
         MAV_GCSTX_INV_State.Fault_Flags = cxdata().INV_data.FLT.ALL;
         gcs().send_message(MSG_INV_STATE); //
-    } else if (Count1Hz == 2) {
+    } else if (Count1Hz%10 == 2) {
         MAV_GCSTX_HBSYS.PMS_State = cxdata().DMI_PMS_data.PMS_State;
         MAV_GCSTX_HBSYS.IFCU_State = cxdata().IFCU_data.State;
         MAV_GCSTX_HBSYS.HDC_Vout = cxdata().DMI_PMS_data.HDC_OutputVoltage;
@@ -250,7 +252,7 @@ void Copter::userhook_MediumLoop()
         MAV_GCSTX_HBSYS.HDC_Vin = cxdata().DMI_PMS_data.HDC_InputVoltage;
         MAV_GCSTX_HBSYS.HDC_Cin = cxdata().DMI_PMS_data.HDC_InputCurrent;
         gcs().send_message(MSG_HBSYS);
-    } else if (Count1Hz == 3) {
+    } else if (Count1Hz%10 == 3) {
         MAV_GCSTX_CCB_State.Active_Mode = cxdata().CCB_data.State.bits.IsActive;
         MAV_GCSTX_CCB_State.Motor_ON = ( cxdata().CCB_data.State.bits.Motor1_run | cxdata().CCB_data.State.bits.Motor2_run);
         MAV_GCSTX_CCB_State.Motor_MAX = cxdata().CCB_data.State.bits.IsForcedMax;
@@ -263,7 +265,7 @@ void Copter::userhook_MediumLoop()
         MAV_GCSTX_CCB_State.Flow_mL = cxdata().CCB_data.Flow_mL;
         MAV_GCSTX_CCB_State.Brd_temp = cxdata().CCB_data.Brd_temp;
         gcs().send_message(MSG_CCB_STATE);
-    } else if (Count1Hz == 4) {
+    } else if (Count1Hz%10 == 4) {
         MAV_GCSTX_CXSV_POS.Servo_State = cxdata().SVinitialized;
         MAV_GCSTX_CXSV_POS.SV1_POS_RAW = cxdata().SV_Pos[0].raw;
         MAV_GCSTX_CXSV_POS.SV2_POS_RAW = cxdata().SV_Pos[1].raw;
@@ -272,7 +274,7 @@ void Copter::userhook_MediumLoop()
         MAV_GCSTX_CXSV_POS.SV5_POS_RAW = cxdata().SV_Pos[4].raw;
         MAV_GCSTX_CXSV_POS.SV6_POS_RAW = cxdata().SV_Pos[5].raw;
         gcs().send_message(MSG_CXSV_POS);
-    } else if (Count1Hz == 5) {
+    } else if (Count1Hz%10 == 5) {
         MAV_GCSTX_CXSV_SWASH.Swash_State = static_cast<uint8_t>(cxdata().CX_State);
         MAV_GCSTX_CXSV_SWASH.Collective = cxdata().Swash.Col;
         MAV_GCSTX_CXSV_SWASH.Cyclic_Lon = cxdata().Swash.Lon;
@@ -283,7 +285,7 @@ void Copter::userhook_MediumLoop()
         MAV_GCSTX_CXSV_SWASH.CMD_Cyclic_Lat = cxdata().Swash_CMD.Lat;
         MAV_GCSTX_CXSV_SWASH.CMD_Pedal      = cxdata().Swash_CMD.Rud;
         gcs().send_message(MSG_CXSV_SWASH);
-    } else if (Count1Hz == 6) {
+    } else if (Count1Hz%10 == 6) {
         MAV_GCSTX_DMI_data.LDC_State = 0;
         MAV_GCSTX_DMI_data.PMS_Mv_Battery_VoltageX10 = 11;
         MAV_GCSTX_DMI_data.PMS_Mv_Output_CurrentX10 = 12;
@@ -295,7 +297,7 @@ void Copter::userhook_MediumLoop()
         MAV_GCSTX_DMI_data.PMS_MAX_TempX10 = 200;
 
         gcs().send_message(MSG_DMI_DATA);
-    } else if (Count1Hz == 10) {
+    } else if (Count1Hz%10 == 0) {
         MAV_GCSTX_HDM_data.Ifcu_PpCurLimX100 = 10000;
         MAV_GCSTX_HDM_data.Ifcu_PpH2SofX2 = 100;
         MAV_GCSTX_HDM_data.Ifcu_H2LkLmp = 0;
@@ -307,7 +309,11 @@ void Copter::userhook_MediumLoop()
         MAV_GCSTX_HDM_data.Ifcu_H2TnkTmp = 14;
         MAV_GCSTX_HDM_data.Ifcu_H2TnkPrsX10 = 101;
         gcs().send_message(MSG_HDM_DATA);
-        Count1Hz = 0;
+#if CCB_AUTOSEQUENCE == 1
+        if (Count1Hz > 50) {
+            cxdata().Command_Received.NewCMD.bits.CCB_Motor_MAX = 1;
+        }
+#endif
     }
     Count1Hz++;
 #if COAXSERVO_TEST == 1 //For temporary servo test. Disabled for normal operation

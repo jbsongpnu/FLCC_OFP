@@ -694,9 +694,9 @@ void AP_COAXCAN2::Check_ALL_data(void)
     //PMS3
     if(_NewDMI_msg & 0x04) {
         cxdata().DMI_PMS_data.HDC_OutputVoltage = (float)_PMS3.OutputVoltage_raw * 0.1;
-        cxdata().DMI_PMS_data.HDC_OutputCurrent = (float)_PMS3.OutputCurrent_raw * 0.1;// - 350.0;
+        cxdata().DMI_PMS_data.HDC_OutputCurrent = (float)_PMS3.OutputCurrent_raw * 0.1 - 350.0;
         cxdata().DMI_PMS_data.HDC_InputVoltage = (float)_PMS3.InputVoltage_raw * 0.1;
-        cxdata().DMI_PMS_data.HDC_InputCurrent = (float)_PMS3.InputCurrent_raw * 0.1;// - 350.0;
+        cxdata().DMI_PMS_data.HDC_InputCurrent = (float)_PMS3.InputCurrent_raw * 0.1 - 350.0;
         _DMI_has_Initialized |= 0x02;
 #if DEBUG_PMS == 1
         gcs().send_text(MAV_SEVERITY_INFO, "PMS3-i : %.1f, %.1f, %.1f, %.1f",
@@ -780,7 +780,7 @@ int  AP_COAXCAN2::CAN_TX_std(uint16_t can_id, uint8_t data_cmd[], uint8_t msgdlc
 // -------------------------------------------------------------------------
 void AP_COAXCAN2::TX_FCC1_MSG(void)
 {
-    uint8_t temp_data[8] = {0} ;
+    uint8_t temp_data[8] = {0,0,0,0,0,0,0,0} ;
     uint8_t tempjoin = 0;
 #if DEBUG_CANTX == 1
     static uint16_t temp_debug_count = 0;
@@ -804,7 +804,7 @@ void AP_COAXCAN2::TX_FCC1_MSG(void)
 
     temp_data[0] = tempjoin;
 
-    CAN_TX_std(_cmd_id[TX_ID::TX_ID_FCC1], temp_data, 1);
+    CAN_TX_std(_cmd_id[TX_ID::TX_ID_FCC1], temp_data, 8);
     _FCC_AlivCnt++;
     _FCC_AlivCnt = _FCC_AlivCnt%16;
 }
@@ -816,9 +816,9 @@ void AP_COAXCAN2::TX_FCC2_MSG(void)
 {
     uint8_t temp_data[8] = {0,0,0,0,0,0,0,0} ;
 
-    _FCC_FcPwrReq = 35000;
-    _FCC_FcThrottle = 10;
-    _FCC_FcThrottlePrdct = 20;
+    _FCC_FcPwrReq = 0;
+    _FCC_FcThrottle = 0;
+    _FCC_FcThrottlePrdct = 0;
 
     temp_data[0] = _FCC_FcPwrReq & 0x00FF;
     temp_data[1] = (_FCC_FcPwrReq >> 8) & 0x00FF;
@@ -827,6 +827,6 @@ void AP_COAXCAN2::TX_FCC2_MSG(void)
     temp_data[4] = _FCC_FcThrottlePrdct & 0x00FF;
     temp_data[5] = (_FCC_FcThrottlePrdct >> 8) & 0x00FF;
 
-    CAN_TX_std(_cmd_id[TX_ID::TX_ID_FCC2], temp_data, 6);
+    CAN_TX_std(_cmd_id[TX_ID::TX_ID_FCC2], temp_data, 8);
 
 }
