@@ -5,6 +5,7 @@
 ***
 
 ## Version History
+- V0.01.37 Substituting Pegsus Actuator to HiTech servo : Basic Functions and debug codes with configuration check with UART => This version is not working properly due to TX delay from ChibiOS
 - V0.01.36 Updating CoaxCAN1 and CoaxCAN2 : bug fixes for CCB, Inverter and IFCU
 - V0.01.35 Updating CoaxCAN1 for Inveter control : Adding GCS' ready-to-use flag, checking inverter communicaiton being initialized
 - V0.01.34 Fixing Errors from tests - CAN, Pegasus Servo. Also, Added some remarks for helicopter setting

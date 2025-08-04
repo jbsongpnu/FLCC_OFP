@@ -2,21 +2,74 @@
 
 #include <AP_Common/AP_Common.h>
 
-#define ID_CMD_PADATA_PING                      0x01
-#define ID_CMD_PADATA_SET_POSITION              0x02
-#define ID_CMD_PADATA_SET_PARAMETER             0x03
-#define ID_CMD_PADATA_GET_PARAMETER             0x04
-#define ID_CMD_PADATA_SET_MULTI_POSITIONS       0x07
-#define ID_CMD_PADATA_GET_POSITION              0x10
-#define ID_CMD_PADATA_GET_MOT_TEMP_C            0x11
-#define ID_CMD_PADATA_GET_MOT_TEMP_F            0x12
-#define ID_CMD_PADATA_GET_SW_REV                0x13
-#define ID_CMD_PADATA_GET_CURRENT               0x14
-#define ID_CMD_PADATA_GET_SIGNED_CURRENT        0x15
-#define ID_CMD_PADATA_POWERSTAGE_DISABLE        0x20
-#define ID_CMD_PADATA_RECALL_FACTORY_SETTING    0x21
-#define ID_CMD_PADATA_RESET                     0x22
+//===HiTech Servo Registry
+//Read-only
+#define REG_PRODUCT_NO          0x00
+#define REG_PRODUCT_VERSION     0X02
+#define REG_FIRMWARE_VERSION    0X04
+#define REG_SERIAL_NO_SUB       0X06
+#define REG_SERIAL_NO_MAIN      0X08
+#define REG_STATUS_FLAG         0x0A
+#define REG_POSITION            0x0C
+#define REG_VELOCITY            0x0E
+#define REG_TORQUE              0x10
+#define REG_VOLTAGE             0x12
+#define REG_MCU_TEMP            0x14
+#define REG_MOTOR_TEMP          0x16
+#define REG_WORKING_TIME        0x1A
+#define REG_HUMIDITY            0x3C
+#define REG_HUMIDITY_MAX        0x40
+#define REG_HUMIDITY_MIN        0x42
+//Read + write Action
+#define REG_POSITION_NEW        0x1E
+#define REG_VELOCITY_NEW        0x20
+#define REG_TORQUE_NEW          0x22
+#define REG_360DEG_TURN_NEW     0X24
+//Read + write Configuration
+#define REG_SERVO_ID            0x32
+#define REG_BAUD_RATE           0x34
+#define REG_NORMAL_RETURN_DELAY 0x3A
+#define REG_POWER_CONFIG        0x46
+#define REG_EMERGENCY_STOP      0x48
+#define REG_ACTION_MODE         0x4A
+#define REG_POSITION_SLOPE      0x4C
+#define REG_DEAD_BAND           0x4E
+#define REG_VELOCITY_MAX        0x54
+#define REG_TORQUE_MAX          0x56
+#define REG_VOLTAGE_MAX         0x58
+#define REG_VOLTAGE_MIN         0x5A
+#define REG_TEMP_MAX            0x5C
+#define REG_TEMP_MIN            0x5E
+#define REG_POS_START           0x96
+#define REG_POS_END             0x94
+#define REG_POS_NEUTRAL         0XC2
+#define REG_FACTORY_DEFAULT     0X6E
+#define REG_CONFIG_SAVE         0X70
+#define REG_MOTOR_TURN_DIRECT   0X84
 
+//Default Config Parameter values for HiTech Servos
+#define PARAM_POWER_CONFIG        0x0002
+#define PARAM_EMERGENCY_STOP      0x1800    //Stop at Over-voltage and Under-voltage
+#define PARAM_ACTION_MODE         0x0060    //CR disabled, Velocity Mode, Acceleration Disabled
+#define PARAM_POSITION_SLOPE      3800      //Max position slope => large torque at target point
+#define PARAM_DEAD_BAND           2         //Set at minimum value of 2, smaller value creates vibration
+#define PARAM_VELOCITY_MAX        4095      
+#define PARAM_TORQUE_MAX          4095
+#define PARAM_VOLTAGE_MAX         290
+#define PARAM_VOLTAGE_MIN         180
+#define PARAM_TEMP_MAX            800
+#define PARAM_TEMP_MIN            0
+#define PARAM_POS_START           455
+#define PARAM_POS_END             1593
+#define PARAM_POS_NEUTRAL         1024
+#define PARAM_SV1_T_Direction     0 //CCW : 0, CW : 1
+#define PARAM_SV2_T_Direction     1
+#define PARAM_SV3_T_Direction     0
+#define PARAM_SV4_T_Direction     0
+#define PARAM_SV5_T_Direction     1
+#define PARAM_SV6_T_Direction     1
+//Servo 1, 3 Start 381 Neutral 950 End 1519  //range 569 for 50deg
+//Servo6 Start 321 Neutral 890 End 1459
 typedef union {
     uint8_t ALL;
     struct {
@@ -247,38 +300,58 @@ struct datadef_IFCU_data {
 };
 
 struct TX_CoaxServo_data {
-    uint16_t SV_pos;
+    int16_t SV_pos;
+    uint16_t SV_Vel;
+    uint16_t SV_Trq;
 };
 
 struct RX_CoaxServo_pos {
-    uint16_t raw;
+    int16_t raw;
+    float angle;
 };
 
 union Err_msg_g{
-    uint8_t ALL;
+    uint16_t ALL;
     struct {
-        uint8_t Angle_limit_err : 1;
-        uint8_t Param_range_err : 1;
-        uint8_t Over_temperature : 1;
-        uint8_t Overloaded : 1;
-        uint8_t Power_stage_err : 1;
-        uint8_t rsvd : 3;
+        uint16_t reserved1 : 10;         //bit 0~9
+        uint16_t Temp_Too_Low : 1;       //bit 10
+        uint16_t Temp_Too_High : 1;      //bit 11
+        uint16_t reserved2 : 1;          //bit 12
+        uint16_t Volt_Too_Low : 1;       //bit 13
+        uint16_t Volt_Too_High : 1;      //bit 14
+        uint16_t reserved3 : 1;          //bit 15
     }bits;
 };
 
 struct Data_CoaxSerovs {
-    union Err_msg_g ErrorCode;
-    uint8_t connected;
-    uint8_t got_param;
-    uint8_t temperature;
-    uint16_t angle_limit_min;
-    uint16_t angle_limit_max;
-    uint8_t expansion;
-    uint8_t reverse;
-    int16_t offset;
-    uint16_t failsafe_pos;
-    uint8_t timeout;
-    float current;
+    //User-defined
+    uint8_t connected = 0;
+    //Read from HiTech servo registry
+    union Err_msg_g ErrorCode;          //REG_STATUS_FLAG
+    int16_t Status_Velocity = 0;        //REG_VELOCITY
+    int16_t Status_Torque = 0;          //REG_TORQUE
+    uint16_t Status_Voltage = 0;        //REG_VOLTAGE
+    uint16_t Status_MCU_Temp = 0;       //REG_MCU_TEMP
+    uint16_t Status_Motor_Temp = 0;     //REG_MOTOR_TEMP
+    uint16_t Status_Humidity = 0;       //REG_HUMIDITY
+    int16_t Action_Velocity = 0;        //REG_VELOCITY_NEW
+    int16_t Action_Torque = 0;          //REG_TORQUE_NEW
+    uint16_t Config_Delay = 0;          //REG_NORMAL_RETURN_DELAY
+    uint16_t Config_Power_Config = 0;   //REG_POWER_CONFIG
+    uint16_t Config_Emergency_Stop = 0; //REG_EMERGENCY_STOP
+    uint16_t Config_Action_Mode = 0;    //REG_ACTION_MODE
+    uint16_t Config_Pos_Slope = 0;      //REG_POSITION_SLOPE
+    uint16_t Config_Dead_band = 0;      //REG_DEAD_BAND
+    uint16_t Config_Velocity_Max = 0;   //REG_VELOCITY_MAX
+    uint16_t Config_Torque_Max = 0;     //REG_TORQUE_MAX
+    uint16_t Config_Volt_Max = 0;       //REG_VOLTAGE_MAX
+    uint16_t Config_Volt_Min = 0;       //REG_VOLTAGE_MIN
+    uint16_t Config_Temp_Max = 0;       //REG_TEMP_MAX
+    uint16_t Config_Temp_Min = 0;       //REG_TEMP_MIN
+    int16_t Config_Pos_Start = 0;       //REG_POS_START
+    int16_t Config_Pos_End = 0;         //REG_POS_END
+    int16_t Config_Pos_Neutral = 0;     //REG_POS_NEUTRAL
+    uint8_t Config_Direnction = 0;      //REG_MOTOR_TURN_DIRECT
 };
 
 struct CoaxSwashState {
@@ -325,6 +398,7 @@ public:
     TX_CoaxServo_data SV_TX_prev[6];   //TX coaxial servo data @previous session
     RX_CoaxServo_pos SV_Pos[6];        //Current servo position
     RX_CoaxServo_pos SV_Pos_prv[6];    //Previous servo position
+    int16_t SV_TXPos_feedback[6];        //Feedback of position TX
     Data_CoaxSerovs SV_state[6];       //Current servo states
     uint8_t SVinitialized;              //All-motors responded to Ping, comm link initialized
     CoaxSwashState Swash;

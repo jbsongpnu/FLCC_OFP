@@ -1095,33 +1095,33 @@ MAV_RESULT GCS_MAVLINK_Copter::handle_command_CXSV_SET_PARAM(const mavlink_comma
     uint8_t ParamID = (uint8_t)msg.param2;
     int16_t value = (int16_t)msg.param2;
 
-    AP_CoaxServo *ServoUART = AP::PegasusSV();
+    //AP_CoaxServo *ServoUART = AP::HiTechSV();
     gcs().send_text(MAV_SEVERITY_INFO, "Got Coax Set CXSV %u %u %d", SvID, ParamID, value);
-    if ((SvID > 6) || (ParamID > 14) || (value > 4048) || (value < -4048)){
-        return MAV_RESULT_ACCEPTED;
-    } else {
-        switch (ParamID) {
-            case 0x02 : {
-                uint16_t known_max = cxdata().SV_state[SvID].angle_limit_max; //take max param
-                ServoUART->Set_Angle_limit(SvID, (uint16_t)value, known_max);
-                //TBD : Should wait and check response here
-                }break;
-            case 0x04 : {
-                uint16_t known_min = cxdata().SV_state[SvID].angle_limit_min; //take max param
-                ServoUART->Set_Angle_limit(SvID, known_min, (uint16_t)value);
-                //TBD : Should wait and check response here
-                }break;
-            case 0x07 : {
-                ServoUART->Set_Reverse(SvID, (bool)value);
-                }break;
-            case 0x08 : {
-                ServoUART->Set_Neutral(SvID, value);
-            }
-            default :
-            //Other values are ignore, but I need Failsafe timeout later
-                break;
-        }
-    }
+    // if ((SvID > 6) || (ParamID > 14) || (value > 4048) || (value < -4048)){
+    //     return MAV_RESULT_ACCEPTED;
+    // } else {
+    //     switch (ParamID) {
+    //         case 0x02 : {
+    //             uint16_t known_max = cxdata().SV_state[SvID].angle_limit_max; //take max param
+    //             ServoUART->Set_Angle_limit(SvID, (uint16_t)value, known_max);
+    //             //TBD : Should wait and check response here
+    //             }break;
+    //         case 0x04 : {
+    //             uint16_t known_min = cxdata().SV_state[SvID].angle_limit_min; //take max param
+    //             ServoUART->Set_Angle_limit(SvID, known_min, (uint16_t)value);
+    //             //TBD : Should wait and check response here
+    //             }break;
+    //         case 0x07 : {
+    //             ServoUART->Set_Reverse(SvID, (bool)value);
+    //             }break;
+    //         case 0x08 : {
+    //             ServoUART->Set_Neutral(SvID, value);
+    //         }
+    //         default :
+    //         //Other values are ignore, but I need Failsafe timeout later
+    //             break;
+    //     }
+    // }
     return MAV_RESULT_ACCEPTED;
 }
 MAV_RESULT GCS_MAVLINK_Copter::handle_command_CXSV_SWASH_OVERRIDE(const mavlink_command_long_t &msg)

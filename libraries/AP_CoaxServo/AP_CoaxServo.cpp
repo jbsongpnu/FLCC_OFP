@@ -1,9 +1,9 @@
 #include "AP_CoaxServo.h"
 #include <AP_CoaxCAN2/Coaxial_data.h>
 
-#define DEBUG_COAXSERVO 0
+#define DEBUG_COAXSERVO 1
 
-//Will use Copter's motors_output(400Hz FAST_TASK) to send out CMD_PADATA_SET_MULTI_POSITIONS
+//Will use Copter's motors_output(400Hz FAST_TASK) to send out CMD_SET_MULTI_POSITIONS
 //motors_output() @/ArduCopter/motors.cpp
 //Due to nature of RS-485 communication, all communitions should be scheduled in a single thread
 
@@ -26,600 +26,399 @@ AP_CoaxServo *AP_CoaxServo::get_singleton()
     return _singleton;
 }
 
-// Following function created critical error since version 0.01.27
-// Internal error code 0x4000020 => mem_guard + panic
-// void AP_CoaxServo::Send_CMD_Frame(void) {
-    // uint8_t buffer[30]={0U};
-    // uint8_t size = 0;
-    // uint8_t i = 0;
-    // uint32_t temp_checksum = 0;
-
-    // //Check following 
-    //     // _TX_data.ID = 2;
-    //     // _TX_data.LENGTH = 5;
-    //     // _TX_data.COMMAND = 1;
-    //     // _TX_data.Parameters[0] = 0x30;
-    //     // _TX_data.Parameters[1] = 0x31;
-    //     // _TX_data.Parameters[2] = 0x32;
-    // //Should send with Checksum = 0x64
-
-    // if(_TX_data.LENGTH < 2) {
-    //     gcs().send_text(MAV_SEVERITY_ERROR, "Error! CoaxServo Length < 2");
-    //     return;
-    // } else if (_TX_data.LENGTH > 27){
-    //     gcs().send_text(MAV_SEVERITY_ERROR, "Error! CoaxServo TX Buffer overflow");
-    //     return;
-    // } else {
-    //     size = _TX_data.LENGTH - 2;//3
-    // }
-    // // Initialize Buffer
-    // memset(buffer, 0, size+5);
-
-    // // Set Start Command
-    // buffer[0]= START_BYTE;
-    // buffer[1]=_TX_data.ID;
-    // buffer[2]=_TX_data.LENGTH;
-    // buffer[3]=_TX_data.COMMAND;
-    // temp_checksum += (_TX_data.ID + _TX_data.LENGTH + _TX_data.COMMAND);
-    // for (i=0;i<size;i++) {
-    //     buffer[i+4] = _TX_data.Parameters[i];
-    //     temp_checksum += _TX_data.Parameters[i];
-    // }
-    // temp_checksum = temp_checksum & 0x000000FF;
-    // buffer[i+4] = ~temp_checksum; 
-    // // Send Buffer
-    // Actuator_UART->write(buffer, (size+5));
-
-    // gcs().send_text(MAV_SEVERITY_INFO, "BufTx %02x %02x %02x %02x %02x %02x %02x %02x",
-    //     buffer[0], buffer[1], buffer[2], buffer[3], buffer[4], buffer[5], buffer[6], buffer[7]);
-// }
-
-// COMMAND                              Command ID  Number of   Number of Response
-//                                                  Parameters  Parameters
-// CMD_PADATA_PING                      0x01        0           0
-// CMD_PADATA_SET_POSITION              0x02        2           2
-// CMD_PADATA_SET_PARAMETER             0x03        2-20        0
-// CMD_PADATA_GET_PARAMETER             0x04        2           1-20
-// CMD_PADATA_SET_MULTI_POSITIONS       0x07        3-60        N/A
-// CMD_PADATA_GET_POSITION              0x10        0           2
-// CMD_PADATA_GET_MOT_TEMP_C            0x11        0           1
-// CMD_PADATA_GET_MOT_TEMP_F            0x12        0           1
-// CMD_PADATA_GET_SW_REV                0x13        0           2
-// CMD_PADATA_GET_CURRENT               0x14        0           2
-// CMD_PADATA_GET_SIGNED_CURRENT        0x15        0           2
-// CMD_PADATA_POWERSTAGE_DISABLE        0x20        1           0
-// CMD_PADATA_RECALL_FACTORY_SETTING    0x21        0           0
-// CMD_PADATA_RESET                     0x22        0           0
-
-// ====== CMD_PADATA_PING
-// Is used to detect a particular actuator. Broadcast ID 0x1F address any connected
-// actuator, therefore the broadcast ID should not be used in a data bus system by
-// reason that all connected servo actuators will answer simultaneously.
-// Answered by Response Frame
-void AP_CoaxServo::CMD_PADATA_PING(uint8_t id) {
-    //check validity
-    if(id>31) return; //if id is 31(=0x1F), ping is broadcasted to all servos
-
-    uint8_t buffer[5];
-    buffer[0] = 0xFF;       //Header
-    buffer[1] = id;         //Target ID
-    buffer[2] = 0x02;       //Length
-    buffer[3] = 0x01;       //Command
-    buffer[4] = ~(buffer[1] + buffer[2] + buffer[3]) ;  //Checksum : NOT(sum(id+length+command+parms))
-
-    Actuator_UART->write(buffer, 5);
+void AP_CoaxServo::Set_dummyTX(void) {
+    uint8_t buffer[32] = {0, };
+    Actuator_UART->write(buffer, 32);
 }
 
-// ====== CMD_PADATA_SET_POSITION
-// The CMD_PADATA_SET_POSITION command makes the actuator run to the defined position.
-// If the required position exceeds the specified maximum deflection angle, the
-// actuator runs to the specified maximum position. In this case the Angle Limit Error
-// bit is set into the answers error byte
-// Answered by Response Frame
-void AP_CoaxServo::CMD_PADATA_SET_POSITION(uint8_t id, uint16_t setpoint) {
+// ====== CMD_SET_POSITION
+// The CMD_SET_POSITION command makes the actuator run to the defined position.
+// 
+void AP_CoaxServo::CMD_SET_POSITION(uint8_t id, int16_t setpoint) {
     //check validity
-    if(id>30) return; //No broadcasting, only 30 is allowed
-    if(setpoint>4048) return;
+    if(id>6) return; //Servo ID numbering has changed from 0~5 => 1~6, but 0 is required for initial setting
+    if((setpoint < 0) || (setpoint > 2048)) return; //Only allow 90degs turn clockwise and counter-clockwise
 
     uint8_t buffer[7];
-    buffer[0] = 0xFF;       //Header
+    buffer[0] = 0x96;       //Header
     buffer[1] = id;         //Target ID
-    buffer[2] = 0x04;       //Length
-    buffer[3] = 0x02;       //Command
+    buffer[2] = 0x1E;       //Address
+    buffer[3] = 0x02;       //Registry Length
     buffer[4] = (uint8_t)(setpoint & 0x00FF);
     buffer[5] = (uint8_t)((setpoint >> 8) & 0x00FF);
-    buffer[6] = ~(buffer[1] + buffer[2] + buffer[3] + buffer[4] + buffer[5]);   //Checksum : NOT(sum(id+length+command+parms))
+    buffer[6] = (buffer[1] + buffer[2] + buffer[3] + buffer[4] + buffer[5]) % 256;   //Checksum : sum(id : Registry Length)%256  (meaning low byte)
 
     Actuator_UART->write(buffer, 7);
 }
 
-// ====== CMD_PADATA_SET_PARAMETER or CMD_PADATA_GET_PARAMETER
-// PARAMETER                       Parameter ID     Read    Parameter Range
-//                                 / Address        / Write
-// PARM_PADATA_ACTUATOR_ID         0x01             R/W     0 - 30
-// PARM_PADATA_ANGLE_LIMIT_MIN_L   0x02             R/W
-// PARM_PADATA_ANGLE_LIMIT_MIN_H   0x03             R/W     48 - 4048
-// PARM_PADATA_ANGLE_LIMIT_MAX_L   0x04             R/W
-// PARM_PADATA_ANGLE_LIMIT_MAX_H   0x05             R/W     48 - 4048
-// PARM_PADATA_EXPANSION           0x06             R/W     10 - 200            => Not used
-// PARM_PADATA_REVERSE             0x07             R/W     1 (TRUE) / 0 (FALSE)
-// PARM_PADATA_NEUTRAL_OFFSET_L    0x08             R/W
-// PARM_PADATA_NEUTRAL_OFFSET_H    0x09             R/W     -500 - +500
-// PARM_PADATA_FAILSAFE_POSITION_L 0x0A             R/W                         => Not used
-// PARM_PADATA_FAILSAFE_POSITION_H 0x0B             R/W     48 - 4048           => Not used
-// PARM_PADATA_FAILSAFE_TIMEOUT    0x0C             R/W     0 - 127             => Not used
-// PARM_PADATA_SENSOR_DB           0x0D             R/W     0 - 50
-// PARM_PADATA_PROFILE             0x0E             R/W     1 - 5
+// ====== CMD_SET_VELOCITY
+// The CMD_SET_VELOCITY command makes the actuator run to the defined position.
+// 
+void AP_CoaxServo::CMD_SET_VELOCITY(uint8_t id, uint16_t speed) {
+    //check validity
+    if(id>6) return; //Servo ID numbering has changed from 0~5 => 1~6, but 0 is required for initial setting
+    if(speed > 4095) return; //Only allow 4095
 
-// ====== CMD_PADATA_SET_PARAMETER : PARM_PADATA_ACTUATOR_ID
-// Answered by Response Frame
+    uint8_t buffer[7];
+    buffer[0] = 0x96;       //Header
+    buffer[1] = id;         //Target ID
+    buffer[2] = 0x20;       //Address
+    buffer[3] = 0x02;       //Registry Length
+    buffer[4] = (uint8_t)(speed & 0x00FF);
+    buffer[5] = (uint8_t)((speed >> 8) & 0x00FF);
+    buffer[6] = (buffer[1] + buffer[2] + buffer[3] + buffer[4] + buffer[5]) % 256;   //Checksum : sum(id : Registry Length)%256  (meaning low byte)
+
+    Actuator_UART->write(buffer, 7);
+}
+
+// ====== CMD_SET_TORQUE
+// The CMD_SET_TORQUE command makes the actuator run to the defined position.
+// 
+void AP_CoaxServo::CMD_SET_TORQUE(uint8_t id, uint16_t Trq) {
+    //check validity
+    if(id>6) return; //Servo ID numbering has changed from 0~5 => 1~6, but 0 is required for initial setting
+    if(Trq > 4095) return; //Only allow 4095
+
+    uint8_t buffer[7];
+    buffer[0] = 0x96;       //Header
+    buffer[1] = id;         //Target ID
+    buffer[2] = 0x22;       //Address
+    buffer[3] = 0x02;       //Registry Length
+    buffer[4] = (uint8_t)(Trq & 0x00FF);
+    buffer[5] = (uint8_t)((Trq >> 8) & 0x00FF);
+    buffer[6] = (buffer[1] + buffer[2] + buffer[3] + buffer[4] + buffer[5]) % 256;   //Checksum : sum(id : Registry Length)%256  (meaning low byte)
+
+    Actuator_UART->write(buffer, 7);
+}
+
+// ====== Set_Servo_ID
+// Only allowed to set up to 6 servos
 void AP_CoaxServo::Set_Servo_ID(uint8_t pre_id, uint8_t aft_id) {
     //check validity
-    if((pre_id>30)||(aft_id>30)) return;
+    if((pre_id>6)||(aft_id>6)) return;
     
     uint8_t buffer[7];
-    buffer[0] = 0xFF;       //Header
+    buffer[0] = 0x96;       //Header
     buffer[1] = pre_id;     //Target ID
-    buffer[2] = 0x04;       //Length
-    buffer[3] = 0x03;       //Command
-    buffer[4] = 0x01;       //Parameter starting location
-    buffer[5] = aft_id;
-    buffer[6] = ~(buffer[1] + buffer[2] + buffer[3] + buffer[4] + buffer[5]);   //Checksum : NOT(sum(id+length+command+parms))
+    buffer[2] = 0x32;       //Address
+    buffer[3] = 0x02;       //Registry Length
+    buffer[4] = aft_id;       
+    buffer[5] = 0;
+    buffer[6] = (buffer[1] + buffer[2] + buffer[3] + buffer[4] + buffer[5]) % 256;   //Checksum : sum(id : Registry Length)%256  (meaning low byte)
 
     Actuator_UART->write(buffer, 7);
 }
-// ===== CMD_PADATA_SET_PARAMETER : PARM_PADATA_ANGLE_LIMIT_MIN_x and PARM_PADATA_ANGLE_LIMIT_MAX_x
-// Answered by Response Frame
-void AP_CoaxServo::Set_Angle_limit(uint8_t id, uint16_t min, uint16_t max) {
+
+void AP_CoaxServo::Set_UINT_Config(uint8_t id, uint8_t addrs, uint16_t value) {
     //check validity
-    if(id>30) return;
-    if(min<48) return;
-    if(max>4048) return;
+    if(id>6) return;
     
-    uint8_t buffer[10];
-    buffer[0] = 0xFF;       //Header
-    buffer[1] = id;         //Target ID
-    buffer[2] = 0x07;       //Length
-    buffer[3] = 0x03;       //Command
-    buffer[4] = 0x02;       //Parameter starting location
-    buffer[5] = (uint8_t)(min & 0x00FF);        //low byte of min
-    buffer[6] = (uint8_t)((min >> 8) & 0x00FF); //high byte of min
-    buffer[7] = (uint8_t)(max & 0x00FF);
-    buffer[8] = (uint8_t)((max >> 8) & 0x00FF);
-    buffer[9] = ~(buffer[1] + buffer[2] + buffer[3] + buffer[4] + buffer[5] + buffer[6] + buffer[7] + buffer[8]);   //Checksum : NOT(sum(id+length+command+parms))
-
-    Actuator_UART->write(buffer, 10);
-}
-
-// ===== CMD_PADATA_SET_PARAMETER : PARM_PADATA_REVERSE
-// Answered by Response Frame
-void AP_CoaxServo::Set_Reverse(uint8_t id, bool rev) {
-    //check validity
-    if(id>30) return;
-      
     uint8_t buffer[7];
-    buffer[0] = 0xFF;       //Header
+    buffer[0] = 0x96;       //Header
     buffer[1] = id;         //Target ID
-    buffer[2] = 0x04;       //Length
-    buffer[3] = 0x03;       //Command
-    buffer[4] = 0x07;       //Parameter starting location
-    buffer[5] = rev;
-    buffer[6] = ~(buffer[1] + buffer[2] + buffer[3] + buffer[4] + buffer[5]);   //Checksum : NOT(sum(id+length+command+parms))
+    buffer[2] = addrs;      //Address
+    buffer[3] = 0x02;       //Registry Length
+    buffer[4] = (uint8_t)(value & 0x00FF);
+    buffer[5] = (uint8_t)((value >> 8) & 0x00FF);
+    buffer[6] = (buffer[1] + buffer[2] + buffer[3] + buffer[4] + buffer[5]) % 256;   //Checksum : sum(id : Registry Length)%256  (meaning low byte)
 
     Actuator_UART->write(buffer, 7);
 }
 
-// ===== CMD_PADATA_SET_PARAMETER : PARM_PADATA_NEUTRAL_OFFSET_x
-// Answered by Response Frame
-void AP_CoaxServo::Set_Neutral(uint8_t id, int16_t neutral) {
+void AP_CoaxServo::Set_INT_Config(uint8_t id, uint8_t addrs, int16_t value) {
     //check validity
-    if(id>30) return;
-    if((neutral < -500)||(neutral>500)) return;
-
-    uint8_t buffer[8];
-    buffer[0] = 0xFF;       //Header
-    buffer[1] = id;         //Target ID
-    buffer[2] = 0x05;       //Length
-    buffer[3] = 0x03;       //Command
-    buffer[4] = 0x08;       //Parameter starting location
-    buffer[5] = (uint8_t)(neutral & 0x00FF);
-    buffer[6] = (uint8_t)((neutral >> 8) & 0x00FF);
-    buffer[7] = ~(buffer[1] + buffer[2] + buffer[3] + buffer[4] + buffer[5] + buffer[6]);   //Checksum : NOT(sum(id+length+command+parms))
-
-    Actuator_UART->write(buffer, 8);
-}
-
-// ===== PARM_PADATA_SENSOR_DB
-// ===== PARM_PADATA_PROFILE
-
-// ===== CMD_PADATA_GET_PARAMETER
-// Parameters can be acquired one by one, but this function acquires them all
-// Answered by Response Frame
-void AP_CoaxServo::Request_all_Param(uint8_t id) {
-    //check validity
-    if(id>30) return;
-
-    uint8_t buffer[7];
-    buffer[0] = 0xFF;       //Header
-    buffer[1] = id;         //Target ID
-    buffer[2] = 0x04;       //Length
-    buffer[3] = 0x04;       //Command
-    buffer[4] = 0x01;       //Parameter starting location
-    buffer[5] = 0x0E;
-    buffer[6] = ~(buffer[1] + buffer[2] + buffer[3] + buffer[4] + buffer[5]);   //Checksum : NOT(sum(id+length+command+parms))
-
-    Actuator_UART->write(buffer, 7);
-}
-
-// ===== CMD_PADATA_SET_MULTI_POSITIONS
-// The CMD_PADATA_SET_MULTI_POSITIONS command is a special command designed to allow
-// for fast control of up to 20 actuators with just one command.
-// This command is special in two ways:
-//  - It must be sent with the actuator broadcast ID (31)
-//  - No response to the command will be sent
-// The command parameters consist of groups of three bytes, containing the ID of the
-// actuator to be set and the position for that actuator.
-// Every addressed actuator will behave as if a regular CMD_PADATA_SET_POSITION command
-// was set, except that it will not transmit a response. The same angle limits and
-// parameters apply.
-// NOT answered by Response Frame
-void AP_CoaxServo::Set_Coax_ServoPosition(void) {
+    if(id>6) return;
     
-    //uint8_t buffer[23];
-    uint8_t buffer[26];//23 is enough, but trying to see if more length helps eliminating internal_error 0x4000020
-    uint8_t chcksm;
-    buffer[0] = 0xFF;       //Header
-    buffer[1] = 0x1F;       //Target ID
-    buffer[2] = 0x14;       //Length (3 * 6) + 2 = 20 = 0x14
-    buffer[3] = 0x07;       //Command : bug fixed
-    chcksm = buffer[1] + buffer[2] + buffer[3];
+    uint8_t buffer[7];
+    buffer[0] = 0x96;       //Header
+    buffer[1] = id;         //Target ID
+    buffer[2] = addrs;      //Address
+    buffer[3] = 0x02;       //Registry Length
+    buffer[4] = (uint8_t)(value & 0x00FF);
+    buffer[5] = (uint8_t)((value >> 8) & 0x00FF);
+    buffer[6] = (buffer[1] + buffer[2] + buffer[3] + buffer[4] + buffer[5]) % 256;   //Checksum : sum(id : Registry Length)%256  (meaning low byte)
+
+    Actuator_UART->write(buffer, 7);
+}
+
+void AP_CoaxServo::Request_SVData(uint8_t id, uint8_t addrs) {
+    //temp test
+    static uint8_t count = 0;
+    //check validity
+    if((id>6)||(addrs > 0xC2)) return;
+    
+    uint8_t buffer[32] = {0, }; //to avoid TX interrupt delay, we send large amount of data with dummy bytes
+    buffer[0] = 0x96;       //Header
+    buffer[1] = id;         //Target ID
+    buffer[2] = addrs;      //Address
+    buffer[3] = 0;          //Registry Length
+    buffer[4] = (buffer[1] + buffer[2] + buffer[3]) % 256;   //Checksum : sum(id : Registry Length)%256  (meaning low byte)
+    buffer[5] = count;
+    count++;
+
+    Actuator_UART->write(buffer, 32);
+
+#if DEBUG_COAXSERVO == 1
+    //gcs().send_text(MAV_SEVERITY_INFO, "Req SVData to %u for %u", id, addrs);
+#endif
+}
+
+// CMD_SET_MULTI_POSITIONS
+void AP_CoaxServo::CMD_SET_MULTI_POSITIONS(void) {
+    
     for(int i=0; i<6; i++) {
-        buffer[(i * 3)+4] = i; //Servos are numbered from 0 to 5 for six servos
-        buffer[(i * 3)+5] = (uint8_t)(cxdata().SV_TX[i].SV_pos & 0x00FF); 
-        buffer[(i * 3)+6] = (uint8_t)((cxdata().SV_TX[i].SV_pos >> 8) & 0x00FF);
-        chcksm += buffer[(i * 3)+4] + buffer[(i * 3)+5] + buffer[(i * 3)+6];
+        CMD_SET_VELOCITY((i+1), cxdata().SV_TX[i].SV_Vel);
+        CMD_SET_TORQUE((i+1), cxdata().SV_TX[i].SV_Trq);
+        CMD_SET_POSITION((i+1),cxdata().SV_TX[i].SV_pos);
     }
-    buffer[22] = ~(chcksm) ;  //Checksum : NOT(sum(id+length+command+parms))
-
-    Actuator_UART->write(buffer, 23);
-}
-
-// ===== CMD_PADATA_GET_POSITION
-// Report the current position.
-// Answered by Response Frame
-void AP_CoaxServo::Request_Servo_Pos(uint8_t id) {
-    //check validity
-    if(id>30) return;
-    
-    uint8_t buffer[5];
-    buffer[0] = 0xFF;       //Header
-    buffer[1] = id;         //Target ID
-    buffer[2] = 0x02;       //Length
-    buffer[3] = 0x10;       //Command
-    buffer[4] = ~(buffer[1] + buffer[2] + buffer[3]) ;  //Checksum : NOT(sum(id+length+command+parms))
-
-    Actuator_UART->write(buffer, 5);
-}
-
-// ===== CMD_PADATA_GET_MOT_TEMP_C
-// The CMD_PADATA_GET_MOT_TEMP_C reports the current motor temperature of the Pegasus
-// actuator in degrees Celsius.
-// The measurement range of the actuators motor-temperature is 20 to 120 degree
-// Celsius. The actuator responds 20 degree Celsius even if the effective motor
-// temperature is below.
-// Answered by Response Frame
-void AP_CoaxServo::Request_Servo_Temp(uint8_t id) {
-    //check validity
-    if(id>30) return;
-    
-    uint8_t buffer[5];
-    buffer[0] = 0xFF;       //Header
-    buffer[1] = id;         //Target ID
-    buffer[2] = 0x02;       //Length
-    buffer[3] = 0x11;       //Command
-    buffer[4] = ~(buffer[1] + buffer[2] + buffer[3]) ;  //Checksum : NOT(sum(id+length+command+parms))
-
-    Actuator_UART->write(buffer, 5);
-}
-
-// ===== CMD_PADATA_GET_CURRENT
-// The actual measured motor current can be read out in mA with this command. The
-// resolution is 10 mA.
-// Answered by Response Frame
-void AP_CoaxServo::Request_Servo_Current(uint8_t id) {
-    //check validity
-    if(id>30) return;
-
-    uint8_t buffer[5];
-    buffer[0] = 0xFF;       //Header
-    buffer[1] = id;         //Target ID
-    buffer[2] = 0x02;       //Length
-    buffer[3] = 0x14;       //Command
-    buffer[4] = ~(buffer[1] + buffer[2] + buffer[3]) ;  //Checksum : NOT(sum(id+length+command+parms))
- 
-    Actuator_UART->write(buffer, 5);
-}
-// ===== CMD_PADATA_RESET
-// Reset the actuator
-// Answered by Response Frame
-void AP_CoaxServo::Reset_Servo(uint8_t id) {
-    //check validity
-    if(id>30) return;
-    
-    uint8_t buffer[5];
-    buffer[0] = 0xFF;       //Header
-    buffer[1] = id;         //Target ID
-    buffer[2] = 0x02;       //Length
-    buffer[3] = ID_CMD_PADATA_RESET;       //Command
-    buffer[4] = ~(buffer[1] + buffer[2] + buffer[3]) ;  //Checksum : NOT(sum(id+length+command+parms))
-
-    Actuator_UART->write(buffer, 5);
 }
 
 // Handling RX frame
 // -------------------------------------------------------------------------
 // Receive Data from CoaxServo UART
+// Returns number of messages received
 // -------------------------------------------------------------------------
-uint16_t AP_CoaxServo::receive_CoaxServo_uart_data(uint8_t* buffer)
+uint16_t AP_CoaxServo::receive_CoaxServo_uart_data(void)
 {
-    int16_t recv_size = 0;
+    uint8_t tempbyte1;
+    uint8_t tempbyte2;
+    uint8_t sv_id;
+    uint8_t msg_id;
+    uint8_t length;
+    uint8_t data_low;
+    uint8_t data_high;
+    uint8_t chcksm_rx;
+    uint8_t chcksm_cal;
+    int16_t num_msg=0;
+    //uint8_t tempdebugCheck = 0;
 
-    while ((Actuator_UART->available() > 0) && (COAXSV_UART_BUFFER_SIZE > recv_size))
+    while (Actuator_UART->available() > 0)
     {
-        buffer[recv_size] = (uint8_t)Actuator_UART->read();
-        recv_size = recv_size + 1;
-    }
-
-    return recv_size;
-}
-
-// ===== Parse buffer
-// Returns num_of_msgs : number of received RX frame => if returned 2, _RX_data[0] and _RX_data[1] are valid
-uint8_t AP_CoaxServo::Parse_Buffer(uint8_t* buffer, uint16_t size) {
-    uint16_t index = 0;
-    uint16_t state = 0; //0 : check header, 1: check ID, 2: check Length, 3: Get Error, 4: getting parameters, 5: Chekcsum
-    uint8_t  temp_length;
-    uint16_t num_of_msgs = 0;
-    uint16_t temp_index;
-    uint16_t last_checked = 0;
-    uint32_t temp_checksum;
-
-    //set all _RX_data[] to zeros
-    reset_RX_data();
-
-    if (size > COAXSV_UART_BUFFER_SIZE) {
-        return 0;
-    }
-
-    while(index < size) {   //smallest frame size is 5 bytes, should use 5-1=4
-        //State 0 : check header
-        if ((state == 0) && (buffer[index] == 0xFF)) {
-            state = 1;
-            last_checked = index;
-            temp_index = 0;
-            temp_length = 0;
-            temp_checksum = 0;
-            index++;
-        //State 1: check ID
-        } else if (state==1) {
-            if (buffer[index] > 30) {    //Valid ID : 0~30
-                state = 0;
-                index = last_checked + 1;
-            } else {
-                _RX_data[num_of_msgs].ID = buffer[index];   //ID of servo motor that sent this message
-                state = 2;
-                temp_checksum += buffer[index];
-                index++;
-            }
-        //State 2: check Length
-        } else if (state==2) {
-            if ((buffer[index] < 2 ) || (buffer[index] > 16)) {
-                state = 0;
-                index = last_checked + 1;
-            } else {
-                temp_length = _RX_data[num_of_msgs].LENGTH = buffer[index];
-                state = 3;
-                temp_checksum += buffer[index];
-                index++;
-            }
-        //State 3: Get Error
-        } else if (state==3) {
-            _RX_data[num_of_msgs].ERROR.ALL =  buffer[index];
-            state = 4;
-            temp_checksum += buffer[index];
-            index++;
-        //State 4: getting parameters
-        } else if (state==4) {
-            if (temp_length <=2) {   // go to next step if there's no parameter left to process
-                state = 5;
-            } else {
-                _RX_data[num_of_msgs].Parameters[temp_index] = buffer[index];
-                temp_index++;
-                temp_length--;
-                temp_checksum += buffer[index];
-                index++;
-            }
-        //State 5: Chekcsum
-        } else if (state==5) {
-            state = 0;
-            temp_checksum = ~(temp_checksum & 0x000000FF);
-            if (buffer[index] == (uint8_t)temp_checksum) {    //Checksum OK
-#if DEBUG_COAXSERVO == 1
-                gcs().send_text(MAV_SEVERITY_INFO, "Parsing ID= %u, Len = %u, Err = %u, Param = %u %u %u %u", 
-                    _RX_data[num_of_msgs].ID, 
-                    _RX_data[num_of_msgs].LENGTH,
-                    _RX_data[num_of_msgs].ERROR.ALL,
-                    _RX_data[num_of_msgs].Parameters[0], _RX_data[num_of_msgs].Parameters[1], _RX_data[num_of_msgs].Parameters[2],
-                    _RX_data[num_of_msgs].Parameters[3]);
-#endif
-                num_of_msgs++;
-                if(num_of_msgs >= 6) {
-                    gcs().send_text(MAV_SEVERITY_ERROR, "CoaxServo RX_Buffer full - may lose data");
-                    return num_of_msgs;
-                } else {
-                    index++;
+        tempbyte1 = (uint8_t)Actuator_UART->read();
+        if(tempbyte1 == 0xff) {
+            //tempdebugCheck = 1;
+            tempbyte2 = (uint8_t)Actuator_UART->read();
+            if(tempbyte2 == 0x69) {
+                //tempdebugCheck = 2;
+                sv_id = (uint8_t)Actuator_UART->read();
+                msg_id = (uint8_t)Actuator_UART->read();
+                length = (uint8_t)Actuator_UART->read();
+                data_low = (uint8_t)Actuator_UART->read();
+                data_high = (uint8_t)Actuator_UART->read();
+                chcksm_rx = (uint8_t)Actuator_UART->read();
+                chcksm_cal = (sv_id + msg_id + length + data_low + data_high) % 256;
+                if (chcksm_cal == chcksm_rx) {
+                    interprete_msg(sv_id, msg_id, data_low, data_high);
+                    num_msg = num_msg + 1;
+                    //tempdebugCheck = 3;
                 }
-            } else {    //Checksum bad
-                index = last_checked + 1;
             }
         }
-
     }
 
-    return num_of_msgs;
+    //gcs().send_text(MAV_SEVERITY_INFO, "CoaxUART debug %u", tempdebugCheck);
+    return num_msg;
 }
 
-// ===== reset_RX_data
-// Reset all _RX_data[] arrays
-void AP_CoaxServo::reset_RX_data(void) {
-    //can't use memset() function due to non-trivial type
-    for(int i=0;i<6;i++){
-        _RX_data[i].ID = 0;
-        _RX_data[i].LENGTH = 0;
-        _RX_data[i].ERROR.ALL = 0;
-        for(int j=0;j<20;j++){
-            _RX_data[i].Parameters[j] = 0;
-        }
-    }
+void AP_CoaxServo::interprete_msg(uint8_t sv_id, uint8_t msg_id, uint8_t data_low, uint8_t data_high) {
+    uint16_t tempUint16 = 0;
+    int16_t tempInt16 = 0;
+    uint8_t isSignedInt = 0;
+    if ((sv_id == 0)||(sv_id > 6)||(msg_id>0xC2)) { return; }
     
-}
+    uint8_t SV_index = sv_id - 1;
 
-// ===== Get length of _RX_data
-uint8_t AP_CoaxServo::GET_RX_data_Length(uint8_t msgbox) {
-    return _RX_data[msgbox].LENGTH;
+    switch (msg_id) {
+        // case REG_PRODUCT_NO :
+        //     break;
+        // case REG_PRODUCT_VERSION :
+        //     break;
+        // case REG_FIRMWARE_VERSION :
+        //     break;
+        // case REG_SERIAL_NO_SUB :
+        //     break;
+        // case REG_SERIAL_NO_MAIN :
+        //     break;
+        case REG_STATUS_FLAG :
+            tempUint16 = data_low;
+            tempUint16 = tempUint16 | ((uint16_t)data_high << 8); //Uint
+            cxdata().SV_state[SV_index].ErrorCode.ALL = tempUint16;
+            break;
+        case REG_POSITION :
+            tempUint16 = data_low;
+            tempInt16 = (int16_t)(tempUint16 | ((uint16_t)data_high << 8)); //Int
+            isSignedInt = 1;
+            cxdata().SV_Pos_prv[SV_index].raw = cxdata().SV_Pos[SV_index].raw;
+            cxdata().SV_Pos[SV_index].raw = tempInt16;
+            break;
+        case REG_VELOCITY :
+            tempUint16 = data_low;
+            tempInt16 = (int16_t)(tempUint16 | ((uint16_t)data_high << 8)); //Int
+            isSignedInt = 1;
+            cxdata().SV_state[SV_index].Status_Velocity = tempInt16;
+            break;
+        case REG_TORQUE :
+            tempUint16 = data_low;
+            tempInt16 = (int16_t)(tempUint16 | ((uint16_t)data_high << 8)); //Int
+            isSignedInt = 1;
+            cxdata().SV_state[SV_index].Status_Velocity = tempInt16;
+            break;
+        case REG_VOLTAGE :
+            tempUint16 = data_low;
+            tempUint16 = tempUint16 | ((uint16_t)data_high << 8); //Uint
+            cxdata().SV_state[SV_index].Status_Voltage = tempUint16;
+            break;
+        case REG_MCU_TEMP :
+            tempUint16 = data_low;
+            tempUint16 = tempUint16 | ((uint16_t)data_high << 8); //Uint
+            cxdata().SV_state[SV_index].Status_MCU_Temp = tempUint16;
+            break;
+        case REG_MOTOR_TEMP :
+            tempUint16 = data_low;
+            tempUint16 = tempUint16 | ((uint16_t)data_high << 8); //Uint
+            cxdata().SV_state[SV_index].Status_Motor_Temp = tempUint16;
+            break;
+        case REG_HUMIDITY :
+            tempUint16 = data_low;
+            tempUint16 = tempUint16 | ((uint16_t)data_high << 8); //Uint
+            cxdata().SV_state[SV_index].Status_Humidity = tempUint16;
+            break;
+        // case REG_HUMIDITY_MAX :
+        //     break;
+        // case REG_HUMIDITY_MIN :
+        //     break;
+        case REG_POSITION_NEW :
+            tempUint16 = data_low;
+            tempInt16 = (int16_t)(tempUint16 | ((uint16_t)data_high << 8)); //Int
+            isSignedInt = 1;
+            cxdata().SV_TXPos_feedback[SV_index] = tempInt16;
+            break;
+        case REG_VELOCITY_NEW :
+            tempUint16 = data_low;
+            tempUint16 = tempUint16 | ((uint16_t)data_high << 8); //Uint
+            cxdata().SV_state[SV_index].Action_Velocity = tempUint16;
+            break;
+        case REG_TORQUE_NEW :
+            tempUint16 = data_low;
+            tempUint16 = tempUint16 | ((uint16_t)data_high << 8); //Uint
+            cxdata().SV_state[SV_index].Action_Torque = tempUint16;
+            break;
+        // case REG_360DEG_TURN_NEW :
+        //     break;
+        case REG_SERVO_ID :
+            tempUint16 = data_low;
+            tempUint16 = tempUint16 | ((uint16_t)data_high << 8); //Uint
+            if (sv_id == tempUint16) {
+                cxdata().SV_state[SV_index].connected = 1;
+            } else {
+                gcs().send_text(MAV_SEVERITY_ERROR, "Invalid Servo ID Error %u %u %u %u", sv_id, data_low, data_high, tempUint16);
+            }
+            break;
+        // case REG_BAUD_RATE :
+        //     break;
+        case REG_NORMAL_RETURN_DELAY :
+            tempUint16 = data_low;
+            tempUint16 = tempUint16 | ((uint16_t)data_high << 8); //Uint
+            cxdata().SV_state[SV_index].Config_Delay = tempUint16;
+            break;
+        case REG_POWER_CONFIG :
+            tempUint16 = data_low;
+            tempUint16 = tempUint16 | ((uint16_t)data_high << 8); //Uint
+            cxdata().SV_state[SV_index].Config_Power_Config = tempUint16;
+            break;
+        case REG_EMERGENCY_STOP :
+            tempUint16 = data_low;
+            tempUint16 = tempUint16 | ((uint16_t)data_high << 8); //Uint
+            cxdata().SV_state[SV_index].Config_Emergency_Stop = tempUint16;
+            break;
+        case REG_ACTION_MODE :
+            tempUint16 = data_low;
+            tempUint16 = tempUint16 | ((uint16_t)data_high << 8); //Uint
+            cxdata().SV_state[SV_index].Config_Action_Mode = tempUint16;
+            break;
+        case REG_POSITION_SLOPE :
+            tempUint16 = data_low;
+            tempUint16 = tempUint16 | ((uint16_t)data_high << 8);  //Uint
+            cxdata().SV_state[SV_index].Config_Pos_Slope = tempUint16;
+            break;
+        case REG_DEAD_BAND :
+            tempUint16 = data_low;
+            tempUint16 = tempUint16 | ((uint16_t)data_high << 8);  //Uint
+            cxdata().SV_state[SV_index].Config_Dead_band = tempUint16;
+            break;
+        case REG_VELOCITY_MAX :
+            tempUint16 = data_low;
+            tempUint16 = tempUint16 | ((uint16_t)data_high << 8);  //Uint
+            cxdata().SV_state[SV_index].Config_Velocity_Max = tempUint16;
+            break;
+        case REG_TORQUE_MAX :
+            tempUint16 = data_low;
+            tempUint16 = tempUint16 | ((uint16_t)data_high << 8);  //Uint
+            cxdata().SV_state[SV_index].Config_Torque_Max = tempUint16;
+            break;
+        case REG_VOLTAGE_MAX :
+            tempUint16 = data_low;
+            tempUint16 = tempUint16 | ((uint16_t)data_high << 8);  //Uint
+            cxdata().SV_state[SV_index].Config_Volt_Max = tempUint16;
+            break;
+        case REG_VOLTAGE_MIN :
+            tempUint16 = data_low;
+            tempUint16 = tempUint16 | ((uint16_t)data_high << 8);  //Uint
+            cxdata().SV_state[SV_index].Config_Volt_Min = tempUint16;
+            break;
+        case REG_TEMP_MAX :
+            tempUint16 = data_low;
+            tempUint16 = tempUint16 | ((uint16_t)data_high << 8);  //Uint
+            cxdata().SV_state[SV_index].Config_Temp_Max = tempUint16;
+            break;
+        case REG_TEMP_MIN :
+            tempUint16 = data_low;
+            tempUint16 = tempUint16 | ((uint16_t)data_high << 8);  //Uint
+            cxdata().SV_state[SV_index].Config_Temp_Min = tempUint16;
+            break;
+        case REG_POS_START :
+            tempUint16 = data_low;
+            tempInt16 = (int16_t)(tempUint16 | ((uint16_t)data_high << 8)); //Int
+            isSignedInt = 1;
+            cxdata().SV_state[SV_index].Config_Pos_Start = tempInt16;
+            break;
+        case REG_POS_END :
+            tempUint16 = data_low;
+            tempInt16 = (int16_t)(tempUint16 | ((uint16_t)data_high << 8)); //Int
+            isSignedInt = 1;
+            cxdata().SV_state[SV_index].Config_Pos_End = tempInt16;
+            break;
+        case REG_POS_NEUTRAL :
+            tempUint16 = data_low;
+            tempInt16 = (int16_t)(tempUint16 | ((uint16_t)data_high << 8)); //Int
+            isSignedInt = 1;
+            cxdata().SV_state[SV_index].Config_Pos_Neutral = tempInt16;
+            break;
+        // case REG_FACTORY_DEFAULT :
+        //     break;
+        // case REG_CONFIG_SAVE :
+        //     break;
+        case REG_MOTOR_TURN_DIRECT :
+            tempUint16 = data_low;
+            tempUint16 = tempUint16 | ((uint16_t)data_high << 8);  //Uint
+            cxdata().SV_state[SV_index].Config_Direnction = tempUint16;
+            break;
+        default :
+            tempUint16 = data_low;
+            tempUint16 = tempUint16 | ((uint16_t)data_high << 8);  //Uint
+            break;
+    }
+#if DEBUG_COAXSERVO == 1
+    if(isSignedInt) {
+        gcs().send_text(MAV_SEVERITY_INFO, "HiTech SV %u, MSG %u, Value %d", sv_id, msg_id, tempInt16);
+    } else {
+        gcs().send_text(MAV_SEVERITY_INFO, "HiTech SV %u, MSG %u, Value %u", sv_id, msg_id, tempUint16);
+    }
+#endif
 }
-
-// ===== interprete_msg
-// Inerprete parsed message box
-// Response frame has no reference message ID, but responds to each command differently
-// Therefore, one needs to know expected message, and here, it is passed through cmd, and sv_ID
-// COMMAND                              Command ID  Number of   Number of Response
-//                                                  Parameters  Parameters
-// CMD_PADATA_PING                      0x01        0           0
-// CMD_PADATA_SET_POSITION              0x02        2           2
-// CMD_PADATA_SET_PARAMETER             0x03        2-20        0
-// CMD_PADATA_GET_PARAMETER             0x04        2           1-20
-// CMD_PADATA_SET_MULTI_POSITIONS       0x07        3-60        N/A
-// CMD_PADATA_GET_POSITION              0x10        0           2
-// CMD_PADATA_GET_MOT_TEMP_C            0x11        0           1
-// CMD_PADATA_GET_MOT_TEMP_F            0x12        0           1
-// CMD_PADATA_GET_SW_REV                0x13        0           2
-// CMD_PADATA_GET_CURRENT               0x14        0           2
-// CMD_PADATA_GET_SIGNED_CURRENT        0x15        0           2
-// CMD_PADATA_POWERSTAGE_DISABLE        0x20        1           0
-// CMD_PADATA_RECALL_FACTORY_SETTING    0x21        0           0
-// CMD_PADATA_RESET                     0x22        0           0
-void AP_CoaxServo::interprete_msg(uint16_t msg_box_id, uint8_t cmd) {
-    uint16_t uint16_temp1;
-    uint16_t uint16_temp2;
-    uint8_t id = _RX_data[msg_box_id].ID;
-    if (id > 6) { 
-        return;
-    }
-    if (cmd > 0x22) {
-        return;
-    }
-    //same for all
-    cxdata().SV_state[id].ErrorCode.ALL = _RX_data[msg_box_id].ERROR.ALL;
-    //interprete specific command response
-    switch(cmd) {
-        case ID_CMD_PADATA_PING:
-            cxdata().SV_state[id].connected = 1;
-#if DEBUG_COAXSERVO == 1
-            gcs().send_text(MAV_SEVERITY_INFO, "Ping Received : %d", id);
-#endif
-            break;
-        case ID_CMD_PADATA_SET_POSITION: //CMD_PADATA_SET_POSITION
-            //not used
-            break;
-        case ID_CMD_PADATA_SET_PARAMETER: // CMD_PADATA_SET_PARAMETER
-            //no need to interprete
-            break;
-        case ID_CMD_PADATA_GET_PARAMETER:
-            //_RX_data[msg_box_id].Parameters[0] is the actuator ID, which we know it already
-            uint16_temp1 = _RX_data[msg_box_id].Parameters[1];
-            uint16_temp2 = _RX_data[msg_box_id].Parameters[2];
-            cxdata().SV_state[id].angle_limit_min =  uint16_temp1 + (uint16_temp2 << 8);
-            uint16_temp1 = _RX_data[msg_box_id].Parameters[3];
-            uint16_temp2 = _RX_data[msg_box_id].Parameters[4];
-            cxdata().SV_state[id].angle_limit_max = uint16_temp1 + (uint16_temp2 << 8);
-            cxdata().SV_state[id].expansion = _RX_data[msg_box_id].Parameters[5];
-            cxdata().SV_state[id].reverse = _RX_data[msg_box_id].Parameters[6];
-            uint16_temp1 = _RX_data[msg_box_id].Parameters[7];
-            uint16_temp2 = _RX_data[msg_box_id].Parameters[8];
-            cxdata().SV_state[id].offset = (int16_t)(uint16_temp1 + (uint16_temp2 << 8));
-            uint16_temp1 = _RX_data[msg_box_id].Parameters[9];
-            uint16_temp2 = _RX_data[msg_box_id].Parameters[10];
-            cxdata().SV_state[id].failsafe_pos = (int16_t)(uint16_temp1 + (uint16_temp2 << 8));
-            cxdata().SV_state[id].timeout = _RX_data[msg_box_id].Parameters[11];
-            cxdata().SV_state[id].got_param = 1;
-#if DEBUG_COAXSERVO == 1
-            gcs().send_text(MAV_SEVERITY_INFO, "SV Param %u, %u, %u, %u, %u, %u, %u", 
-                cxdata().SV_state[id].angle_limit_min,
-                cxdata().SV_state[id].angle_limit_max, 
-                cxdata().SV_state[id].expansion,
-                cxdata().SV_state[id].reverse,
-                cxdata().SV_state[id].offset,
-                cxdata().SV_state[id].failsafe_pos,
-                cxdata().SV_state[id].timeout
-            );
-#endif
-            break;
-        case ID_CMD_PADATA_GET_POSITION:
-            uint16_temp1 = _RX_data[msg_box_id].Parameters[0];
-            uint16_temp2 = _RX_data[msg_box_id].Parameters[1];
-            cxdata().SV_Pos[id].raw = uint16_temp1 + (uint16_temp2 << 8);
-#if DEBUG_COAXSERVO == 1
-            gcs().send_text(MAV_SEVERITY_INFO, "SV Pos ID %u, pos %u", id, cxdata().SV_Pos[id].raw);
-#endif
-            break;
-        case ID_CMD_PADATA_GET_MOT_TEMP_C:
-            cxdata().SV_state[id].temperature = _RX_data[msg_box_id].Parameters[0];
-#if DEBUG_COAXSERVO == 1
-            gcs().send_text(MAV_SEVERITY_INFO, "SV Tmp ID %u, temp %u degC", id, cxdata().SV_state[id].temperature);
-#endif
-            break;
-        case ID_CMD_PADATA_GET_SW_REV:
-            //not used
-            break;
-        case ID_CMD_PADATA_GET_CURRENT:
-            uint16_temp1 = _RX_data[msg_box_id].Parameters[0];
-            uint16_temp2 = _RX_data[msg_box_id].Parameters[1];
-            cxdata().SV_state[id].current = (float)(uint16_temp1 + (uint16_temp2 << 8)) / 100.0;
-#if DEBUG_COAXSERVO == 1
-            gcs().send_text(MAV_SEVERITY_INFO, "SV Cur ID %u, cur %.2f", id, cxdata().SV_state[id].current);
-#endif
-            break;
-        case ID_CMD_PADATA_GET_SIGNED_CURRENT:
-        case ID_CMD_PADATA_POWERSTAGE_DISABLE:
-        case ID_CMD_PADATA_RECALL_FACTORY_SETTING:
-        case ID_CMD_PADATA_RESET:
-            break;
-        default: 
-            break;
-    }
-    
-}
-// ====== CMD_PADATA_SET_PARAMETER or CMD_PADATA_GET_PARAMETER
-// PARAMETER                       Parameter ID     Read    Parameter Range
-//                                 / Address        / Write
-// PARM_PADATA_ACTUATOR_ID         0x01             R/W     0 - 30
-// PARM_PADATA_ANGLE_LIMIT_MIN_L   0x02             R/W
-// PARM_PADATA_ANGLE_LIMIT_MIN_H   0x03             R/W     48 - 4048
-// PARM_PADATA_ANGLE_LIMIT_MAX_L   0x04             R/W
-// PARM_PADATA_ANGLE_LIMIT_MAX_H   0x05             R/W     48 - 4048
-// PARM_PADATA_EXPANSION           0x06             R/W     10 - 200            => Not used
-// PARM_PADATA_REVERSE             0x07             R/W     1 (TRUE) / 0 (FALSE)
-// PARM_PADATA_NEUTRAL_OFFSET_L    0x08             R/W
-// PARM_PADATA_NEUTRAL_OFFSET_H    0x09             R/W     -500 - +500
-// PARM_PADATA_FAILSAFE_POSITION_L 0x0A             R/W                         => Not used
-// PARM_PADATA_FAILSAFE_POSITION_H 0x0B             R/W     48 - 4048           => Not used
-// PARM_PADATA_FAILSAFE_TIMEOUT    0x0C             R/W     0 - 127             => Not used
-// PARM_PADATA_SENSOR_DB           0x0D             R/W     0 - 50
-// PARM_PADATA_PROFILE             0x0E             R/W     1 - 5
 namespace AP {
 
-AP_CoaxServo *PegasusSV()
+AP_CoaxServo *HiTechSV()
 {
     return AP_CoaxServo::get_singleton();
 }

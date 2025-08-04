@@ -203,8 +203,8 @@ const AP_Param::GroupInfo AP_SerialManager::var_info[] = {
     // @DisplayName: Serial 5 Baud Rate
     // @Description: The baud rate used for Serial5. Most stm32-based boards can support rates of up to 1500. If you setup a rate you cannot support and then can't connect to your board you should load a firmware from a different vehicle type. That will reset all your parameters to defaults.
     //AP_GROUPINFO("5_BAUD", 10, AP_SerialManager, state[5].baud, SERIAL5_BAUD),
-    AP_GROUPINFO("5_PROTOCOL",  9, AP_SerialManager, state[5].protocol, SerialProtocol_CoaxPegasus),       // Configure the Serial 4 Protocol of for CAM Interface (KAL)
-	AP_GROUPINFO("5_BAUD",      10, AP_SerialManager, state[5].baud, AP_SERIALMANAGER_CONSOLE_BAUD/1000), // Configure the Serial 4 baudrate of for CAM Interface (KAL)
+    AP_GROUPINFO("5_PROTOCOL",  9, AP_SerialManager, state[5].protocol, SerialProtocol_CoaxHiTech),       // Configure the Serial 4 Protocol of for CAM Interface (KAL)
+	AP_GROUPINFO("5_BAUD",      10, AP_SerialManager, state[5].baud, AP_SERIALMANAGER_HITECH_BAUD/1000), // Configure the Serial 4 baudrate of for CAM Interface (KAL)
 
 #endif
 
@@ -528,11 +528,11 @@ void AP_SerialManager::init()
                     // Note init is handled by AP_MSP
                     break;
 #endif
-                case SerialProtocol_CoaxPegasus: // KAL
-                    state[i].baud.set_default(AP_SERIALMANAGER_PEGASUS_BAUD/1000);
+                case SerialProtocol_CoaxHiTech: // KAL
+                    state[i].baud.set_default(AP_SERIALMANAGER_HITECH_BAUD/1000);
                     uart->begin(state[i].baudrate(),
-                                         AP_SERIALMANAGER_PEGASUS_BUFSIZE_RX,
-                                         AP_SERIALMANAGER_PEGASUS_BUFSIZE_TX);
+                                         AP_SERIALMANAGER_HITECH_BUFSIZE_RX,
+                                         AP_SERIALMANAGER_HITECH_BUFSIZE_TX);
                     break;
 
                 default:

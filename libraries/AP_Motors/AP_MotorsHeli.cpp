@@ -553,7 +553,7 @@ void AP_MotorsHeli::reset_flight_controls()
 // multiplied by 500 to get PWM output.
 void AP_MotorsHeli::rc_write_swash(uint8_t chan, float swash_in)
 {   //This is the final destination of servo motor servo PWM calculation.
-    uint16_t pwm = (uint16_t)(1500 + 500 * swash_in);//This seems unfit with Pegasus
+    uint16_t pwm = (uint16_t)(1500 + 500 * swash_in);//This seems unfit with HiTech
     SRV_Channel::Aux_servo_function_t function = SRV_Channels::get_motor_function(chan);
     SRV_Channels::set_output_pwm_trimmed(function, pwm);
 }

@@ -21,33 +21,6 @@
 #define START_BYTE  255U
 #define COAXSV_UART_BUFFER_SIZE 64
 
-//====Description of Pegasus Actuators Protocol===
-//1) 2 types of frames : Command and Response
-//2) Command Frame structure
-//      Byte1   START       0xFF
-//      Byte2   ID          0~30 (0x00~0x1E) assigned to each motor
-//                          Broadcasting ID is 31 (0x1F), Initial ID 1
-//      Byte3   LENGTH      Command + num of params + checksum (=param+2)
-//      Byte4   COMMAND     Command ID
-//      Byte5~N Parameters  Additional parameters
-//      ByteN+1 Checksum    ~((ID + LENGTH + COMMAND + sum(Parameters)) & 0x000000FF)
-//3) Response Frame structure
-//      Byte1   START       0xFF
-//      Byte2   ID          0~30 (0x00~0x1E) assigned to each motor
-//                          Broadcasting ID is 31 (0x1F)
-//      Byte3   LENGTH      Command + num of params + checksum (=param+2)
-//      Byte4   Error       Actuator status : See Error Code
-//      Byte5~N Parameters  Additional parameters
-//      ByteN+1 Checksum    ~((ID + LENGTH + COMMAND + sum(Parameters)) & 0x000000FF)
-//4) Error Code
-//      Bit0    Angle Limit Error       If SET_POSITION exceeds valid range
-//      Bit1    Parameter Range Error   Value range of parameter exceeded (only for write access)
-//      Bit2    Over temperature Error  Motor temperature exceeds specified limit
-//      Bit3    Overload Error          Actuator is in overload condition
-//      Bit4    Power stage Error       Power stage or motor failure
-//      Bit5~7  Reserved
-//================================================
-
 union Err_msg{
     uint8_t ALL;
     struct {
@@ -72,33 +45,28 @@ public:
 
     static AP_CoaxServo *get_singleton();
     static AP_CoaxServo *_singleton;
-    AP_CoaxServo *PegasusSV();
-    void CMD_PADATA_PING(uint8_t id);
-    void CMD_PADATA_SET_POSITION(uint8_t id, uint16_t setpoint);
-    void Set_Servo_ID(uint8_t pre_id, uint8_t aft_id);
-    void Set_Angle_limit(uint8_t id, uint16_t min, uint16_t max);
-    void Set_Reverse(uint8_t id, bool rev);
-    void Set_Neutral(uint8_t id, int16_t neutral);
-    void Request_all_Param(uint8_t id);
-    void Set_Coax_ServoPosition(void);
-    void Request_Servo_Pos(uint8_t id);
-    void Request_Servo_Temp(uint8_t id);
-    void Request_Servo_Current(uint8_t id);
-    void Reset_Servo(uint8_t id);
+    AP_CoaxServo *HiTechSV();
 
-    uint16_t receive_CoaxServo_uart_data(uint8_t* buffer);
-    uint8_t Parse_Buffer(uint8_t* buffer, uint16_t size);
-    void interprete_msg(uint16_t msg_box_id, uint8_t cmd);
-    uint8_t GET_RX_data_Length(uint8_t msgbox);
+    void Set_dummyTX(void);
+    void CMD_SET_POSITION(uint8_t id, int16_t setpoint);
+    void CMD_SET_VELOCITY(uint8_t id, uint16_t speed);
+    void CMD_SET_TORQUE(uint8_t id, uint16_t Trq);
+    void Set_Servo_ID(uint8_t pre_id, uint8_t aft_id);
+    void Set_UINT_Config(uint8_t id, uint8_t addrs, uint16_t value);
+    void Set_INT_Config(uint8_t id, uint8_t addrs, int16_t value);
+    void Request_SVData(uint8_t id, uint8_t addrs);
+    void CMD_SET_MULTI_POSITIONS(void);
+
+    uint16_t receive_CoaxServo_uart_data(void);
+    void interprete_msg(uint8_t sv_id, uint8_t msg_id, uint8_t data_low, uint8_t data_high);
+
 private:
 
     RX_Frame _RX_data[6];
 
-    void reset_RX_data(void);
-
 };
 
 namespace AP {
-    AP_CoaxServo *PegasusSV();
+    AP_CoaxServo *HiTechSV();
 };
 
