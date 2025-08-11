@@ -48,28 +48,47 @@
 #define REG_MOTOR_TURN_DIRECT   0X84
 
 //Default Config Parameter values for HiTech Servos
-#define PARAM_POWER_CONFIG        0x0002
-#define PARAM_EMERGENCY_STOP      0x1800    //Stop at Over-voltage and Under-voltage
-#define PARAM_ACTION_MODE         0x0060    //CR disabled, Velocity Mode, Acceleration Disabled
-#define PARAM_POSITION_SLOPE      3800      //Max position slope => large torque at target point
-#define PARAM_DEAD_BAND           2         //Set at minimum value of 2, smaller value creates vibration
-#define PARAM_VELOCITY_MAX        4095      
-#define PARAM_TORQUE_MAX          4095
-#define PARAM_VOLTAGE_MAX         290
-#define PARAM_VOLTAGE_MIN         180
-#define PARAM_TEMP_MAX            800
-#define PARAM_TEMP_MIN            0
-#define PARAM_POS_START           455
-#define PARAM_POS_END             1593
-#define PARAM_POS_NEUTRAL         1024
-#define PARAM_SV1_T_Direction     0 //CCW : 0, CW : 1
-#define PARAM_SV2_T_Direction     1
-#define PARAM_SV3_T_Direction     0
-#define PARAM_SV4_T_Direction     0
-#define PARAM_SV5_T_Direction     1
-#define PARAM_SV6_T_Direction     1
+#define PARAM_RETURN_DELAY      1
+#define PARAM_POWER_CONFIG      2
+#define PARAM_EMERGENCY_STOP    0x1800    //Stop at Over-voltage and Under-voltage
+#define PARAM_ACTION_MODE       0x0060    //CR disabled, Velocity Mode, Acceleration Disabled
+#define PARAM_POSITION_SLOPE    3800      //3800 = 0x0ED8, Max position slope => large torque at target point
+#define PARAM_DEAD_BAND         2         //Set at minimum value of 2, smaller value creates vibration
+#define PARAM_VELOCITY_MAX      4095      //4095 = 0x0FFF, Max velocity set to max value of 4095 
+#define PARAM_TORQUE_MAX        4095      //4095 = 0x0FFF, Max torque set to max value of 4095
+#define PARAM_VOLTAGE_MAX       290
+#define PARAM_VOLTAGE_MIN       180
+#define PARAM_TEMP_MAX          800
+#define PARAM_TEMP_MIN          0
+// #define PARAM_POS_START         455
+// #define PARAM_POS_END           1593
+// #define PARAM_POS_NEUTRAL       1024
+#define PARAM_SV1_POS_START     381
+#define PARAM_SV1_POS_NEUTRAL   950
+#define PARAM_SV1_POS_END       1519
+#define PARAM_SV2_POS_START     455
+#define PARAM_SV2_POS_NEUTRAL   1024
+#define PARAM_SV2_POS_END       1593
+#define PARAM_SV3_POS_START     381
+#define PARAM_SV3_POS_NEUTRAL   950
+#define PARAM_SV3_POS_END       1519
+#define PARAM_SV4_POS_START     381
+#define PARAM_SV4_POS_NEUTRAL   950
+#define PARAM_SV4_POS_END       1519
+#define PARAM_SV5_POS_START     455     //0x01c7
+#define PARAM_SV5_POS_NEUTRAL   1024    //0x0400
+#define PARAM_SV5_POS_END       1593    //0x0639
+#define PARAM_SV6_POS_START     321
+#define PARAM_SV6_POS_NEUTRAL   890
+#define PARAM_SV6_POS_END       1459
 //Servo 1, 3 Start 381 Neutral 950 End 1519  //range 569 for 50deg
 //Servo6 Start 321 Neutral 890 End 1459
+#define PARAM_SV1_T_Direction   0 //CCW : 0, CW : 1
+#define PARAM_SV2_T_Direction   1
+#define PARAM_SV3_T_Direction   0
+#define PARAM_SV4_T_Direction   0
+#define PARAM_SV5_T_Direction   1
+#define PARAM_SV6_T_Direction   0
 typedef union {
     uint8_t ALL;
     struct {
@@ -252,6 +271,11 @@ struct datadef_PMS_data {
     float HDC_OutputCurrent;     //16bit : Byte2 ~ Byte3
     float HDC_InputVoltage;      //16bit : Byte4 ~ Byte5
     float HDC_InputCurrent;      //16bit : Byte6 ~ Byte7
+    //PMS4
+    float PMS_Out_Power;     //16bit : Byte0 ~ Byte1
+    float PMS_In_Power;      //16bit : Byte2 ~ Byte3
+    float PMS_LDC_Out_Volt;  //16bit : Byte4 ~ Byte5
+    float PMS_Max_Temp;          //16bit : Byte6 ~ Byte7    
     //FDC1
     uint8_t FDC_State;              //8bit : Byte1
     float FDC_Aux_Volt;           //8bit : Byte2
@@ -374,6 +398,15 @@ enum class CoaxState {
     CXSTATE_8_LANDED
 };
 
+struct HiTechTestState {
+    uint8_t ServoTestStep = 0;
+    uint8_t ServoTestingID = 0;
+    uint8_t SVDataRequested = 0;
+    uint8_t SVConfigModified = 0;
+    uint8_t ServoCheckFinished = 0;
+    uint8_t Request_retry = 0;
+};
+
 class CoaxData
 {
 public:
@@ -403,7 +436,8 @@ public:
     uint8_t SVinitialized;              //All-motors responded to Ping, comm link initialized
     CoaxSwashState Swash;
     CoaxSwashState Swash_prev;
-    CoaxSwashState Swash_CMD;
+    CoaxSwashState Swash_CMD;    
+    HiTechTestState SVTestState;
 
     //====State Machine
     CoaxState CX_State; //Coaxial State-machine state

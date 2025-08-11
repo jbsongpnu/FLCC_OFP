@@ -82,9 +82,11 @@ private:
     coaxcan1::ICanIface* _iface;
 
     //-----Receive ID definition-----
-    //CCB Test
+    //CCB 
     static constexpr unsigned RX_ID_CCB1  = 0x00000001;  //CCB1 message
     static constexpr unsigned RX_ID_CCB2  = 0x00000010;  //CCB2 message
+    //CAN-485 Converter
+    static constexpr unsigned RX_ID_RS485  = 0x00000020;  //RS-485 Data for Coax Servo
     //Receive ID for Inverter
     static constexpr unsigned RX_ID_INV_GET_CMD     = 0x016E0102; //Get Command
     static constexpr unsigned RX_ID_INV_GET_CC      = 0x016F0102; //Get Current control
@@ -137,6 +139,23 @@ private:
     uint16_t COAXCAN1_ErrCnt;
     uint16_t COAXCAN1_RcvrCnt;
 
+    //RS-485 and Coax Servo related
+    uint16_t _num_SVmsg = 0;    //number of new Servo messages for new session
+    uint8_t _new_SVmsg_ID = 0;  //Message ID of new servo message
+    uint8_t _new_MSG_SVID = 0;  //Corresponding Servo ID of the message
+
+    void interprete_msg(uint8_t sv_id, uint8_t msg_id, uint8_t data_low, uint8_t data_high);
+    void CMD_SET_POSITION(uint8_t id, int16_t setpoint);
+    void CMD_SET_VELOCITY(uint8_t id, uint16_t speed);
+    void CMD_SET_TORQUE(uint8_t id, uint16_t Trq);
+    void Set_Servo_ID(uint8_t pre_id, uint8_t aft_id);
+    void Set_UINT_Config(uint8_t id, uint8_t addrs, uint16_t value);
+    void Set_INT_Config(uint8_t id, uint8_t addrs, int16_t value);
+    void Request_SVData(uint8_t id, uint8_t addrs);
+    void CMD_SET_MULTI_POSITIONS(void);
+    void SV_Config_Test(void);
+    void SV_Check_State(void);
+    void CoaxServoRun(void);
 };
 
 #endif

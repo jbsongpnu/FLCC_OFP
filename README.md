@@ -5,6 +5,7 @@
 ***
 
 ## Version History
+- V0.01.38 Communicating with HiTech servos with CAN protocol through CCB board. CCB board will relay CAN frames to RS-485 to servos. Also some Mavlink messages are changed.
 - V0.01.37 Substituting Pegsus Actuator to HiTech servo : Basic Functions and debug codes with configuration check with UART => This version is not working properly due to TX delay from ChibiOS
 - V0.01.36 Updating CoaxCAN1 and CoaxCAN2 : bug fixes for CCB, Inverter and IFCU
 - V0.01.35 Updating CoaxCAN1 for Inveter control : Adding GCS' ready-to-use flag, checking inverter communicaiton being initialized

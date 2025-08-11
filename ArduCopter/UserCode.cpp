@@ -36,7 +36,7 @@ void Copter::userhook_init()
     MAV_GCSTX_INV_State.i_b = 0;
     MAV_GCSTX_INV_State.i_c = 0;
     
-    MAV_GCSTX_INV_State.Theta_Offset = 55;
+    MAV_GCSTX_INV_State.Motor_Aligned = 55;
     MAV_GCSTX_INV_State.t_a = 0;
     MAV_GCSTX_INV_State.t_b = 0;
     MAV_GCSTX_INV_State.t_c = 0;
@@ -122,6 +122,8 @@ void Copter::userhook_init()
     cxdata().SV_TX[3].SV_pos = 1024;
     cxdata().SV_TX[4].SV_pos = 1024;
     cxdata().SV_TX[5].SV_pos = 890;
+
+    cxdata().SVTestState.ServoTestingID = 0;//Initiate with ID 0
 }
 #endif
 
@@ -213,7 +215,7 @@ void Copter::userhook_MediumLoop()
     //static variables
     static uint16_t Count1Hz = 0;
 
-    uint8_t NewServoMessages = 0;
+    //uint8_t NewServoMessages = 0;
 #if COAXSERVO_TEST == 1
     static uint16_t ServoTestStep = 0;
     static uint8_t ServoTestingID = 0;
@@ -227,7 +229,7 @@ void Copter::userhook_MediumLoop()
     // HiTech Servo testing
     //static uint16_t temp_HiTech_setting = 0;
     //uint8_t  CSBuf[16] = {0};  //this should be reduced, but can only be usded for temporary servo test
-    AP_CoaxServo *HiTech = AP::HiTechSV();
+//    AP_CoaxServo *HiTech = AP::HiTechSV();
 
     //static uint8_t ID_init = 0;
     //static uint8_t ID_Cycle = 0;
@@ -249,7 +251,7 @@ void Copter::userhook_MediumLoop()
         MAV_GCSTX_INV_State.Target_Motor_Speed = (uint16_t)cxdata().INV_data.Motor_RPM_CMD;
         MAV_GCSTX_INV_State.Motor_Speed_Limit = (uint16_t)cxdata().INV_data.Speed_Limit;
         MAV_GCSTX_INV_State.Target_Motor_Acceleration = (uint16_t)cxdata().INV_data.Motor_ACC_CMD;
-        MAV_GCSTX_INV_State.Theta_Offset = (uint16_t)cxdata().INV_data.Theta_Offset;
+        MAV_GCSTX_INV_State.Motor_Aligned = 1;//(uint16_t)cxdata().INV_data.Motor_Align_flag;//Thetaoffset has changed to Align_flag
         MAV_GCSTX_INV_State.i_a = (uint16_t)(cxdata().INV_data.i_a * 100.0);
         MAV_GCSTX_INV_State.i_b = (uint16_t)(cxdata().INV_data.i_b * 100.0);
         MAV_GCSTX_INV_State.i_c = (uint16_t)(cxdata().INV_data.i_c * 100.0);
@@ -257,7 +259,7 @@ void Copter::userhook_MediumLoop()
         MAV_GCSTX_INV_State.t_b = (uint16_t)(cxdata().INV_data.t_b * 100.0);
         MAV_GCSTX_INV_State.t_c = (uint16_t)(cxdata().INV_data.t_c * 100.0);
         MAV_GCSTX_INV_State.V_dc = (uint16_t)(cxdata().INV_data.V_dc_input * 10.0);
-        MAV_GCSTX_INV_State.Fault_Flags = cxdata().INV_data.FLT.ALL;
+        MAV_GCSTX_INV_State.Fault_Flags = 7;//cxdata().INV_data.FLT.ALL;
         gcs().send_message(MSG_INV_STATE); //
     } else if (Count1Hz%10 == 2) {
         MAV_GCSTX_HBSYS.PMS_State = cxdata().DMI_PMS_data.PMS_State;
@@ -301,28 +303,30 @@ void Copter::userhook_MediumLoop()
         MAV_GCSTX_CXSV_SWASH.CMD_Pedal      = cxdata().Swash_CMD.Rud;
         gcs().send_message(MSG_CXSV_SWASH);
     } else if (Count1Hz%10 == 6) {
-        MAV_GCSTX_DMI_data.LDC_State = 0;
-        MAV_GCSTX_DMI_data.PMS_Mv_Battery_VoltageX10 = 11;
-        MAV_GCSTX_DMI_data.PMS_Mv_Output_CurrentX10 = 12;
-        MAV_GCSTX_DMI_data.PMS_Batt_Out_CurrentX10 = 13;
-        MAV_GCSTX_DMI_data.PMS_LDC_Output_CurrentX10 = 14;
-        MAV_GCSTX_DMI_data.PMS_LDC_Output_VoltageX10 = 15;
-        MAV_GCSTX_DMI_data.PMS_Output_PowerX10 = 100;
-        MAV_GCSTX_DMI_data.PMS_Input_PowerX10 = 101;
-        MAV_GCSTX_DMI_data.PMS_MAX_TempX10 = 200;
+        MAV_GCSTX_DMI_data.LDC_State = cxdata().DMI_PMS_data.LDC_State;
+        MAV_GCSTX_DMI_data.PMS_Mv_Battery_VoltageX10 = (uint16_t)(cxdata().DMI_PMS_data.Mv_Battery_Voltage * 10.0);
+        MAV_GCSTX_DMI_data.PMS_Mv_Output_CurrentX10 = (uint16_t)(cxdata().DMI_PMS_data.Mv_Output_Current * 10.0);
+        MAV_GCSTX_DMI_data.PMS_Batt_Out_CurrentX10 = (uint16_t)(cxdata().DMI_PMS_data.Batt_Output_Current * 10.0);
+        MAV_GCSTX_DMI_data.PMS_LDC_Output_CurrentX10 = (uint16_t)(cxdata().DMI_PMS_data.LDC_Output_Current * 10.0);
+        MAV_GCSTX_DMI_data.PMS_LDC_Output_VoltageX10 = (uint16_t)(cxdata().DMI_PMS_data.PMS_LDC_Out_Volt * 10.0);
+        MAV_GCSTX_DMI_data.PMS_Output_PowerX10 = (uint16_t)(cxdata().DMI_PMS_data.PMS_Out_Power * 10.0);
+        MAV_GCSTX_DMI_data.PMS_Input_PowerX10 = (uint16_t)(cxdata().DMI_PMS_data.PMS_In_Power * 10.0);
+        MAV_GCSTX_DMI_data.PMS_MAX_TempX10 = (uint16_t)(cxdata().DMI_PMS_data.PMS_Max_Temp * 10.0);
 
         gcs().send_message(MSG_DMI_DATA);
+    //} else if (Count1Hz%10 == 7) {
+    //    gcs().send_text(MAV_SEVERITY_INFO, "SVID %u Step %u", cxdata().SVTestState.ServoTestingID, cxdata().SVTestState.ServoTestStep);
     } else if (Count1Hz%10 == 0) {
-        MAV_GCSTX_HDM_data.Ifcu_PpCurLimX100 = 10000;
-        MAV_GCSTX_HDM_data.Ifcu_PpH2SofX2 = 100;
-        MAV_GCSTX_HDM_data.Ifcu_H2LkLmp = 0;
-        MAV_GCSTX_HDM_data.Ifcu_FcNetVltX10 = 200;
-        MAV_GCSTX_HDM_data.Ifcu_FcNetCurx10 = 10;
-        MAV_GCSTX_HDM_data.Ifcu_FcInClntTmp = 11;
-        MAV_GCSTX_HDM_data.Ifcu_AmbTemp = 12;
-        MAV_GCSTX_HDM_data.Ifcu_RoomTemp = 13;
-        MAV_GCSTX_HDM_data.Ifcu_H2TnkTmp = 14;
-        MAV_GCSTX_HDM_data.Ifcu_H2TnkPrsX10 = 101;
+        MAV_GCSTX_HDM_data.Ifcu_PpCurLimX100 = (uint16_t)(cxdata().IFCU_data.PpCurLim * 100.0);
+        MAV_GCSTX_HDM_data.Ifcu_PpH2SofX2 = (uint16_t)(cxdata().IFCU_data.PpH2Sof * 2);
+        MAV_GCSTX_HDM_data.Ifcu_H2LkLmp = cxdata().IFCU_data.H2LkLmp;
+        MAV_GCSTX_HDM_data.Ifcu_FcNetVltX10 = (uint16_t)(cxdata().IFCU_data.FcNetVlt * 10.0);
+        MAV_GCSTX_HDM_data.Ifcu_FcNetCurx10 = (uint16_t)(cxdata().IFCU_data.FcNetCur * 10.0);
+        MAV_GCSTX_HDM_data.Ifcu_FcInClntTmp = cxdata().IFCU_data.FcInClntTmp;
+        MAV_GCSTX_HDM_data.Ifcu_AmbTemp = cxdata().IFCU_data.AmbTemp;
+        MAV_GCSTX_HDM_data.Ifcu_RoomTemp = cxdata().IFCU_data.RoomTemp;
+        MAV_GCSTX_HDM_data.Ifcu_H2TnkTmp = cxdata().IFCU_data.H2TnkTmp;
+        MAV_GCSTX_HDM_data.Ifcu_H2TnkPrsX10 = cxdata().IFCU_data.H2TnkPrs;
         gcs().send_message(MSG_HDM_DATA);
 #if CCB_AUTOSEQUENCE == 1
         if (Count1Hz > 50) {
@@ -330,18 +334,16 @@ void Copter::userhook_MediumLoop()
         }
 #endif
     }
-#if COAXSERVO_TEST == 1
-    if((Count1Hz == 99) && (ServoTestingID == 0)) { 
-        HiTech->Set_dummyTX();
-    } else if ((Count1Hz == 100) && (ServoTestingID == 0)) { 
-        HiTech->Set_dummyTX();
-        ServoTestingID = 1;
+//#if COAXSERVO_TEST == 1
+    if((Count1Hz == 108) && (cxdata().SVTestState.ServoTestingID == 0)) { 
+        cxdata().SVTestState.ServoTestingID = 1;
+
     }
-#endif
+//#endif
     //============Check HiTech Servo Configurations=======
     //HiTech Servo ID starts from 1 to 6
     //cxdata's servo array starts from 0 to 5
-    NewServoMessages = HiTech->receive_CoaxServo_uart_data();
+    //NewServoMessages = HiTech->receive_CoaxServo_uart_data();
 #if COAXSERVO_TEST == 1
     //gcs().send_text(MAV_SEVERITY_INFO, "%d New Servo MSGs at %u for %u", NewServoMessages, Count1Hz, ServoTestingID);
 
@@ -349,7 +351,6 @@ void Copter::userhook_MediumLoop()
         switch (ServoTestStep) {
             case 0 :    //Check ID
                 if(SVDataRequested == 0) {
-                    HiTech->Set_dummyTX();
                     HiTech->Request_SVData(ServoTestingID, REG_SERVO_ID); 
                     gcs().send_text(MAV_SEVERITY_INFO, "Requesting ID check to SV %u ", ServoTestingID);
                     SVDataRequested = 1;
@@ -830,7 +831,7 @@ void Copter::userhook_MediumLoop()
         }
     }
 #else
-    if (Count1Hz%10 == 1) {
+    /*if (Count1Hz%10 == 1) {
         HiTech->Request_SVData(1,REG_POSITION);
         HiTech->Request_SVData(2,REG_POSITION);
         HiTech->Request_SVData(3,REG_POSITION);
@@ -859,7 +860,7 @@ void Copter::userhook_MediumLoop()
         HiTech->CMD_SET_POSITION(4,cxdata().SV_TX[3].SV_pos);
         HiTech->CMD_SET_POSITION(5,cxdata().SV_TX[4].SV_pos);
         HiTech->CMD_SET_POSITION(6,cxdata().SV_TX[5].SV_pos);
-    }
+    }*/
 #endif
 
     //cxdata().SVinitialized = 1;

@@ -6669,7 +6669,7 @@ void GCS_MAVLINK::send_message_flcc_gcs_inv_state() const
         MAV_GCSTX_INV_State.Target_Motor_Speed,
         MAV_GCSTX_INV_State.Motor_Speed_Limit,
         MAV_GCSTX_INV_State.Target_Motor_Acceleration,
-        MAV_GCSTX_INV_State.Theta_Offset,
+        MAV_GCSTX_INV_State.Motor_Aligned,
         MAV_GCSTX_INV_State.i_a,
         MAV_GCSTX_INV_State.i_b,
         MAV_GCSTX_INV_State.i_c,

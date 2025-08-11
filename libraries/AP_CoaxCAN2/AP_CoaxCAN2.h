@@ -53,6 +53,7 @@ public:
     PMS1_msg _PMS1;
     PMS2_msg _PMS2;
     PMS3_msg _PMS3;
+    PMS4_msg _PMS4;
     FDC1_msg _FDC1;
     FDC2_msg _FDC2;
     VCUFDC1_msg _VCUFDC1;
@@ -84,6 +85,7 @@ private:
     static constexpr unsigned RX_ID_PMS1  = 0x000006F0;
     static constexpr unsigned RX_ID_PMS2  = 0x000006F1;
     static constexpr unsigned RX_ID_PMS3  = 0x000006F2;
+    static constexpr unsigned RX_ID_PMS4  = 0x000006F4;
     static constexpr unsigned RX_ID_FDC1  = 0x00000300;
     static constexpr unsigned RX_ID_FDC2  = 0x00000301;
     static constexpr unsigned RX_ID_VCUF1 = 0x00000400;

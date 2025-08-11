@@ -10,11 +10,13 @@
 
 extern const AP_HAL::HAL& hal;
 
+#define RS485_CAN_MSGID 0xFD
+
 #define TEMP_EXP 0		//Initial value
 #define DEBUG_INVERTER 0
 #define DEBUG_CCB 0
 #define DEBUG_GCSCMD 1
-
+#define DEBUG_COAXSERVO 1
 // Table of user settable CAN bus parameters
 const AP_Param::GroupInfo AP_COAXCAN1::var_info[] = {
     // @Param: example
@@ -155,28 +157,48 @@ void AP_COAXCAN1::run(void)
     Check_INV_data();
     Check_CCB_data();
     
-    //if(_AP_COAXCAN1_loop_cnt%20==0)
-    // if(_AP_COAXCAN1_loop_cnt%100==0)
-    // {
-    //     //TX_INV_SETCMD_MSG();
-    // }
-    // // else if(_AP_COAXCAN1_loop_cnt%20 == 5)
-    // else if(_AP_COAXCAN1_loop_cnt%100 == 20)
-    // {
-    //     TX_INV_SETCC_MSG();
-    // }
-    // else if(_AP_COAXCAN1_loop_cnt%100 == 40)
-    // {
-    //     TX_INV_SETSC_MSG();
-    // }
-    // else if(_AP_COAXCAN1_loop_cnt%100 == 60)
-    // {
-    //     TX_INV_SETFLT_MSG();
-    // }
-    if(_AP_COAXCAN1_loop_cnt%20==0) {
+    //Coax Servo loop at 100Hz
+    CoaxServoRun();
+    
+    //Inverter and CCB loop at 10Hz
+    if(_AP_COAXCAN1_loop_cnt%20 == 1) {
         TXspin();
     }
+    //Coax Servo loop and Inverter/CCB loops are designed to never overlap
     
+}
+
+//Coax Servo loop at 200Hz
+void AP_COAXCAN1::CoaxServoRun(void)
+{   //_AP_COAXCAN1_loop_cnt still usable
+    switch (cxdata().CX_State) {
+        case CoaxState::CXSTATE_0_INIT : 
+            if(_AP_COAXCAN1_loop_cnt%2 == 0) {
+                //Check Configuration of servos at Init state
+                if(cxdata().SVTestState.ServoCheckFinished) {
+                    //If finished, transit to next state
+                    cxdata().CX_State = CoaxState::CXSTATE_1_CHECK;
+                    cxdata().SVTestState.ServoCheckFinished = 0;
+                    gcs().send_text(MAV_SEVERITY_INFO, "Checking Current State of Servos");//Notice for next step
+                } else {
+                    //Check configuration
+                    SV_Config_Test();
+                }
+            }
+        break;
+        case CoaxState::CXSTATE_1_CHECK :
+            if(_AP_COAXCAN1_loop_cnt%2 == 0) {
+                if(cxdata().SVTestState.ServoCheckFinished) {
+                    cxdata().CX_State = CoaxState::CXSTATE_2_WAIT;
+                    gcs().send_text(MAV_SEVERITY_INFO, "Servos at Wait-state");
+                } else {
+                    SV_Check_State();
+                }
+            }
+        break;
+        default : 
+        break;
+    }
 }
 
 // -------------------------------------------------------------------------
@@ -339,6 +361,33 @@ void AP_COAXCAN1::handleFrame(const AP_HAL::CANFrame& can_rxframe)
             gcs().send_text(MAV_SEVERITY_INFO, "CCB_2 : %u, %u, %u, %u, %u", 
                 CC_MSG2.ThCp1x10, CC_MSG2.ThCp2x10, CC_MSG2.Flow_mL, CC_MSG2.Brd_temp, CC_MSG2.State.ALL );
 #endif
+            break;
+        case RX_ID_RS485 : {
+            uint8_t sv_id;
+            uint8_t msg_id;
+            uint8_t length;
+            uint8_t data_low;
+            uint8_t data_high;
+            uint8_t chcksm_rx;
+            uint8_t chcksm_cal;
+            if((can_rxframe.data[0] == 0xff) && (can_rxframe.data[1] == 0x69)) {
+                //tempdebugCheck = 1;
+                sv_id = can_rxframe.data[2];
+                msg_id = can_rxframe.data[3];
+                length = can_rxframe.data[4];
+                data_low = can_rxframe.data[5];
+                data_high = can_rxframe.data[6];
+                chcksm_rx = can_rxframe.data[7];
+                chcksm_cal = (sv_id + msg_id + length + data_low + data_high) % 256;
+                if (chcksm_cal == chcksm_rx) {
+                    interprete_msg(sv_id, msg_id, data_low, data_high);
+                    _num_SVmsg = _num_SVmsg + 1;
+                    _new_SVmsg_ID = msg_id;
+                    _new_MSG_SVID = sv_id;
+                    //tempdebugCheck = 2;
+                }
+            }
+        }
             break;
 
         case RX_ID_INV_GET_CMD:
@@ -749,7 +798,7 @@ void AP_COAXCAN1::TXspin()
     //====Send GCS 61112 command to CCB
     //if and else if should be used here : one command at a time to CCB
     //Therefore, if multiple commands are received, should run TXspin() multiple times.
-    if (_AP_COAXCAN1_loop_cnt%200 == 0){
+    if (_AP_COAXCAN1_loop_cnt%200 == 1){
         CC_CMD.Command = 5;
         TX_CCB();
     } else {
@@ -973,4 +1022,1401 @@ void AP_COAXCAN1::TX_CCB(void)
 #if DEBUG_CCB == 1
     gcs().send_text(MAV_SEVERITY_NOTICE, "CCBTX %u", CC_CMD.Command);
 #endif
+}
+
+void AP_COAXCAN1::interprete_msg(uint8_t sv_id, uint8_t msg_id, uint8_t data_low, uint8_t data_high) {
+    uint16_t tempUint16 = 0;
+    int16_t tempInt16 = 0;
+    uint8_t isSignedInt = 0;
+    if ((sv_id == 0)||(sv_id > 6)||(msg_id>0xC2)) { return; }
+    
+    uint8_t SV_index = sv_id - 1;
+
+    switch (msg_id) {
+        // case REG_PRODUCT_NO :
+        //     break;
+        // case REG_PRODUCT_VERSION :
+        //     break;
+        // case REG_FIRMWARE_VERSION :
+        //     break;
+        // case REG_SERIAL_NO_SUB :
+        //     break;
+        // case REG_SERIAL_NO_MAIN :
+        //     break;
+        case REG_STATUS_FLAG :
+            tempUint16 = data_low;
+            tempUint16 = tempUint16 | ((uint16_t)data_high << 8); //Uint
+            cxdata().SV_state[SV_index].ErrorCode.ALL = tempUint16;
+            break;
+        case REG_POSITION :
+            tempUint16 = data_low;
+            tempInt16 = (int16_t)(tempUint16 | ((uint16_t)data_high << 8)); //Int
+            isSignedInt = 1;
+            cxdata().SV_Pos_prv[SV_index].raw = cxdata().SV_Pos[SV_index].raw;
+            cxdata().SV_Pos[SV_index].raw = tempInt16;
+            break;
+        case REG_VELOCITY :
+            tempUint16 = data_low;
+            tempInt16 = (int16_t)(tempUint16 | ((uint16_t)data_high << 8)); //Int
+            isSignedInt = 1;
+            cxdata().SV_state[SV_index].Status_Velocity = tempInt16;
+            break;
+        case REG_TORQUE :
+            tempUint16 = data_low;
+            tempInt16 = (int16_t)(tempUint16 | ((uint16_t)data_high << 8)); //Int
+            isSignedInt = 1;
+            cxdata().SV_state[SV_index].Status_Velocity = tempInt16;
+            break;
+        case REG_VOLTAGE :
+            tempUint16 = data_low;
+            tempUint16 = tempUint16 | ((uint16_t)data_high << 8); //Uint
+            cxdata().SV_state[SV_index].Status_Voltage = tempUint16;
+            break;
+        case REG_MCU_TEMP :
+            tempUint16 = data_low;
+            tempUint16 = tempUint16 | ((uint16_t)data_high << 8); //Uint
+            cxdata().SV_state[SV_index].Status_MCU_Temp = tempUint16;
+            break;
+        case REG_MOTOR_TEMP :
+            tempUint16 = data_low;
+            tempUint16 = tempUint16 | ((uint16_t)data_high << 8); //Uint
+            cxdata().SV_state[SV_index].Status_Motor_Temp = tempUint16;
+            break;
+        case REG_HUMIDITY :
+            tempUint16 = data_low;
+            tempUint16 = tempUint16 | ((uint16_t)data_high << 8); //Uint
+            cxdata().SV_state[SV_index].Status_Humidity = tempUint16;
+            break;
+        // case REG_HUMIDITY_MAX :
+        //     break;
+        // case REG_HUMIDITY_MIN :
+        //     break;
+        case REG_POSITION_NEW :
+            tempUint16 = data_low;
+            tempInt16 = (int16_t)(tempUint16 | ((uint16_t)data_high << 8)); //Int
+            isSignedInt = 1;
+            cxdata().SV_TXPos_feedback[SV_index] = tempInt16;
+            break;
+        case REG_VELOCITY_NEW :
+            tempUint16 = data_low;
+            tempUint16 = tempUint16 | ((uint16_t)data_high << 8); //Uint
+            cxdata().SV_state[SV_index].Action_Velocity = tempUint16;
+            break;
+        case REG_TORQUE_NEW :
+            tempUint16 = data_low;
+            tempUint16 = tempUint16 | ((uint16_t)data_high << 8); //Uint
+            cxdata().SV_state[SV_index].Action_Torque = tempUint16;
+            break;
+        // case REG_360DEG_TURN_NEW :
+        //     break;
+        case REG_SERVO_ID :
+            tempUint16 = data_low;
+            tempUint16 = tempUint16 | ((uint16_t)data_high << 8); //Uint
+            if (sv_id == tempUint16) {
+                cxdata().SV_state[SV_index].connected = 1;
+            } else {
+                gcs().send_text(MAV_SEVERITY_ERROR, "Invalid Servo ID Error %u %u %u %u", sv_id, data_low, data_high, tempUint16);
+            }
+            break;
+        // case REG_BAUD_RATE :
+        //     break;
+        case REG_NORMAL_RETURN_DELAY :
+            tempUint16 = data_low;
+            tempUint16 = tempUint16 | ((uint16_t)data_high << 8); //Uint
+            cxdata().SV_state[SV_index].Config_Delay = tempUint16;
+            break;
+        case REG_POWER_CONFIG :
+            tempUint16 = data_low;
+            tempUint16 = tempUint16 | ((uint16_t)data_high << 8); //Uint
+            cxdata().SV_state[SV_index].Config_Power_Config = tempUint16;
+            break;
+        case REG_EMERGENCY_STOP :
+            tempUint16 = data_low;
+            tempUint16 = tempUint16 | ((uint16_t)data_high << 8); //Uint
+            cxdata().SV_state[SV_index].Config_Emergency_Stop = tempUint16;
+            break;
+        case REG_ACTION_MODE :
+            tempUint16 = data_low;
+            tempUint16 = tempUint16 | ((uint16_t)data_high << 8); //Uint
+            cxdata().SV_state[SV_index].Config_Action_Mode = tempUint16;
+            break;
+        case REG_POSITION_SLOPE :
+            tempUint16 = data_low;
+            tempUint16 = tempUint16 | ((uint16_t)data_high << 8);  //Uint
+            cxdata().SV_state[SV_index].Config_Pos_Slope = tempUint16;
+            break;
+        case REG_DEAD_BAND :
+            tempUint16 = data_low;
+            tempUint16 = tempUint16 | ((uint16_t)data_high << 8);  //Uint
+            cxdata().SV_state[SV_index].Config_Dead_band = tempUint16;
+            break;
+        case REG_VELOCITY_MAX :
+            tempUint16 = data_low;
+            tempUint16 = tempUint16 | ((uint16_t)data_high << 8);  //Uint
+            cxdata().SV_state[SV_index].Config_Velocity_Max = tempUint16;
+            break;
+        case REG_TORQUE_MAX :
+            tempUint16 = data_low;
+            tempUint16 = tempUint16 | ((uint16_t)data_high << 8);  //Uint
+            cxdata().SV_state[SV_index].Config_Torque_Max = tempUint16;
+            break;
+        case REG_VOLTAGE_MAX :
+            tempUint16 = data_low;
+            tempUint16 = tempUint16 | ((uint16_t)data_high << 8);  //Uint
+            cxdata().SV_state[SV_index].Config_Volt_Max = tempUint16;
+            break;
+        case REG_VOLTAGE_MIN :
+            tempUint16 = data_low;
+            tempUint16 = tempUint16 | ((uint16_t)data_high << 8);  //Uint
+            cxdata().SV_state[SV_index].Config_Volt_Min = tempUint16;
+            break;
+        case REG_TEMP_MAX :
+            tempUint16 = data_low;
+            tempUint16 = tempUint16 | ((uint16_t)data_high << 8);  //Uint
+            cxdata().SV_state[SV_index].Config_Temp_Max = tempUint16;
+            break;
+        case REG_TEMP_MIN :
+            tempUint16 = data_low;
+            tempUint16 = tempUint16 | ((uint16_t)data_high << 8);  //Uint
+            cxdata().SV_state[SV_index].Config_Temp_Min = tempUint16;
+            break;
+        case REG_POS_START :
+            tempUint16 = data_low;
+            tempInt16 = (int16_t)(tempUint16 | ((uint16_t)data_high << 8)); //Int
+            isSignedInt = 1;
+            cxdata().SV_state[SV_index].Config_Pos_Start = tempInt16;
+            break;
+        case REG_POS_END :
+            tempUint16 = data_low;
+            tempInt16 = (int16_t)(tempUint16 | ((uint16_t)data_high << 8)); //Int
+            isSignedInt = 1;
+            cxdata().SV_state[SV_index].Config_Pos_End = tempInt16;
+            break;
+        case REG_POS_NEUTRAL :
+            tempUint16 = data_low;
+            tempInt16 = (int16_t)(tempUint16 | ((uint16_t)data_high << 8)); //Int
+            isSignedInt = 1;
+            cxdata().SV_state[SV_index].Config_Pos_Neutral = tempInt16;
+            break;
+        // case REG_FACTORY_DEFAULT :
+        //     break;
+        // case REG_CONFIG_SAVE :
+        //     break;
+        case REG_MOTOR_TURN_DIRECT :
+            tempUint16 = data_low;
+            tempUint16 = tempUint16 | ((uint16_t)data_high << 8);  //Uint
+            cxdata().SV_state[SV_index].Config_Direnction = tempUint16;
+            break;
+        default :
+            tempUint16 = data_low;
+            tempUint16 = tempUint16 | ((uint16_t)data_high << 8);  //Uint
+            break;
+    }
+#if DEBUG_COAXSERVO == 1
+    if(isSignedInt) {
+        gcs().send_text(MAV_SEVERITY_INFO, "HiTech SV %u, MSG %u, Value %d", sv_id, msg_id, tempInt16);
+    } else {
+        gcs().send_text(MAV_SEVERITY_INFO, "HiTech SV %u, MSG %u, Value %u", sv_id, msg_id, tempUint16);
+    }
+#endif
+}
+
+// ====== CMD_SET_POSITION
+// The CMD_SET_POSITION command makes the actuator run to the defined position.
+void AP_COAXCAN1::CMD_SET_POSITION(uint8_t id, int16_t setpoint) {
+    //check validity
+    if(id>6) return; //Servo ID numbering has changed from 0~5 => 1~6, but 0 is required for initial setting
+    if((setpoint < 0) || (setpoint > 2048)) return; //Only allow 90degs turn clockwise and counter-clockwise
+
+    uint8_t buffer[8];
+    buffer[0] = 0x96;       //Header
+    buffer[1] = id;         //Target ID
+    buffer[2] = 0x1E;       //Address
+    buffer[3] = 0x02;       //Registry Length
+    buffer[4] = (uint8_t)(setpoint & 0x00FF);
+    buffer[5] = (uint8_t)((setpoint >> 8) & 0x00FF);
+    buffer[6] = (buffer[1] + buffer[2] + buffer[3] + buffer[4] + buffer[5]) % 256;   //Checksum : sum(id : Registry Length)%256  (meaning low byte)
+    buffer[7] = 0;
+
+    CAN_TX_Std(RS485_CAN_MSGID, buffer, 8);
+}
+
+// ====== CMD_SET_VELOCITY
+// The CMD_SET_VELOCITY command makes the actuator run to the defined position.
+// 
+void AP_COAXCAN1::CMD_SET_VELOCITY(uint8_t id, uint16_t speed) {
+    //check validity
+    if(id>6) return; //Servo ID numbering has changed from 0~5 => 1~6, but 0 is required for initial setting
+    if(speed > 4095) return; //Only allow 4095
+
+    uint8_t buffer[8];
+    buffer[0] = 0x96;       //Header
+    buffer[1] = id;         //Target ID
+    buffer[2] = 0x20;       //Address
+    buffer[3] = 0x02;       //Registry Length
+    buffer[4] = (uint8_t)(speed & 0x00FF);
+    buffer[5] = (uint8_t)((speed >> 8) & 0x00FF);
+    buffer[6] = (buffer[1] + buffer[2] + buffer[3] + buffer[4] + buffer[5]) % 256;   //Checksum : sum(id : Registry Length)%256  (meaning low byte)
+    buffer[7] = 0;
+
+    CAN_TX_Std(RS485_CAN_MSGID, buffer, 8);
+}
+
+// ====== CMD_SET_TORQUE
+// The CMD_SET_TORQUE command makes the actuator run to the defined position.
+// 
+void AP_COAXCAN1::CMD_SET_TORQUE(uint8_t id, uint16_t Trq) {
+    //check validity
+    if(id>6) return; //Servo ID numbering has changed from 0~5 => 1~6, but 0 is required for initial setting
+    if(Trq > 4095) return; //Only allow 4095
+
+    uint8_t buffer[8];
+    buffer[0] = 0x96;       //Header
+    buffer[1] = id;         //Target ID
+    buffer[2] = 0x22;       //Address
+    buffer[3] = 0x02;       //Registry Length
+    buffer[4] = (uint8_t)(Trq & 0x00FF);
+    buffer[5] = (uint8_t)((Trq >> 8) & 0x00FF);
+    buffer[6] = (buffer[1] + buffer[2] + buffer[3] + buffer[4] + buffer[5]) % 256;   //Checksum : sum(id : Registry Length)%256  (meaning low byte)
+    buffer[7] = 0;
+
+    CAN_TX_Std(RS485_CAN_MSGID, buffer, 8);
+}
+
+// ====== Set_Servo_ID
+// Only allowed to set up to 6 servos
+void AP_COAXCAN1::Set_Servo_ID(uint8_t pre_id, uint8_t aft_id) {
+    //check validity
+    if((pre_id>6)||(aft_id>6)) return;
+    
+    uint8_t buffer[8];
+    buffer[0] = 0x96;       //Header
+    buffer[1] = pre_id;     //Target ID
+    buffer[2] = 0x32;       //Address
+    buffer[3] = 0x02;       //Registry Length
+    buffer[4] = aft_id;       
+    buffer[5] = 0;
+    buffer[6] = (buffer[1] + buffer[2] + buffer[3] + buffer[4] + buffer[5]) % 256;   //Checksum : sum(id : Registry Length)%256  (meaning low byte)
+    buffer[7] = 0;
+
+    CAN_TX_Std(RS485_CAN_MSGID, buffer, 8);
+}
+
+void AP_COAXCAN1::Set_UINT_Config(uint8_t id, uint8_t addrs, uint16_t value) {
+    //check validity
+    if(id>6) return;
+    
+    uint8_t buffer[8];
+    buffer[0] = 0x96;       //Header
+    buffer[1] = id;         //Target ID
+    buffer[2] = addrs;      //Address
+    buffer[3] = 0x02;       //Registry Length
+    buffer[4] = (uint8_t)(value & 0x00FF);
+    buffer[5] = (uint8_t)((value >> 8) & 0x00FF);
+    buffer[6] = (buffer[1] + buffer[2] + buffer[3] + buffer[4] + buffer[5]) % 256;   //Checksum : sum(id : Registry Length)%256  (meaning low byte)
+    buffer[7] = 0;
+
+    CAN_TX_Std(RS485_CAN_MSGID, buffer, 8);
+}
+
+void AP_COAXCAN1::Set_INT_Config(uint8_t id, uint8_t addrs, int16_t value) {
+    //check validity
+    if(id>6) return;
+    
+    uint8_t buffer[8];
+    buffer[0] = 0x96;       //Header
+    buffer[1] = id;         //Target ID
+    buffer[2] = addrs;      //Address
+    buffer[3] = 0x02;       //Registry Length
+    buffer[4] = (uint8_t)(value & 0x00FF);
+    buffer[5] = (uint8_t)((value >> 8) & 0x00FF);
+    buffer[6] = (buffer[1] + buffer[2] + buffer[3] + buffer[4] + buffer[5]) % 256;   //Checksum : sum(id : Registry Length)%256  (meaning low byte)
+    buffer[7] = 0;
+
+    CAN_TX_Std(RS485_CAN_MSGID, buffer, 8);
+}
+
+void AP_COAXCAN1::Request_SVData(uint8_t id, uint8_t addrs) {
+    //temp test
+    static uint8_t count = 0;
+    //check validity
+    if((id>6)||(addrs > 0xC2)) return;
+    
+    uint8_t buffer[8] = {0, }; //to avoid TX interrupt delay, we send large amount of data with dummy bytes
+    buffer[0] = 0x96;       //Header
+    buffer[1] = id;         //Target ID
+    buffer[2] = addrs;      //Address
+    buffer[3] = 0;          //Registry Length
+    buffer[4] = (buffer[1] + buffer[2] + buffer[3]) % 256;   //Checksum : sum(id : Registry Length)%256  (meaning low byte)
+    count++;
+
+    CAN_TX_Std(RS485_CAN_MSGID, buffer, 8);
+
+#if DEBUG_COAXSERVO == 1
+    //gcs().send_text(MAV_SEVERITY_INFO, "Req SVData to %u for %u", id, addrs);
+#endif
+}
+
+// CMD_SET_MULTI_POSITIONS
+void AP_COAXCAN1::CMD_SET_MULTI_POSITIONS(void) {
+    
+    for(int i=0; i<6; i++) {
+        CMD_SET_POSITION((i+1),cxdata().SV_TX[i].SV_pos);
+    }
+}
+
+void AP_COAXCAN1::SV_Config_Test(void) {
+    uint8_t NewServoMessages = _num_SVmsg;
+
+    if((cxdata().SVTestState.ServoTestingID > 0) && (cxdata().SVTestState.ServoTestingID < 7)) {
+        switch (cxdata().SVTestState.ServoTestStep) {
+            case 0 :    //Check ID
+                if(cxdata().SVTestState.SVDataRequested == 0) {
+                    Request_SVData(cxdata().SVTestState.ServoTestingID, REG_SERVO_ID); 
+                    gcs().send_text(MAV_SEVERITY_INFO, "Req ID chck SV %u ", cxdata().SVTestState.ServoTestingID);
+                    cxdata().SVTestState.SVDataRequested = 1;
+                } else {
+                    if ( (NewServoMessages) && (_new_SVmsg_ID == REG_SERVO_ID) ) {
+                        if(cxdata().SV_state[(cxdata().SVTestState.ServoTestingID-1)].connected) {   
+                            gcs().send_text(MAV_SEVERITY_INFO, "Checking SV %u Config", cxdata().SVTestState.ServoTestingID);
+                            cxdata().SVTestState.ServoTestStep++;
+                            cxdata().SVTestState.SVDataRequested = 0;
+                            cxdata().SVTestState.Request_retry = 0;
+                        } else {
+                            Request_SVData(cxdata().SVTestState.ServoTestingID, REG_SERVO_ID);//Retry
+                            cxdata().SVTestState.Request_retry++;
+                        }
+                    } 
+                    else {
+                        //Retry up to 20 tiems
+                        if(cxdata().SVTestState.Request_retry <= 250) {
+                            Request_SVData(cxdata().SVTestState.ServoTestingID, REG_SERVO_ID);//temp test : TX not working
+                            cxdata().SVTestState.Request_retry++;
+                        } else {
+                            //Time-over 2sec, Move on to next motor instead of next test step
+                            gcs().send_text(MAV_SEVERITY_INFO, "SV %u NOT CONNECTED.", cxdata().SVTestState.ServoTestingID);
+                            cxdata().SVTestState.Request_retry = 0;
+                            cxdata().SVTestState.ServoTestingID++;
+                            cxdata().SVTestState.SVDataRequested = 0;
+                        }
+                    }
+                }
+            break;
+            case 1 :    //Check Return Delay
+                if(cxdata().SVTestState.SVDataRequested == 0) {
+                    Request_SVData(cxdata().SVTestState.ServoTestingID, REG_NORMAL_RETURN_DELAY);
+                    gcs().send_text(MAV_SEVERITY_INFO, "Req RETURN DELAY %u ", cxdata().SVTestState.ServoTestingID);
+                    cxdata().SVTestState.SVDataRequested = 1;
+                } else {
+                    if ( (NewServoMessages) && (_new_SVmsg_ID == REG_NORMAL_RETURN_DELAY) ) {
+                        if(cxdata().SV_state[(cxdata().SVTestState.ServoTestingID-1)].Config_Delay == PARAM_RETURN_DELAY) { 
+                            //servo 1 : 1ms, servo 2 : 2ms .... delay is same as servo number
+                            gcs().send_text(MAV_SEVERITY_INFO, "SV %u RETURN DELAY OK", cxdata().SVTestState.ServoTestingID);
+                            cxdata().SVTestState.ServoTestStep++;
+                            cxdata().SVTestState.SVDataRequested = 0;
+                        } else {
+                            Set_UINT_Config(cxdata().SVTestState.ServoTestingID, REG_NORMAL_RETURN_DELAY, PARAM_RETURN_DELAY);
+                            gcs().send_text(MAV_SEVERITY_INFO, "Reconfig Return Delay: SV %u Val=%u", cxdata().SVTestState.ServoTestingID, PARAM_RETURN_DELAY);
+                            cxdata().SVTestState.SVDataRequested = 0;    //Reset SVDataRequested to check again
+                            cxdata().SVTestState.SVConfigModified = 1;   //Notice configuration chagne
+                        }
+                        cxdata().SVTestState.Request_retry = 0;
+                    } else {
+                        //Retry up to 20 tiems
+                        if(cxdata().SVTestState.Request_retry <= 250) {
+                            Request_SVData(cxdata().SVTestState.ServoTestingID, REG_NORMAL_RETURN_DELAY);
+                            gcs().send_text(MAV_SEVERITY_INFO, "RetrySV %u Stp %u", cxdata().SVTestState.ServoTestingID, cxdata().SVTestState.ServoTestStep);//Delete this line later
+                            cxdata().SVTestState.Request_retry++;
+                        } else {
+                            //Time-over 2sec, Move on to next test step
+                            gcs().send_text(MAV_SEVERITY_INFO, "SV %u Check Error Step %u", cxdata().SVTestState.ServoTestingID, cxdata().SVTestState.ServoTestStep);
+                            cxdata().SVTestState.Request_retry = 0;
+                            cxdata().SVTestState.ServoTestStep++;
+                            cxdata().SVTestState.SVDataRequested = 0;
+                        }
+                    }
+                }
+            break;
+            case 2 :    //Check Power Config
+                if(cxdata().SVTestState.SVDataRequested == 0) {
+                    Request_SVData(cxdata().SVTestState.ServoTestingID, REG_POWER_CONFIG);
+                    gcs().send_text(MAV_SEVERITY_INFO, "Requesting REG_POWER_CONFIG %u ", cxdata().SVTestState.ServoTestingID);
+                    cxdata().SVTestState.SVDataRequested = 1;
+                } else {
+                    if ( (NewServoMessages) && (_new_SVmsg_ID == REG_POWER_CONFIG) ) {
+                        if(cxdata().SV_state[(cxdata().SVTestState.ServoTestingID-1)].Config_Power_Config == PARAM_POWER_CONFIG) { 
+                            gcs().send_text(MAV_SEVERITY_INFO, "SV %u Power Config OK", cxdata().SVTestState.ServoTestingID);
+                            cxdata().SVTestState.ServoTestStep++;
+                            cxdata().SVTestState.SVDataRequested = 0;
+                        } else {
+                            Set_UINT_Config(cxdata().SVTestState.ServoTestingID, REG_POWER_CONFIG, PARAM_POWER_CONFIG);
+                            gcs().send_text(MAV_SEVERITY_INFO, "Reconfig Power Config: SV %u Val=%u", cxdata().SVTestState.ServoTestingID, PARAM_POWER_CONFIG);
+                            cxdata().SVTestState.SVDataRequested = 0;    //Reset SVDataRequested to check again
+                            cxdata().SVTestState.SVConfigModified = 1;   //Notice configuration chagne
+                        }
+                        cxdata().SVTestState.Request_retry = 0;
+                    } else {
+                        //Retry up to 20 tiems
+                        if(cxdata().SVTestState.Request_retry <= 250) {
+                            Request_SVData(cxdata().SVTestState.ServoTestingID, REG_POWER_CONFIG);
+                            gcs().send_text(MAV_SEVERITY_INFO, "RetrySV %u Stp %u", cxdata().SVTestState.ServoTestingID, cxdata().SVTestState.ServoTestStep);//Delete this line later
+                            cxdata().SVTestState.Request_retry++;
+                        } else {
+                            //Time-over 2sec, Move on to next test step
+                            gcs().send_text(MAV_SEVERITY_INFO, "SV %u Check Error Step %u", cxdata().SVTestState.ServoTestingID, cxdata().SVTestState.ServoTestStep);
+                            cxdata().SVTestState.Request_retry = 0;
+                            cxdata().SVTestState.ServoTestStep++;
+                            cxdata().SVTestState.SVDataRequested = 0;
+                        }
+                    }
+                }
+            break;
+            case 3 :    //Check Emergency Stop
+                if(cxdata().SVTestState.SVDataRequested == 0) {
+                    Request_SVData(cxdata().SVTestState.ServoTestingID, REG_EMERGENCY_STOP);
+                    gcs().send_text(MAV_SEVERITY_INFO, "Requesting REG_EMERGENCY_STOP %u ", cxdata().SVTestState.ServoTestingID);
+                    cxdata().SVTestState.SVDataRequested = 1;
+                } else {
+                    if ( (NewServoMessages) && (_new_SVmsg_ID == REG_EMERGENCY_STOP) ) {
+                        if(cxdata().SV_state[(cxdata().SVTestState.ServoTestingID-1)].Config_Emergency_Stop == PARAM_EMERGENCY_STOP) { 
+                            gcs().send_text(MAV_SEVERITY_INFO, "SV %u EM Stop failsafe OK", cxdata().SVTestState.ServoTestingID);
+                            cxdata().SVTestState.ServoTestStep++;
+                            cxdata().SVTestState.SVDataRequested = 0;
+                        } else {
+                            Set_UINT_Config(cxdata().SVTestState.ServoTestingID, REG_EMERGENCY_STOP, PARAM_EMERGENCY_STOP);
+                            gcs().send_text(MAV_SEVERITY_INFO, "Reconfig EM Stop failsafe: SV %u Val=%u", cxdata().SVTestState.ServoTestingID, PARAM_EMERGENCY_STOP);
+                            cxdata().SVTestState.SVDataRequested = 0;    //Reset SVDataRequested to check again
+                            cxdata().SVTestState.SVConfigModified = 1;   //Notice configuration chagne
+                        }
+                        cxdata().SVTestState.Request_retry = 0;
+                    } else {
+                        //Retry up to 20 tiems
+                        if(cxdata().SVTestState.Request_retry <= 250) {
+                            Request_SVData(cxdata().SVTestState.ServoTestingID, REG_EMERGENCY_STOP);
+                            gcs().send_text(MAV_SEVERITY_INFO, "RetrySV %u Stp %u", cxdata().SVTestState.ServoTestingID, cxdata().SVTestState.ServoTestStep);//Delete this line later
+                            cxdata().SVTestState.Request_retry++;
+                        } else {
+                            //Time-over 2sec, Move on to next test step
+                            gcs().send_text(MAV_SEVERITY_INFO, "SV %u Check Error Step %u", cxdata().SVTestState.ServoTestingID, cxdata().SVTestState.ServoTestStep);
+                            cxdata().SVTestState.Request_retry = 0;
+                            cxdata().SVTestState.ServoTestStep++;
+                            cxdata().SVTestState.SVDataRequested = 0;
+                        }
+                    }
+                }
+            break;
+            case 4 :    //Check Action Mode
+                if(cxdata().SVTestState.SVDataRequested == 0) {
+                    Request_SVData(cxdata().SVTestState.ServoTestingID, REG_ACTION_MODE);
+                    gcs().send_text(MAV_SEVERITY_INFO, "Requesting REG_ACTION_MODE %u ", cxdata().SVTestState.ServoTestingID);
+                    cxdata().SVTestState.SVDataRequested = 1;
+                } else {
+                    if ( (NewServoMessages) && (_new_SVmsg_ID == REG_ACTION_MODE) ) {
+                        if(cxdata().SV_state[(cxdata().SVTestState.ServoTestingID-1)].Config_Action_Mode == PARAM_ACTION_MODE) { 
+                            gcs().send_text(MAV_SEVERITY_INFO, "SV %u Action Mode OK", cxdata().SVTestState.ServoTestingID);
+                            cxdata().SVTestState.ServoTestStep++;
+                            cxdata().SVTestState.SVDataRequested = 0;
+                        } else {
+                            Set_UINT_Config(cxdata().SVTestState.ServoTestingID, REG_ACTION_MODE, PARAM_ACTION_MODE);
+                            gcs().send_text(MAV_SEVERITY_INFO, "Reconfig Action Mode: SV %u Val=%u", cxdata().SVTestState.ServoTestingID, PARAM_ACTION_MODE);
+                            cxdata().SVTestState.SVDataRequested = 0;    //Reset SVDataRequested to check again
+                            cxdata().SVTestState.SVConfigModified = 1;   //Notice configuration chagne
+                        }
+                        cxdata().SVTestState.Request_retry = 0;
+                    } else {
+                        //Retry up to 20 tiems
+                        if(cxdata().SVTestState.Request_retry <= 250) {
+                            Request_SVData(cxdata().SVTestState.ServoTestingID, REG_ACTION_MODE);
+                            gcs().send_text(MAV_SEVERITY_INFO, "RetrySV %u Stp %u", cxdata().SVTestState.ServoTestingID, cxdata().SVTestState.ServoTestStep);//Delete this line later
+                            cxdata().SVTestState.Request_retry++;
+                        } else {
+                            //Time-over 2sec, Move on to next test step
+                            gcs().send_text(MAV_SEVERITY_INFO, "SV %u Check Error Step %u", cxdata().SVTestState.ServoTestingID, cxdata().SVTestState.ServoTestStep);
+                            cxdata().SVTestState.Request_retry = 0;
+                            cxdata().SVTestState.ServoTestStep++;
+                            cxdata().SVTestState.SVDataRequested = 0;
+                        }
+                    }
+                }
+            break;
+            case 5 :    //Check Position Slope
+                if(cxdata().SVTestState.SVDataRequested == 0) {
+                    Request_SVData(cxdata().SVTestState.ServoTestingID, REG_POSITION_SLOPE);
+                    gcs().send_text(MAV_SEVERITY_INFO, "Requesting REG_POSITION_SLOPE %u ", cxdata().SVTestState.ServoTestingID);
+                    cxdata().SVTestState.SVDataRequested = 1;
+                } else {
+                    if ( (NewServoMessages) && (_new_SVmsg_ID == REG_POSITION_SLOPE) ) {
+                        if(cxdata().SV_state[(cxdata().SVTestState.ServoTestingID-1)].Config_Pos_Slope == PARAM_POSITION_SLOPE) { 
+                            gcs().send_text(MAV_SEVERITY_INFO, "SV %u Position Slope OK", cxdata().SVTestState.ServoTestingID);
+                            cxdata().SVTestState.ServoTestStep++;
+                            cxdata().SVTestState.SVDataRequested = 0;
+                        } else {
+                            Set_UINT_Config(cxdata().SVTestState.ServoTestingID, REG_POSITION_SLOPE, PARAM_POSITION_SLOPE);
+                            gcs().send_text(MAV_SEVERITY_INFO, "Reconfig Position Slope: SV %u Val=%u", cxdata().SVTestState.ServoTestingID, PARAM_POSITION_SLOPE);
+                            cxdata().SVTestState.SVDataRequested = 0;    //Reset SVDataRequested to check again
+                            cxdata().SVTestState.SVConfigModified = 1;   //Notice configuration chagne
+                        }
+                        cxdata().SVTestState.Request_retry = 0;
+                    } else {
+                        //Retry up to 20 tiems
+                        if(cxdata().SVTestState.Request_retry <= 250) {
+                            Request_SVData(cxdata().SVTestState.ServoTestingID, REG_POSITION_SLOPE);
+                            gcs().send_text(MAV_SEVERITY_INFO, "RetrySV %u Stp %u", cxdata().SVTestState.ServoTestingID, cxdata().SVTestState.ServoTestStep);//Delete this line later
+                            cxdata().SVTestState.Request_retry++;
+                        } else {
+                            //Time-over 2sec, Move on to next test step
+                            gcs().send_text(MAV_SEVERITY_INFO, "SV %u Check Error Step %u", cxdata().SVTestState.ServoTestingID, cxdata().SVTestState.ServoTestStep);
+                            cxdata().SVTestState.Request_retry = 0;
+                            cxdata().SVTestState.ServoTestStep++;
+                            cxdata().SVTestState.SVDataRequested = 0;
+                        }
+                    }
+                }
+            break;
+            case 6 :    //Check Dead Band
+                if(cxdata().SVTestState.SVDataRequested == 0) {
+                    Request_SVData(cxdata().SVTestState.ServoTestingID, REG_DEAD_BAND);
+                    gcs().send_text(MAV_SEVERITY_INFO, "Requesting REG_DEAD_BAND %u ", cxdata().SVTestState.ServoTestingID);
+                    cxdata().SVTestState.SVDataRequested = 1;
+                } else {
+                    if ( (NewServoMessages) && (_new_SVmsg_ID == REG_DEAD_BAND) ) {
+                        if(cxdata().SV_state[(cxdata().SVTestState.ServoTestingID-1)].Config_Dead_band == PARAM_DEAD_BAND) { 
+                            gcs().send_text(MAV_SEVERITY_INFO, "SV %u Dead Band OK", cxdata().SVTestState.ServoTestingID);
+                            cxdata().SVTestState.ServoTestStep++;
+                            cxdata().SVTestState.SVDataRequested = 0;
+                        } else {
+                            Set_UINT_Config(cxdata().SVTestState.ServoTestingID, REG_DEAD_BAND, PARAM_DEAD_BAND);
+                            gcs().send_text(MAV_SEVERITY_INFO, "Reconfig Dead Band: SV %u Val=%u", cxdata().SVTestState.ServoTestingID, PARAM_DEAD_BAND);
+                            cxdata().SVTestState.SVDataRequested = 0;    //Reset SVDataRequested to check again
+                            cxdata().SVTestState.SVConfigModified = 1;   //Notice configuration chagne
+                        }
+                        cxdata().SVTestState.Request_retry = 0;
+                    } else {
+                        //Retry up to 20 tiems
+                        if(cxdata().SVTestState.Request_retry <= 250) {
+                            Request_SVData(cxdata().SVTestState.ServoTestingID, REG_DEAD_BAND);
+                            gcs().send_text(MAV_SEVERITY_INFO, "RetrySV %u Stp %u", cxdata().SVTestState.ServoTestingID, cxdata().SVTestState.ServoTestStep);//Delete this line later
+                            cxdata().SVTestState.Request_retry++;
+                        } else {
+                            //Time-over 2sec, Move on to next test step
+                            gcs().send_text(MAV_SEVERITY_INFO, "SV %u Check Error Step %u", cxdata().SVTestState.ServoTestingID, cxdata().SVTestState.ServoTestStep);
+                            cxdata().SVTestState.Request_retry = 0;
+                            cxdata().SVTestState.ServoTestStep++;
+                            cxdata().SVTestState.SVDataRequested = 0;
+                        }
+                    }
+                }
+            break;
+            case 7 :    //Check Velocity Max
+                if(cxdata().SVTestState.SVDataRequested == 0) {
+                    Request_SVData(cxdata().SVTestState.ServoTestingID, REG_VELOCITY_MAX);
+                    gcs().send_text(MAV_SEVERITY_INFO, "Requesting Velocity Max %u ", cxdata().SVTestState.ServoTestingID);
+                    cxdata().SVTestState.SVDataRequested = 1;
+                } else {
+                    if ( (NewServoMessages) && (_new_SVmsg_ID == REG_VELOCITY_MAX) ) {
+                        if(cxdata().SV_state[(cxdata().SVTestState.ServoTestingID-1)].Config_Velocity_Max == PARAM_VELOCITY_MAX) { 
+                            gcs().send_text(MAV_SEVERITY_INFO, "SV %u Velocity Max OK", cxdata().SVTestState.ServoTestingID);
+                            cxdata().SVTestState.ServoTestStep++;
+                            cxdata().SVTestState.SVDataRequested = 0;
+                        } else {
+                            Set_UINT_Config(cxdata().SVTestState.ServoTestingID, REG_VELOCITY_MAX, PARAM_VELOCITY_MAX);
+                            gcs().send_text(MAV_SEVERITY_INFO, "Reconfig Velocity Max: SV %u Val=%u", cxdata().SVTestState.ServoTestingID, PARAM_VELOCITY_MAX);
+                            cxdata().SVTestState.SVDataRequested = 0;    //Reset SVDataRequested to check again
+                            cxdata().SVTestState.SVConfigModified = 1;   //Notice configuration chagne
+                        }
+                        cxdata().SVTestState.Request_retry = 0;
+                    } else {
+                        //Retry up to 20 tiems
+                        if(cxdata().SVTestState.Request_retry <= 250) {
+                            Request_SVData(cxdata().SVTestState.ServoTestingID, REG_VELOCITY_MAX);
+                            gcs().send_text(MAV_SEVERITY_INFO, "RetrySV %u Stp %u", cxdata().SVTestState.ServoTestingID, cxdata().SVTestState.ServoTestStep);//Delete this line later
+                            cxdata().SVTestState.Request_retry++;
+                        } else {
+                            //Time-over 2sec, Move on to next test step
+                            gcs().send_text(MAV_SEVERITY_INFO, "SV %u Check Error Step %u", cxdata().SVTestState.ServoTestingID, cxdata().SVTestState.ServoTestStep);
+                            cxdata().SVTestState.Request_retry = 0;
+                            cxdata().SVTestState.ServoTestStep++;
+                            cxdata().SVTestState.SVDataRequested = 0;
+                        }
+                    }
+                }
+            break;
+            case 8 :    //Check Torque Max
+                if(cxdata().SVTestState.SVDataRequested == 0) {
+                    Request_SVData(cxdata().SVTestState.ServoTestingID, REG_TORQUE_MAX);
+                    gcs().send_text(MAV_SEVERITY_INFO, "Requesting Torque Max %u ", cxdata().SVTestState.ServoTestingID);
+                    cxdata().SVTestState.SVDataRequested = 1;
+                } else {
+                    if ( (NewServoMessages) && (_new_SVmsg_ID == REG_TORQUE_MAX) ) {
+                        if(cxdata().SV_state[(cxdata().SVTestState.ServoTestingID-1)].Config_Torque_Max == PARAM_TORQUE_MAX) { 
+                            gcs().send_text(MAV_SEVERITY_INFO, "SV %u Torque Max OK", cxdata().SVTestState.ServoTestingID);
+                            cxdata().SVTestState.ServoTestStep++;
+                            cxdata().SVTestState.SVDataRequested = 0;
+                        } else {
+                            Set_UINT_Config(cxdata().SVTestState.ServoTestingID, REG_TORQUE_MAX, PARAM_TORQUE_MAX);
+                            gcs().send_text(MAV_SEVERITY_INFO, "Reconfig Torque Max: SV %u Val=%u", cxdata().SVTestState.ServoTestingID, PARAM_TORQUE_MAX);
+                            cxdata().SVTestState.SVDataRequested = 0;    //Reset SVDataRequested to check again
+                            cxdata().SVTestState.SVConfigModified = 1;   //Notice configuration chagne
+                        }
+                        cxdata().SVTestState.Request_retry = 0;
+                    } else {
+                        //Retry up to 20 tiems
+                        if(cxdata().SVTestState.Request_retry <= 250) {
+                            Request_SVData(cxdata().SVTestState.ServoTestingID, REG_TORQUE_MAX);
+                            gcs().send_text(MAV_SEVERITY_INFO, "RetrySV %u Stp %u", cxdata().SVTestState.ServoTestingID, cxdata().SVTestState.ServoTestStep);//Delete this line later
+                            cxdata().SVTestState.Request_retry++;
+                        } else {
+                            //Time-over 2sec, Move on to next test step
+                            gcs().send_text(MAV_SEVERITY_INFO, "SV %u Check Error Step %u", cxdata().SVTestState.ServoTestingID, cxdata().SVTestState.ServoTestStep);
+                            cxdata().SVTestState.Request_retry = 0;
+                            cxdata().SVTestState.ServoTestStep++;
+                            cxdata().SVTestState.SVDataRequested = 0;
+                        }
+                    }
+                }
+            break;
+            case 9 :    //Check Voltage Max
+                if(cxdata().SVTestState.SVDataRequested == 0) {
+                    Request_SVData(cxdata().SVTestState.ServoTestingID, REG_VOLTAGE_MAX);
+                    gcs().send_text(MAV_SEVERITY_INFO, "Requesting Voltage Max %u ", cxdata().SVTestState.ServoTestingID);
+                    cxdata().SVTestState.SVDataRequested = 1;
+                } else {
+                    if ( (NewServoMessages) && (_new_SVmsg_ID == REG_VOLTAGE_MAX) ) {
+                        if(cxdata().SV_state[(cxdata().SVTestState.ServoTestingID-1)].Config_Volt_Max == PARAM_VOLTAGE_MAX) { 
+                            gcs().send_text(MAV_SEVERITY_INFO, "SV %u Voltage Max OK", cxdata().SVTestState.ServoTestingID);
+                            cxdata().SVTestState.ServoTestStep++;
+                            cxdata().SVTestState.SVDataRequested = 0;
+                        } else {
+                            Set_UINT_Config(cxdata().SVTestState.ServoTestingID, REG_VOLTAGE_MAX, PARAM_VOLTAGE_MAX);
+                            gcs().send_text(MAV_SEVERITY_INFO, "Reconfig Voltage Max: SV %u Val=%u", cxdata().SVTestState.ServoTestingID, PARAM_VOLTAGE_MAX);
+                            cxdata().SVTestState.SVDataRequested = 0;    //Reset SVDataRequested to check again
+                            cxdata().SVTestState.SVConfigModified = 1;   //Notice configuration chagne
+                        }
+                        cxdata().SVTestState.Request_retry = 0;
+                    } else {
+                        //Retry up to 20 tiems
+                        if(cxdata().SVTestState.Request_retry <= 250) {
+                            Request_SVData(cxdata().SVTestState.ServoTestingID, REG_VOLTAGE_MAX);
+                            gcs().send_text(MAV_SEVERITY_INFO, "RetrySV %u Stp %u", cxdata().SVTestState.ServoTestingID, cxdata().SVTestState.ServoTestStep);//Delete this line later
+                            cxdata().SVTestState.Request_retry++;
+                        } else {
+                            //Time-over 2sec, Move on to next test step
+                            gcs().send_text(MAV_SEVERITY_INFO, "SV %u Check Error Step %u", cxdata().SVTestState.ServoTestingID, cxdata().SVTestState.ServoTestStep);
+                            cxdata().SVTestState.Request_retry = 0;
+                            cxdata().SVTestState.ServoTestStep++;
+                            cxdata().SVTestState.SVDataRequested = 0;
+                        }
+                    }
+                }
+            break;
+            case 10 :    //Check Voltage Min
+                if(cxdata().SVTestState.SVDataRequested == 0) {
+                    Request_SVData(cxdata().SVTestState.ServoTestingID, REG_VOLTAGE_MIN);
+                    gcs().send_text(MAV_SEVERITY_INFO, "Requesting Voltage Min %u ", cxdata().SVTestState.ServoTestingID);
+                    cxdata().SVTestState.SVDataRequested = 1;
+                } else {
+                    if ( (NewServoMessages) && (_new_SVmsg_ID == REG_VOLTAGE_MIN) ) {
+                        if(cxdata().SV_state[(cxdata().SVTestState.ServoTestingID-1)].Config_Volt_Min == PARAM_VOLTAGE_MIN) { 
+                            gcs().send_text(MAV_SEVERITY_INFO, "SV %u Voltage Min OK", cxdata().SVTestState.ServoTestingID);
+                            cxdata().SVTestState.ServoTestStep++;
+                            cxdata().SVTestState.SVDataRequested = 0;
+                        } else {
+                            Set_UINT_Config(cxdata().SVTestState.ServoTestingID, REG_VOLTAGE_MIN, PARAM_VOLTAGE_MIN);
+                            gcs().send_text(MAV_SEVERITY_INFO, "Reconfig Voltage Min: SV %u Val=%u", cxdata().SVTestState.ServoTestingID, PARAM_VOLTAGE_MIN);
+                            cxdata().SVTestState.SVDataRequested = 0;    //Reset SVDataRequested to check again
+                            cxdata().SVTestState.SVConfigModified = 1;   //Notice configuration chagne
+                        }
+                        cxdata().SVTestState.Request_retry = 0;
+                    } else {
+                        //Retry up to 20 tiems
+                        if(cxdata().SVTestState.Request_retry <= 250) {
+                            Request_SVData(cxdata().SVTestState.ServoTestingID, REG_VOLTAGE_MIN);
+                            gcs().send_text(MAV_SEVERITY_INFO, "RetrySV %u Stp %u", cxdata().SVTestState.ServoTestingID, cxdata().SVTestState.ServoTestStep);//Delete this line later
+                            cxdata().SVTestState.Request_retry++;
+                        } else {
+                            //Time-over 2sec, Move on to next test step
+                            gcs().send_text(MAV_SEVERITY_INFO, "SV %u Check Error Step %u", cxdata().SVTestState.ServoTestingID, cxdata().SVTestState.ServoTestStep);
+                            cxdata().SVTestState.Request_retry = 0;
+                            cxdata().SVTestState.ServoTestStep++;
+                            cxdata().SVTestState.SVDataRequested = 0;
+                        }
+                    }
+                }
+            break;
+            case 11 :    //Check Temperature Max
+                if(cxdata().SVTestState.SVDataRequested == 0) {
+                    Request_SVData(cxdata().SVTestState.ServoTestingID, REG_TEMP_MAX);
+                    gcs().send_text(MAV_SEVERITY_INFO, "Requesting Temp Max %u ", cxdata().SVTestState.ServoTestingID);
+                    cxdata().SVTestState.SVDataRequested = 1;
+                } else {
+                    if ( (NewServoMessages) && (_new_SVmsg_ID == REG_TEMP_MAX) ) {
+                        if(cxdata().SV_state[(cxdata().SVTestState.ServoTestingID-1)].Config_Temp_Max == PARAM_TEMP_MAX) { 
+                            gcs().send_text(MAV_SEVERITY_INFO, "SV %u Temp Max OK", cxdata().SVTestState.ServoTestingID);
+                            cxdata().SVTestState.ServoTestStep++;
+                            cxdata().SVTestState.SVDataRequested = 0;
+                        } else {
+                            Set_UINT_Config(cxdata().SVTestState.ServoTestingID, REG_TEMP_MAX, PARAM_TEMP_MAX);
+                            gcs().send_text(MAV_SEVERITY_INFO, "Reconfig Temperature Max: SV %u Val=%u", cxdata().SVTestState.ServoTestingID, PARAM_TEMP_MAX);
+                            cxdata().SVTestState.SVDataRequested = 0;    //Reset SVDataRequested to check again
+                            cxdata().SVTestState.SVConfigModified = 1;   //Notice configuration chagne
+                        }
+                        cxdata().SVTestState.Request_retry = 0;
+                    } else {
+                        //Retry up to 20 tiems
+                        if(cxdata().SVTestState.Request_retry <= 250) {
+                            Request_SVData(cxdata().SVTestState.ServoTestingID, REG_TEMP_MAX);
+                            gcs().send_text(MAV_SEVERITY_INFO, "RetrySV %u Stp %u", cxdata().SVTestState.ServoTestingID, cxdata().SVTestState.ServoTestStep);//Delete this line later
+                            cxdata().SVTestState.Request_retry++;
+                        } else {
+                            //Time-over 2sec, Move on to next test step
+                            gcs().send_text(MAV_SEVERITY_INFO, "SV %u Check Error Step %u", cxdata().SVTestState.ServoTestingID, cxdata().SVTestState.ServoTestStep);
+                            cxdata().SVTestState.Request_retry = 0;
+                            cxdata().SVTestState.ServoTestStep++;
+                            cxdata().SVTestState.SVDataRequested = 0;
+                        }
+                    }
+                }
+            break;
+            case 12 :    //Check Temperature Min
+                if(cxdata().SVTestState.SVDataRequested == 0) {
+                    Request_SVData(cxdata().SVTestState.ServoTestingID, REG_TEMP_MIN);
+                    gcs().send_text(MAV_SEVERITY_INFO, "Requesting Temp Min %u ", cxdata().SVTestState.ServoTestingID);
+                    cxdata().SVTestState.SVDataRequested = 1;
+                } else {
+                    if ( (NewServoMessages) && (_new_SVmsg_ID == REG_TEMP_MIN) ) {
+                        if(cxdata().SV_state[(cxdata().SVTestState.ServoTestingID-1)].Config_Temp_Min == PARAM_TEMP_MIN) { 
+                            gcs().send_text(MAV_SEVERITY_INFO, "SV %u Temp Min OK", cxdata().SVTestState.ServoTestingID);
+                            cxdata().SVTestState.ServoTestStep++;
+                            cxdata().SVTestState.SVDataRequested = 0;
+                        } else {
+                            Set_UINT_Config(cxdata().SVTestState.ServoTestingID, REG_TEMP_MIN, PARAM_TEMP_MIN);
+                            gcs().send_text(MAV_SEVERITY_INFO, "Reconfig Temperature Min: SV %u Val=%u", cxdata().SVTestState.ServoTestingID, PARAM_TEMP_MIN);
+                            cxdata().SVTestState.SVDataRequested = 0;    //Reset SVDataRequested to check again
+                            cxdata().SVTestState.SVConfigModified = 1;   //Notice configuration chagne
+                        }
+                        cxdata().SVTestState.Request_retry = 0;
+                    } else {
+                        //Retry up to 20 tiems
+                        if(cxdata().SVTestState.Request_retry <= 250) {
+                            Request_SVData(cxdata().SVTestState.ServoTestingID, REG_TEMP_MIN);
+                            gcs().send_text(MAV_SEVERITY_INFO, "RetrySV %u Stp %u", cxdata().SVTestState.ServoTestingID, cxdata().SVTestState.ServoTestStep);//Delete this line later
+                            cxdata().SVTestState.Request_retry++;
+                        } else {
+                            //Time-over 2sec, Move on to next test step
+                            gcs().send_text(MAV_SEVERITY_INFO, "SV %u Check Error Step %u", cxdata().SVTestState.ServoTestingID, cxdata().SVTestState.ServoTestStep);
+                            cxdata().SVTestState.Request_retry = 0;
+                            cxdata().SVTestState.ServoTestStep++;
+                            cxdata().SVTestState.SVDataRequested = 0;
+                        }
+                    }
+                }
+            break;
+            case 13 :    //Check Position Start
+            {   uint8_t isPosStartOK = 0;
+                if(cxdata().SVTestState.SVDataRequested == 0) {
+                    Request_SVData(cxdata().SVTestState.ServoTestingID, REG_POS_START);
+                    gcs().send_text(MAV_SEVERITY_INFO, "Position Start %u ", cxdata().SVTestState.ServoTestingID);
+                    cxdata().SVTestState.SVDataRequested = 1;
+                } else {
+                    if ( (NewServoMessages) && (_new_SVmsg_ID == REG_POS_START) ) {
+                        switch(cxdata().SVTestState.ServoTestingID) {
+                            case 1 :
+                                if(cxdata().SV_state[(cxdata().SVTestState.ServoTestingID-1)].Config_Pos_Start == PARAM_SV1_POS_START) {
+                                    isPosStartOK = 1;
+                                } else {
+                                    Set_INT_Config(cxdata().SVTestState.ServoTestingID, REG_POS_START, PARAM_SV1_POS_START);
+                                    isPosStartOK = 0;
+                                    gcs().send_text(MAV_SEVERITY_INFO, "Reconfig Pos Start: SV %u Val=%u", cxdata().SVTestState.ServoTestingID, PARAM_SV1_POS_START);
+                                }
+                            break;
+                            case 2 :
+                                if(cxdata().SV_state[(cxdata().SVTestState.ServoTestingID-1)].Config_Pos_Start == PARAM_SV2_POS_START) {
+                                    isPosStartOK = 1;
+                                } else {
+                                    Set_INT_Config(cxdata().SVTestState.ServoTestingID, REG_POS_START, PARAM_SV2_POS_START);
+                                    isPosStartOK = 0;
+                                    gcs().send_text(MAV_SEVERITY_INFO, "Reconfig Pos Start: SV %u Val=%u", cxdata().SVTestState.ServoTestingID, PARAM_SV2_POS_START);
+                                }
+                            break;
+                            case 3 :
+                                if(cxdata().SV_state[(cxdata().SVTestState.ServoTestingID-1)].Config_Pos_Start == PARAM_SV3_POS_START) {
+                                    isPosStartOK = 1;
+                                } else {
+                                    Set_INT_Config(cxdata().SVTestState.ServoTestingID, REG_POS_START, PARAM_SV3_POS_START);
+                                    isPosStartOK = 0;
+                                    gcs().send_text(MAV_SEVERITY_INFO, "Reconfig Pos Start: SV %u Val=%u", cxdata().SVTestState.ServoTestingID, PARAM_SV3_POS_START);
+                                }
+                            break;
+                            case 4 :
+                                if(cxdata().SV_state[(cxdata().SVTestState.ServoTestingID-1)].Config_Pos_Start == PARAM_SV4_POS_START) {
+                                    isPosStartOK = 1;
+                                } else {
+                                    Set_INT_Config(cxdata().SVTestState.ServoTestingID, REG_POS_START, PARAM_SV4_POS_START);
+                                    isPosStartOK = 0;
+                                    gcs().send_text(MAV_SEVERITY_INFO, "Reconfig Pos Start: SV %u Val=%u", cxdata().SVTestState.ServoTestingID, PARAM_SV4_POS_START);
+                                }
+                            break;
+                            case 5 :
+                                if(cxdata().SV_state[(cxdata().SVTestState.ServoTestingID-1)].Config_Pos_Start == PARAM_SV5_POS_START) {
+                                    isPosStartOK = 1;
+                                } else {
+                                    Set_INT_Config(cxdata().SVTestState.ServoTestingID, REG_POS_START, PARAM_SV5_POS_START);
+                                    isPosStartOK = 0;
+                                    gcs().send_text(MAV_SEVERITY_INFO, "Reconfig Pos Start: SV %u Val=%u", cxdata().SVTestState.ServoTestingID, PARAM_SV5_POS_START);
+                                }
+                            break;
+                            case 6 :
+                                if(cxdata().SV_state[(cxdata().SVTestState.ServoTestingID-1)].Config_Pos_Start == PARAM_SV6_POS_START) {
+                                    isPosStartOK = 1;
+                                } else {
+                                    Set_INT_Config(cxdata().SVTestState.ServoTestingID, REG_POS_START, PARAM_SV6_POS_START);
+                                    isPosStartOK = 0;
+                                    gcs().send_text(MAV_SEVERITY_INFO, "Reconfig Pos Start: SV %u Val=%u", cxdata().SVTestState.ServoTestingID, PARAM_SV6_POS_START);
+                                }
+                            break;
+                            default :
+                            break;
+                        }
+                        if(isPosStartOK) { 
+                            gcs().send_text(MAV_SEVERITY_INFO, "SV %u Position Start OK", cxdata().SVTestState.ServoTestingID);
+                            cxdata().SVTestState.ServoTestStep++;
+                            cxdata().SVTestState.SVDataRequested = 0;
+                        } else {
+                            cxdata().SVTestState.SVDataRequested = 0;    //Reset SVDataRequested to check again
+                            cxdata().SVTestState.SVConfigModified = 1;   //Notice configuration chagne
+                        }
+                        cxdata().SVTestState.Request_retry = 0;
+                    } else {
+                        //Retry up to 20 tiems
+                        if(cxdata().SVTestState.Request_retry <= 250) {
+                            Request_SVData(cxdata().SVTestState.ServoTestingID, REG_POS_START);
+                            gcs().send_text(MAV_SEVERITY_INFO, "RetrySV %u Stp %u", cxdata().SVTestState.ServoTestingID, cxdata().SVTestState.ServoTestStep);//Delete this line later
+                            cxdata().SVTestState.Request_retry++;
+                        } else {
+                            //Time-over 2sec, Move on to next test step
+                            gcs().send_text(MAV_SEVERITY_INFO, "SV %u Check Error Step %u", cxdata().SVTestState.ServoTestingID, cxdata().SVTestState.ServoTestStep);
+                            cxdata().SVTestState.Request_retry = 0;
+                            cxdata().SVTestState.ServoTestStep++;
+                            cxdata().SVTestState.SVDataRequested = 0;
+                        }
+                    }
+                }
+            }
+            break;
+            case 14 :    //Check Position End
+            {   uint8_t isPosEndOK = 0;
+                if(cxdata().SVTestState.SVDataRequested == 0) {
+                    Request_SVData(cxdata().SVTestState.ServoTestingID, REG_POS_END);
+                    gcs().send_text(MAV_SEVERITY_INFO, "Requesting Position End %u ", cxdata().SVTestState.ServoTestingID);
+                    cxdata().SVTestState.SVDataRequested = 1;
+                } else {
+                    if ( (NewServoMessages) && (_new_SVmsg_ID == REG_POS_END) ) {
+                        switch(cxdata().SVTestState.ServoTestingID) {
+                            case 1 :
+                                if(cxdata().SV_state[(cxdata().SVTestState.ServoTestingID-1)].Config_Pos_End == PARAM_SV1_POS_END) {
+                                    isPosEndOK = 1;
+                                } else {
+                                    Set_INT_Config(cxdata().SVTestState.ServoTestingID, REG_POS_END, PARAM_SV1_POS_END);
+                                    isPosEndOK = 0;
+                                    gcs().send_text(MAV_SEVERITY_INFO, "Reconfig Pos End: SV %u Val=%u", cxdata().SVTestState.ServoTestingID, PARAM_SV1_POS_END);
+                                }
+                            break;
+                            case 2 :
+                                if(cxdata().SV_state[(cxdata().SVTestState.ServoTestingID-1)].Config_Pos_End == PARAM_SV2_POS_END) {
+                                    isPosEndOK = 1;
+                                } else {
+                                    Set_INT_Config(cxdata().SVTestState.ServoTestingID, REG_POS_END, PARAM_SV2_POS_END);
+                                    isPosEndOK = 0;
+                                    gcs().send_text(MAV_SEVERITY_INFO, "Reconfig Pos End: SV %u Val=%u", cxdata().SVTestState.ServoTestingID, PARAM_SV2_POS_END);
+                                }
+                            break;
+                            case 3 :
+                                if(cxdata().SV_state[(cxdata().SVTestState.ServoTestingID-1)].Config_Pos_End == PARAM_SV3_POS_END) {
+                                    isPosEndOK = 1;
+                                } else {
+                                    Set_INT_Config(cxdata().SVTestState.ServoTestingID, REG_POS_END, PARAM_SV3_POS_END);
+                                    isPosEndOK = 0;
+                                    gcs().send_text(MAV_SEVERITY_INFO, "Reconfig Pos End: SV %u Val=%u", cxdata().SVTestState.ServoTestingID, PARAM_SV3_POS_END);
+                                }
+                            break;
+                            case 4 :
+                                if(cxdata().SV_state[(cxdata().SVTestState.ServoTestingID-1)].Config_Pos_End == PARAM_SV4_POS_END) {
+                                    isPosEndOK = 1;
+                                } else {
+                                    Set_INT_Config(cxdata().SVTestState.ServoTestingID, REG_POS_END, PARAM_SV4_POS_END);
+                                    isPosEndOK = 0;
+                                    gcs().send_text(MAV_SEVERITY_INFO, "Reconfig Pos End: SV %u Val=%u", cxdata().SVTestState.ServoTestingID, PARAM_SV4_POS_END);
+                                }
+                            break;
+                            case 5 :
+                                if(cxdata().SV_state[(cxdata().SVTestState.ServoTestingID-1)].Config_Pos_End == PARAM_SV5_POS_END) {
+                                    isPosEndOK = 1;
+                                } else {
+                                    Set_INT_Config(cxdata().SVTestState.ServoTestingID, REG_POS_END, PARAM_SV5_POS_END);
+                                    isPosEndOK = 0;
+                                    gcs().send_text(MAV_SEVERITY_INFO, "Reconfig Pos End: SV %u Val=%u", cxdata().SVTestState.ServoTestingID, PARAM_SV5_POS_END);
+                                }
+                            break;
+                            case 6 :
+                                if(cxdata().SV_state[(cxdata().SVTestState.ServoTestingID-1)].Config_Pos_End == PARAM_SV6_POS_END) {
+                                    isPosEndOK = 1;
+                                } else {
+                                    Set_INT_Config(cxdata().SVTestState.ServoTestingID, REG_POS_END, PARAM_SV6_POS_END);
+                                    isPosEndOK = 0;
+                                    gcs().send_text(MAV_SEVERITY_INFO, "Reconfig Pos End: SV %u Val=%u", cxdata().SVTestState.ServoTestingID, PARAM_SV6_POS_END);
+                                }
+                            break;
+                            default :
+                            break;
+                        }
+                        if(isPosEndOK) { 
+                            gcs().send_text(MAV_SEVERITY_INFO, "SV %u Position End OK", cxdata().SVTestState.ServoTestingID);
+                            cxdata().SVTestState.ServoTestStep++;
+                            cxdata().SVTestState.SVDataRequested = 0;
+                        } else {
+                            cxdata().SVTestState.SVDataRequested = 0;    //Reset SVDataRequested to check again
+                            cxdata().SVTestState.SVConfigModified = 1;   //Notice configuration chagne
+                        }
+                        cxdata().SVTestState.Request_retry = 0;
+                    } else {
+                        //Retry up to 20 tiems
+                        if(cxdata().SVTestState.Request_retry <= 250) {
+                            Request_SVData(cxdata().SVTestState.ServoTestingID, REG_POS_END);
+                            gcs().send_text(MAV_SEVERITY_INFO, "RetrySV %u Stp %u", cxdata().SVTestState.ServoTestingID, cxdata().SVTestState.ServoTestStep);//Delete this line later
+                            cxdata().SVTestState.Request_retry++;
+                        } else {
+                            //Time-over 2sec, Move on to next test step
+                            gcs().send_text(MAV_SEVERITY_INFO, "SV %u Check Error Step %u", cxdata().SVTestState.ServoTestingID, cxdata().SVTestState.ServoTestStep);
+                            cxdata().SVTestState.Request_retry = 0;
+                            cxdata().SVTestState.ServoTestStep++;
+                            cxdata().SVTestState.SVDataRequested = 0;
+                        }
+                    }
+                }
+            }
+            break;
+            case 15 :    //Check Position Neutral
+            {   uint8_t isPosNeutralOK = 0;
+                if(cxdata().SVTestState.SVDataRequested == 0) {
+                    Request_SVData(cxdata().SVTestState.ServoTestingID, REG_POS_NEUTRAL);
+                    gcs().send_text(MAV_SEVERITY_INFO, "Requesting Position Neutral %u ", cxdata().SVTestState.ServoTestingID);
+                    cxdata().SVTestState.SVDataRequested = 1;
+                } else {
+                    if ( (NewServoMessages) && (_new_SVmsg_ID == REG_POS_NEUTRAL) ) {
+                        switch(cxdata().SVTestState.ServoTestingID) {
+                            case 1 :
+                                if(cxdata().SV_state[(cxdata().SVTestState.ServoTestingID-1)].Config_Pos_Neutral == PARAM_SV1_POS_NEUTRAL) {
+                                    isPosNeutralOK = 1;
+                                } else {
+                                    Set_INT_Config(cxdata().SVTestState.ServoTestingID, REG_POS_NEUTRAL, PARAM_SV1_POS_NEUTRAL);
+                                    isPosNeutralOK = 0;
+                                    gcs().send_text(MAV_SEVERITY_INFO, "Reconfig Pos Neutral: SV %u Val=%u", cxdata().SVTestState.ServoTestingID, PARAM_SV1_POS_NEUTRAL);
+                                }
+                            break;
+                            case 2 :
+                                if(cxdata().SV_state[(cxdata().SVTestState.ServoTestingID-1)].Config_Pos_Neutral == PARAM_SV2_POS_NEUTRAL) {
+                                    isPosNeutralOK = 1;
+                                } else {
+                                    Set_INT_Config(cxdata().SVTestState.ServoTestingID, REG_POS_NEUTRAL, PARAM_SV2_POS_NEUTRAL);
+                                    isPosNeutralOK = 0;
+                                    gcs().send_text(MAV_SEVERITY_INFO, "Reconfig Pos Neutral: SV %u Val=%u", cxdata().SVTestState.ServoTestingID, PARAM_SV2_POS_NEUTRAL);
+                                }
+                            break;
+                            case 3 :
+                                if(cxdata().SV_state[(cxdata().SVTestState.ServoTestingID-1)].Config_Pos_Neutral == PARAM_SV3_POS_NEUTRAL) {
+                                    isPosNeutralOK = 1;
+                                } else {
+                                    Set_INT_Config(cxdata().SVTestState.ServoTestingID, REG_POS_NEUTRAL, PARAM_SV3_POS_NEUTRAL);
+                                    isPosNeutralOK = 0;
+                                    gcs().send_text(MAV_SEVERITY_INFO, "Reconfig Pos Neutral: SV %u Val=%u", cxdata().SVTestState.ServoTestingID, PARAM_SV3_POS_NEUTRAL);
+                                }
+                            break;
+                            case 4 :
+                                if(cxdata().SV_state[(cxdata().SVTestState.ServoTestingID-1)].Config_Pos_Neutral == PARAM_SV4_POS_NEUTRAL) {
+                                    isPosNeutralOK = 1;
+                                } else {
+                                    Set_INT_Config(cxdata().SVTestState.ServoTestingID, REG_POS_NEUTRAL, PARAM_SV4_POS_NEUTRAL);
+                                    isPosNeutralOK = 0;
+                                    gcs().send_text(MAV_SEVERITY_INFO, "Reconfig Pos Neutral: SV %u Val=%u", cxdata().SVTestState.ServoTestingID, PARAM_SV4_POS_NEUTRAL);
+                                }
+                            break;
+                            case 5 :
+                                if(cxdata().SV_state[(cxdata().SVTestState.ServoTestingID-1)].Config_Pos_Neutral == PARAM_SV5_POS_NEUTRAL) {
+                                    isPosNeutralOK = 1;
+                                } else {
+                                    Set_INT_Config(cxdata().SVTestState.ServoTestingID, REG_POS_NEUTRAL, PARAM_SV5_POS_NEUTRAL);
+                                    isPosNeutralOK = 0;
+                                    gcs().send_text(MAV_SEVERITY_INFO, "Reconfig Pos Neutral: SV %u Val=%u", cxdata().SVTestState.ServoTestingID, PARAM_SV5_POS_NEUTRAL);
+                                }
+                            break;
+                            case 6 :
+                                if(cxdata().SV_state[(cxdata().SVTestState.ServoTestingID-1)].Config_Pos_Neutral == PARAM_SV6_POS_NEUTRAL) {
+                                    isPosNeutralOK = 1;
+                                } else {
+                                    Set_INT_Config(cxdata().SVTestState.ServoTestingID, REG_POS_NEUTRAL, PARAM_SV6_POS_NEUTRAL);
+                                    isPosNeutralOK = 0;
+                                    gcs().send_text(MAV_SEVERITY_INFO, "Reconfig Pos Neutral: SV %u Val=%u", cxdata().SVTestState.ServoTestingID, PARAM_SV6_POS_NEUTRAL);
+                                }
+                            break;
+                            default :
+                            break;
+                        }
+                        if(isPosNeutralOK) { 
+                            gcs().send_text(MAV_SEVERITY_INFO, "SV %u Position Neutral OK", cxdata().SVTestState.ServoTestingID);
+                            cxdata().SVTestState.ServoTestStep++;
+                            cxdata().SVTestState.SVDataRequested = 0;
+                        } else {
+                            cxdata().SVTestState.SVDataRequested = 0;    //Reset SVDataRequested to check again
+                            cxdata().SVTestState.SVConfigModified = 1;   //Notice configuration chagne
+                        }
+                        cxdata().SVTestState.Request_retry = 0;
+                    } else {
+                        //Retry up to 20 tiems
+                        if(cxdata().SVTestState.Request_retry <= 250) {
+                            Request_SVData(cxdata().SVTestState.ServoTestingID, REG_POS_NEUTRAL);
+                            gcs().send_text(MAV_SEVERITY_INFO, "RetrySV %u Stp %u", cxdata().SVTestState.ServoTestingID, cxdata().SVTestState.ServoTestStep);//Delete this line later
+                            cxdata().SVTestState.Request_retry++;
+                        } else {
+                            //Time-over 2sec, Move on to next test step
+                            gcs().send_text(MAV_SEVERITY_INFO, "SV %u Check Error Step %u", cxdata().SVTestState.ServoTestingID, cxdata().SVTestState.ServoTestStep);
+                            cxdata().SVTestState.Request_retry = 0;
+                            cxdata().SVTestState.ServoTestStep++;
+                            cxdata().SVTestState.SVDataRequested = 0;
+                        }
+                    }
+                }
+            }
+            break;
+            case 16 :    //Check Turn Direction
+            {   uint8_t isDirectionOK = 0;
+                if(cxdata().SVTestState.SVDataRequested == 0) {
+                    Request_SVData(cxdata().SVTestState.ServoTestingID, REG_MOTOR_TURN_DIRECT);
+                    gcs().send_text(MAV_SEVERITY_INFO, "Requesting Turn Direction %u ", cxdata().SVTestState.ServoTestingID);
+                    cxdata().SVTestState.SVDataRequested = 1;
+                } else {
+                    if ( (NewServoMessages) && (_new_SVmsg_ID == REG_MOTOR_TURN_DIRECT) ) {
+                        switch(cxdata().SVTestState.ServoTestingID) {
+                            case 1 :
+                                if(cxdata().SV_state[(cxdata().SVTestState.ServoTestingID-1)].Config_Direnction == PARAM_SV1_T_Direction) {
+                                    isDirectionOK = 1;
+                                } else {
+                                    Set_UINT_Config(cxdata().SVTestState.ServoTestingID, REG_MOTOR_TURN_DIRECT, PARAM_SV1_T_Direction);
+                                    isDirectionOK = 0;
+                                    gcs().send_text(MAV_SEVERITY_INFO, "Reconfig Turn Direction: SV %u Val=%u", cxdata().SVTestState.ServoTestingID, PARAM_SV1_T_Direction);
+                                }
+                            break;
+                            case 2 :
+                                if(cxdata().SV_state[(cxdata().SVTestState.ServoTestingID-1)].Config_Direnction == PARAM_SV2_T_Direction) {
+                                    isDirectionOK = 1;
+                                } else {
+                                    Set_UINT_Config(cxdata().SVTestState.ServoTestingID, REG_MOTOR_TURN_DIRECT, PARAM_SV2_T_Direction);
+                                    isDirectionOK = 0;
+                                    gcs().send_text(MAV_SEVERITY_INFO, "Reconfig Turn Direction: SV %u Val=%u", cxdata().SVTestState.ServoTestingID, PARAM_SV2_T_Direction);
+                                }
+                            break;
+                            case 3 :
+                                if(cxdata().SV_state[(cxdata().SVTestState.ServoTestingID-1)].Config_Direnction == PARAM_SV3_T_Direction) {
+                                    isDirectionOK = 1;
+                                } else {
+                                    Set_UINT_Config(cxdata().SVTestState.ServoTestingID, REG_MOTOR_TURN_DIRECT, PARAM_SV3_T_Direction);
+                                    isDirectionOK = 0;
+                                    gcs().send_text(MAV_SEVERITY_INFO, "Reconfig Turn Direction: SV %u Val=%u", cxdata().SVTestState.ServoTestingID, PARAM_SV3_T_Direction);
+                                }
+                            break;
+                            case 4 :
+                                if(cxdata().SV_state[(cxdata().SVTestState.ServoTestingID-1)].Config_Direnction == PARAM_SV4_T_Direction) {
+                                    isDirectionOK = 1;
+                                } else {
+                                    Set_UINT_Config(cxdata().SVTestState.ServoTestingID, REG_MOTOR_TURN_DIRECT, PARAM_SV4_T_Direction);
+                                    isDirectionOK = 0;
+                                    gcs().send_text(MAV_SEVERITY_INFO, "Reconfig Turn Direction: SV %u Val=%u", cxdata().SVTestState.ServoTestingID, PARAM_SV4_T_Direction);
+                                }
+                            break;
+                            case 5 :
+                                if(cxdata().SV_state[(cxdata().SVTestState.ServoTestingID-1)].Config_Direnction == PARAM_SV5_T_Direction) {
+                                    isDirectionOK = 1;
+                                } else {
+                                    Set_UINT_Config(cxdata().SVTestState.ServoTestingID, REG_MOTOR_TURN_DIRECT, PARAM_SV5_T_Direction);
+                                    isDirectionOK = 0;
+                                    gcs().send_text(MAV_SEVERITY_INFO, "Reconfig Turn Direction: SV %u Val=%u", cxdata().SVTestState.ServoTestingID, PARAM_SV5_T_Direction);
+                                }
+                            break;
+                            case 6 :
+                                if(cxdata().SV_state[(cxdata().SVTestState.ServoTestingID-1)].Config_Direnction == PARAM_SV6_T_Direction) {
+                                    isDirectionOK = 1;
+                                } else {
+                                    Set_UINT_Config(cxdata().SVTestState.ServoTestingID, REG_MOTOR_TURN_DIRECT, PARAM_SV6_T_Direction);
+                                    isDirectionOK = 0;
+                                    gcs().send_text(MAV_SEVERITY_INFO, "Reconfig Turn Direction: SV %u Val=%u", cxdata().SVTestState.ServoTestingID, PARAM_SV6_T_Direction);
+                                }
+                            break;
+                            default :
+                            break;
+                        }
+                        if(isDirectionOK) { 
+                            gcs().send_text(MAV_SEVERITY_INFO, "SV %u Turn Direction OK", cxdata().SVTestState.ServoTestingID);
+                            cxdata().SVTestState.ServoTestStep++;
+                            cxdata().SVTestState.SVDataRequested = 0;
+                        } else {
+                            cxdata().SVTestState.SVDataRequested = 0;    //Reset SVDataRequested to check again
+                            cxdata().SVTestState.SVConfigModified = 1;   //Notice configuration chagne
+                        }
+                        cxdata().SVTestState.Request_retry = 0;
+                    } else {
+                        //Retry up to 20 tiems
+                        if(cxdata().SVTestState.Request_retry <= 250) {
+                            Request_SVData(cxdata().SVTestState.ServoTestingID, REG_MOTOR_TURN_DIRECT);
+                            gcs().send_text(MAV_SEVERITY_INFO, "RetrySV %u Stp %u", cxdata().SVTestState.ServoTestingID, cxdata().SVTestState.ServoTestStep);//Delete this line later
+                            cxdata().SVTestState.Request_retry++;
+                        } else {
+                            //Time-over 2sec, Move on to next test step
+                            gcs().send_text(MAV_SEVERITY_INFO, "SV %u Check Error Step %u", cxdata().SVTestState.ServoTestingID, cxdata().SVTestState.ServoTestStep);
+                            cxdata().SVTestState.Request_retry = 0;
+                            cxdata().SVTestState.ServoTestStep++;
+                            cxdata().SVTestState.SVDataRequested = 0;
+                        }
+                    }
+
+                }
+            }
+            break;
+            case 17 :
+                if(cxdata().SVTestState.SVConfigModified) {
+                    //Set_UINT_Config(cxdata().SVTestState.ServoTestingID, REG_CONFIG_SAVE, 0xFFFF);
+                    gcs().send_text(MAV_SEVERITY_INFO, "SV %u Needs Rebooting!!", cxdata().SVTestState.ServoTestingID);
+                } 
+                cxdata().SVTestState.ServoTestStep = 0;
+                cxdata().SVTestState.SVDataRequested = 0;
+                cxdata().SVTestState.SVConfigModified = 0;
+                if(cxdata().SVTestState.ServoTestingID == 6) {
+                    gcs().send_text(MAV_SEVERITY_INFO, "SV Config Check Finished. Reboot if reuired");
+                    cxdata().SVTestState.ServoCheckFinished = 1;
+                    cxdata().SVTestState.ServoTestingID = 1;
+                } else {
+                    cxdata().SVTestState.ServoTestingID++;
+                }
+            break;
+            default :
+            break;
+        }
+    }
+
+    _num_SVmsg = 0;
+}
+
+void AP_COAXCAN1::SV_Check_State(void) 
+{   //_AP_COAXCAN1_loop_cnt still usable
+    uint8_t NewServoMessages = _num_SVmsg;
+    switch (cxdata().SVTestState.ServoTestStep) {
+        case 0 : //Read Status
+            if(cxdata().SVTestState.SVDataRequested == 0) {
+                Request_SVData(cxdata().SVTestState.ServoTestingID, REG_STATUS_FLAG);
+                cxdata().SVTestState.SVDataRequested = 1;
+            } else {
+                if ( (NewServoMessages) && (_new_SVmsg_ID == REG_STATUS_FLAG) && (_new_MSG_SVID == cxdata().SVTestState.ServoTestingID) ) {
+                    if(cxdata().SV_state[(cxdata().SVTestState.ServoTestingID - 1)].ErrorCode.ALL == 0) {
+                        gcs().send_text(MAV_SEVERITY_INFO, "SV %u Status OK", cxdata().SVTestState.ServoTestingID);
+                    } else {
+                        gcs().send_text(MAV_SEVERITY_INFO, "Abnormal Servo %u Status %u", cxdata().SVTestState.ServoTestingID, cxdata().SV_state[(cxdata().SVTestState.ServoTestingID - 1)].ErrorCode.ALL);
+                    }
+                    cxdata().SVTestState.SVDataRequested = 0;
+                    cxdata().SVTestState.Request_retry = 0;
+                    if(cxdata().SVTestState.ServoTestingID < 6) {
+                        cxdata().SVTestState.ServoTestingID++;
+                    } else {
+                        cxdata().SVTestState.ServoTestingID = 1;
+                        cxdata().SVTestState.ServoTestStep++;
+                    }
+                } else {
+                        //Retry up to 5 tiems
+                    if(cxdata().SVTestState.Request_retry <= 250) {
+                        Request_SVData(cxdata().SVTestState.ServoTestingID, REG_STATUS_FLAG);
+                        cxdata().SVTestState.Request_retry++;
+                    } else {
+                        //Time-over, Move on to next test step
+                        gcs().send_text(MAV_SEVERITY_INFO, "SV %u S-Check Err Stp %u", cxdata().SVTestState.ServoTestingID, cxdata().SVTestState.ServoTestStep);
+                        cxdata().SVTestState.SVDataRequested = 0;
+                        cxdata().SVTestState.Request_retry = 0;
+                        if (cxdata().SVTestState.ServoTestingID < 6) {
+                            cxdata().SVTestState.ServoTestingID++;
+                        } else {
+                            cxdata().SVTestState.ServoTestingID = 1;
+                            cxdata().SVTestState.ServoTestStep++;
+                        }
+                    }
+                }
+            }
+        break;
+        case 1 : //Set Position to Neutral
+            CMD_SET_POSITION(cxdata().SVTestState.ServoTestingID, cxdata().SV_state[(cxdata().SVTestState.ServoTestingID-1)].Config_Pos_Neutral);
+            gcs().send_text(MAV_SEVERITY_INFO, "Preset SV %u Pos Neutral", cxdata().SVTestState.ServoTestingID);
+            if (cxdata().SVTestState.ServoTestingID < 6) {
+                cxdata().SVTestState.ServoTestingID++;
+            } else {
+                cxdata().SVTestState.ServoTestingID = 1;
+                cxdata().SVTestState.ServoTestStep++;
+                cxdata().SVTestState.SVDataRequested = 0;
+                cxdata().SVTestState.Request_retry = 0;
+            }
+        break;
+        case 2 : //Set Action-Torque
+            Set_UINT_Config(cxdata().SVTestState.ServoTestingID, REG_TORQUE_NEW, 4095);
+            gcs().send_text(MAV_SEVERITY_INFO, "Set SV %u Max Trq", cxdata().SVTestState.ServoTestingID);
+            if (cxdata().SVTestState.ServoTestingID < 6) {
+                cxdata().SVTestState.ServoTestingID++;
+            } else {
+                cxdata().SVTestState.ServoTestingID = 1;
+                cxdata().SVTestState.ServoTestStep++;
+                cxdata().SVTestState.SVDataRequested = 0;
+                cxdata().SVTestState.Request_retry = 0;
+            }
+        break;
+        case 3 : //Set Action-Velocity
+            Set_UINT_Config(cxdata().SVTestState.ServoTestingID, REG_VELOCITY_NEW, 4095);
+            gcs().send_text(MAV_SEVERITY_INFO, "Set SV %u Max Vel", cxdata().SVTestState.ServoTestingID);
+            if (cxdata().SVTestState.ServoTestingID < 6) {
+                cxdata().SVTestState.ServoTestingID++;
+            } else {
+                cxdata().SVTestState.ServoTestingID = 1;
+                cxdata().SVTestState.ServoTestStep++;
+                cxdata().SVTestState.SVDataRequested = 0;
+                cxdata().SVTestState.Request_retry = 0;
+            }
+        break;
+        case 4 : //Read Position_New
+            if(cxdata().SVTestState.SVDataRequested == 0) {
+                Request_SVData(cxdata().SVTestState.ServoTestingID, REG_POSITION_NEW);
+                cxdata().SVTestState.SVDataRequested = 1;
+            } else {
+                if ( (NewServoMessages) && (_new_SVmsg_ID == REG_POSITION_NEW) && (_new_MSG_SVID == cxdata().SVTestState.ServoTestingID) ) {
+                    if(cxdata().SV_TXPos_feedback[(cxdata().SVTestState.ServoTestingID - 1)] == cxdata().SV_state[(cxdata().SVTestState.ServoTestingID-1)].Config_Pos_Neutral) {
+                        gcs().send_text(MAV_SEVERITY_INFO, "SV %u Neutral Preset OK", cxdata().SVTestState.ServoTestingID);
+                    } else {
+                        gcs().send_text(MAV_SEVERITY_INFO, "Abnormal Servo %u", cxdata().SVTestState.ServoTestingID);
+                    }
+                    cxdata().SVTestState.SVDataRequested = 0;
+                    cxdata().SVTestState.Request_retry = 0;
+                    if(cxdata().SVTestState.ServoTestingID < 6) {
+                        cxdata().SVTestState.ServoTestingID++;
+                    } else {
+                        cxdata().SVTestState.ServoTestingID = 1;
+                        cxdata().SVTestState.ServoTestStep++;
+                    }
+                } else {
+                        //Retry up to 5 tiems
+                    if(cxdata().SVTestState.Request_retry <= 250) {
+                        Request_SVData(cxdata().SVTestState.ServoTestingID, REG_POSITION_NEW);
+                        cxdata().SVTestState.Request_retry++;
+                    } else {
+                        //Time-over, Move on to next test step
+                        gcs().send_text(MAV_SEVERITY_INFO, "SV %u S-Check Err Stp %u", cxdata().SVTestState.ServoTestingID, cxdata().SVTestState.ServoTestStep);
+                        cxdata().SVTestState.SVDataRequested = 0;
+                        cxdata().SVTestState.Request_retry = 0;
+                        if (cxdata().SVTestState.ServoTestingID < 6) {
+                            cxdata().SVTestState.ServoTestingID++;
+                        } else {
+                            cxdata().SVTestState.ServoTestingID = 1;
+                            cxdata().SVTestState.ServoTestStep++;
+                        }
+                    }
+                }
+            }
+        break;
+        case 5 : //Read Action-Torque
+        {
+            if(cxdata().SVTestState.SVDataRequested == 0) {
+                Request_SVData(cxdata().SVTestState.ServoTestingID, REG_TORQUE_NEW);
+                cxdata().SVTestState.SVDataRequested = 1;
+            } else {
+                if ( (NewServoMessages) && (_new_SVmsg_ID == REG_TORQUE_NEW)  && (_new_MSG_SVID == cxdata().SVTestState.ServoTestingID) ) {
+                    if(cxdata().SV_state[(cxdata().SVTestState.ServoTestingID - 1)].Action_Torque == 4095) {
+                        gcs().send_text(MAV_SEVERITY_INFO, "SV %u Max Trq 4095", cxdata().SVTestState.ServoTestingID);
+                        if(cxdata().SVTestState.ServoTestingID < 6) {
+                            cxdata().SVTestState.ServoTestingID++;
+                        } else {
+                            cxdata().SVTestState.ServoTestingID = 1;
+                            cxdata().SVTestState.ServoTestStep++;
+                        }
+                    } else {
+                        gcs().send_text(MAV_SEVERITY_INFO, "Retry SV %u Max Trq %u", cxdata().SVTestState.ServoTestingID, cxdata().SV_state[(cxdata().SVTestState.ServoTestingID - 1)].Action_Torque);
+                        cxdata().SVTestState.ServoTestStep--;
+                    }
+                    cxdata().SVTestState.SVDataRequested = 0;
+                    cxdata().SVTestState.Request_retry = 0;
+                } else {
+                        //Retry up to 5 tiems
+                    if(cxdata().SVTestState.Request_retry <= 250) {
+                        Request_SVData(cxdata().SVTestState.ServoTestingID, REG_STATUS_FLAG);
+                        cxdata().SVTestState.Request_retry++;
+                    } else {
+                        //Time-over, Move on to next test step
+                        gcs().send_text(MAV_SEVERITY_INFO, "SV %u S-Check Err Stp %u", cxdata().SVTestState.ServoTestingID, cxdata().SVTestState.ServoTestStep);
+                        cxdata().SVTestState.SVDataRequested = 0;
+                        cxdata().SVTestState.Request_retry = 0;
+                        if (cxdata().SVTestState.ServoTestingID < 6) {
+                            cxdata().SVTestState.ServoTestingID++;
+                        } else {
+                            cxdata().SVTestState.ServoTestingID = 1;
+                            cxdata().SVTestState.ServoTestStep++;
+                        }
+                    }
+                }
+            }
+        }
+        break;
+        case 6 : //Read Action-Velocity
+        {
+            if(cxdata().SVTestState.SVDataRequested == 0) {
+                Request_SVData(cxdata().SVTestState.ServoTestingID, REG_VELOCITY_NEW);
+                cxdata().SVTestState.SVDataRequested = 1;
+            } else {
+                if ( (NewServoMessages) && (_new_SVmsg_ID == REG_VELOCITY_NEW)  && (_new_MSG_SVID == cxdata().SVTestState.ServoTestingID) ) {
+                    if(cxdata().SV_state[(cxdata().SVTestState.ServoTestingID - 1)].Action_Torque == 4095) {
+                        gcs().send_text(MAV_SEVERITY_INFO, "SV %u Max Vel 4095", cxdata().SVTestState.ServoTestingID);
+                        if(cxdata().SVTestState.ServoTestingID < 6) {
+                            cxdata().SVTestState.ServoTestingID++;
+                        } else {
+                            cxdata().SVTestState.ServoTestingID = 1;
+                            cxdata().SVTestState.ServoTestStep++;
+                        }
+                    } else {
+                        gcs().send_text(MAV_SEVERITY_INFO, "Retry SV %u Vel Trq %u", cxdata().SVTestState.ServoTestingID, cxdata().SV_state[(cxdata().SVTestState.ServoTestingID - 1)].Action_Torque);
+                        cxdata().SVTestState.ServoTestStep--;
+                    }
+                    cxdata().SVTestState.SVDataRequested = 0;
+                    cxdata().SVTestState.Request_retry = 0;
+                } else {
+                        //Retry up to 5 tiems
+                    if(cxdata().SVTestState.Request_retry <= 250) {
+                        Request_SVData(cxdata().SVTestState.ServoTestingID, REG_STATUS_FLAG);
+                        cxdata().SVTestState.Request_retry++;
+                    } else {
+                        //Time-over, Move on to next test step
+                        gcs().send_text(MAV_SEVERITY_INFO, "SV %u S-Check Err Stp %u", cxdata().SVTestState.ServoTestingID, cxdata().SVTestState.ServoTestStep);
+                        cxdata().SVTestState.SVDataRequested = 0;
+                        cxdata().SVTestState.Request_retry = 0;
+                        if (cxdata().SVTestState.ServoTestingID < 6) {
+                            cxdata().SVTestState.ServoTestingID++;
+                        } else {
+                            cxdata().SVTestState.ServoTestingID = 1;
+                            cxdata().SVTestState.ServoTestStep++;
+                        }
+                    }
+                }
+            }
+        }
+        break;
+        case 7 :
+            cxdata().SVTestState.ServoTestStep = 0;
+            cxdata().SVTestState.SVDataRequested = 0;
+            cxdata().SVTestState.SVConfigModified = 0;
+            gcs().send_text(MAV_SEVERITY_INFO, "SV State Check Finished.");
+            cxdata().SVTestState.ServoCheckFinished = 1;
+
+        break;
+        default :
+        break;
+    }
+
+    _num_SVmsg = 0;
 }

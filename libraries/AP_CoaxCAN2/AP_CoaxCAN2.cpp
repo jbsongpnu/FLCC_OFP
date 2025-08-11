@@ -531,6 +531,22 @@ void AP_COAXCAN2::handleFrame(const AP_HAL::CANFrame& can_rxframe)
                         _PMS3.OutputVoltage_raw, _PMS3.OutputCurrent_raw, _PMS3.InputVoltage_raw, _PMS3.InputCurrent_raw);
             #endif
             break;
+        case RX_ID_PMS4 :
+            uint16_temp1 = can_rxframe.data[0];
+            uint16_temp2 = can_rxframe.data[1];
+            _PMS4.PMS_Out_Power_raw = uint16_temp2 * 256 + uint16_temp1;
+            uint16_temp1 = can_rxframe.data[2];
+            uint16_temp2 = can_rxframe.data[3];
+            _PMS4.PMS_In_Power_raw = uint16_temp2 * 256 + uint16_temp1;
+            uint16_temp1 = can_rxframe.data[4];
+            uint16_temp2 = can_rxframe.data[5];
+            _PMS4.PMS_LDC_Out_Volt_raw = uint16_temp2 * 256 + uint16_temp1;
+            uint16_temp1 = can_rxframe.data[6];
+            uint16_temp2 = can_rxframe.data[7];
+            _PMS4.PMS_Max_Temp_raw = uint16_temp2 * 256 + uint16_temp1;
+
+            _NewDMI_msg = _NewDMI_msg | 0x40;//bit6 : PMS4
+            break;
         case RX_ID_FDC1 :
             _FDC1.AliveCnt   = can_rxframe.data[0];
             _FDC1.State     = can_rxframe.data[1];
@@ -697,6 +713,19 @@ void AP_COAXCAN2::Check_ALL_data(void)
         cxdata().DMI_PMS_data.HDC_OutputCurrent = (float)_PMS3.OutputCurrent_raw * 0.1 - 350.0;
         cxdata().DMI_PMS_data.HDC_InputVoltage = (float)_PMS3.InputVoltage_raw * 0.1;
         cxdata().DMI_PMS_data.HDC_InputCurrent = (float)_PMS3.InputCurrent_raw * 0.1 - 350.0;
+        _DMI_has_Initialized |= 0x02;
+#if DEBUG_PMS == 1
+        gcs().send_text(MAV_SEVERITY_INFO, "PMS3-i : %.1f, %.1f, %.1f, %.1f",
+            cxdata().DMI_PMS_data.Batt_Output_Current, cxdata().DMI_PMS_data.LDC_Output_Current, 
+            cxdata().DMI_PMS_data.Mv_Output_Current, cxdata().DMI_PMS_data.Mv_Battery_Voltage);
+#endif
+    }
+    //PMS4
+    if(_NewDMI_msg & 0x40) {
+        cxdata().DMI_PMS_data.PMS_Out_Power = (float)_PMS4.PMS_Out_Power_raw * 0.1;
+        cxdata().DMI_PMS_data.PMS_In_Power = (float)_PMS4.PMS_In_Power_raw * 0.1;
+        cxdata().DMI_PMS_data.PMS_LDC_Out_Volt = (float)_PMS4.PMS_LDC_Out_Volt_raw * 0.1;
+        cxdata().DMI_PMS_data.PMS_Max_Temp = (float)_PMS4.PMS_Max_Temp_raw  - 40.0;
         _DMI_has_Initialized |= 0x02;
 #if DEBUG_PMS == 1
         gcs().send_text(MAV_SEVERITY_INFO, "PMS3-i : %.1f, %.1f, %.1f, %.1f",

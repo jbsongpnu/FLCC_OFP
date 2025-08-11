@@ -6295,7 +6295,7 @@
       <field type="uint16_t" name="Target_Motor_Speed" units="rpm">Motor_RPM_CMD</field>
       <field type="uint16_t" name="Motor_Speed_Limit" units="rpm">Speed_Limit</field>
       <field type="uint16_t" name="Target_Motor_Acceleration" units="rpm/s">Motor_ACC_CMD</field>
-      <field type="uint16_t" name="Theta_Offset" units="deg">Theta_Offset</field>
+      <field type="uint16_t" name="Motor_Aligned" units="N/A">Motor Alignment. 0: Not Aligned, 1: Aligned</field>
       <field type="uint16_t" name="i_a" units="A">phase A current x 100</field>
       <field type="uint16_t" name="i_b" units="A">phase B current x 100</field>
       <field type="uint16_t" name="i_c" units="A">phase C current x 100</field>

@@ -31,6 +31,14 @@ struct PMS3_msg {
     int16_t InputCurrent_raw;      //16bit : Byte6 ~ Byte7
 };
 
+struct PMS4_msg {
+    //0x6F3 DLC = 8
+    uint16_t PMS_Out_Power_raw;     //16bit : Byte0 ~ Byte1
+    uint16_t PMS_In_Power_raw;      //16bit : Byte2 ~ Byte3
+    uint16_t PMS_LDC_Out_Volt_raw;  //16bit : Byte4 ~ Byte5
+    uint16_t PMS_Max_Temp_raw;          //16bit : Byte6 ~ Byte7
+};
+
 typedef union {
     uint8_t ALL;
     struct {
