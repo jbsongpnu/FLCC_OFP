@@ -5,6 +5,7 @@
 ***
 
 ## Version History
+- V0.01.39 CoaxCAN1 loop changed from 200Hz to 400Hz to realize maximum servo control rate. Inverter has changed from 10Hz to 5Hz, CCB remains 1Hz
 - V0.01.38 Communicating with HiTech servos with CAN protocol through CCB board. CCB board will relay CAN frames to RS-485 to servos. Also some Mavlink messages are changed.
 - V0.01.37 Substituting Pegsus Actuator to HiTech servo : Basic Functions and debug codes with configuration check with UART => This version is not working properly due to TX delay from ChibiOS
 - V0.01.36 Updating CoaxCAN1 and CoaxCAN2 : bug fixes for CCB, Inverter and IFCU

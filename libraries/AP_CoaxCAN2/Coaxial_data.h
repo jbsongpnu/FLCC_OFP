@@ -395,7 +395,8 @@ enum class CoaxState {
     CXSTATE_5_MOTSPOOL,
     CXSTATE_6_IDLERPM,
     CXSTATE_7_ONFLIGHT,
-    CXSTATE_8_LANDED
+    CXSTATE_8_LANDED,
+    CXSTATE_F1_SERVOFAIL
 };
 
 struct HiTechTestState {
@@ -405,6 +406,12 @@ struct HiTechTestState {
     uint8_t SVConfigModified = 0;
     uint8_t ServoCheckFinished = 0;
     uint8_t Request_retry = 0;
+};
+
+struct SVErrorCode {
+    uint8_t SV_Config_Error[6] = {0, };
+    uint8_t SV_Vel_Set_Error[6] = {0, };
+    uint8_t SV_Tq_Set_Error[6] = {0, };
 };
 
 class CoaxData
@@ -438,6 +445,7 @@ public:
     CoaxSwashState Swash_prev;
     CoaxSwashState Swash_CMD;    
     HiTechTestState SVTestState;
+    SVErrorCode SVError;
 
     //====State Machine
     CoaxState CX_State; //Coaxial State-machine state

@@ -9,10 +9,10 @@
 #include "CoaxCAN_driver.hpp"
 #include <AP_CoaxCAN1/AP_CoaxCAN_INV_msg_List.h>
 
-#define COAXCAN1_LOOP_HZ              (200U)      // 200Hz 5ms
-#define COAXCAN1_MINOR_INTERVAL       (2U)      //(2U)        // 100Hz  5ms*2=10ms
-#define COAXCAN1_MALVINK_INTERVAL     (20U)       // 10Hz  5ms*20=100ms
-#define COAXCAN1_ONRUNNING_INTERVAL   (200U)      // 1Hz   5ms*200=1000ms
+#define COAXCAN1_LOOP_HZ              (400U)    //400Hz 2.5ms (200U)  // 200Hz 5ms
+//#define COAXCAN1_MINOR_INTERVAL       (2U)      //(2U)        // 100Hz  5ms*2=10ms
+//#define COAXCAN1_MALVINK_INTERVAL     (20U)       // 10Hz  5ms*20=100ms
+//#define COAXCAN1_ONRUNNING_INTERVAL   (200U)      // 1Hz   5ms*200=1000ms
 
 class AP_COAXCAN1 : public AP_CANDriver {
 public:
@@ -152,10 +152,12 @@ private:
     void Set_UINT_Config(uint8_t id, uint8_t addrs, uint16_t value);
     void Set_INT_Config(uint8_t id, uint8_t addrs, int16_t value);
     void Request_SVData(uint8_t id, uint8_t addrs);
-    void CMD_SET_MULTI_POSITIONS(void);
+    // void CMD_SET_MULTI_POSITIONS(void); //Removed : Do not use multi frames 
     void SV_Config_Test(void);
     void SV_Check_State(void);
     void CoaxServoRun(void);
+    void SV_Waiting_StateLoop(void);
+    void SV_Waiting_State_TESTLoop(void);
 };
 
 #endif

@@ -116,12 +116,12 @@ void Copter::userhook_init()
     cxdata().INV_data.pre_Rdy2useINV = 0;
     cxdata().Command_Received.NewCMD.bits.CCB_Motor_MAX = 0;
 
-    cxdata().SV_TX[0].SV_pos = 950;
-    cxdata().SV_TX[1].SV_pos = 1024;
-    cxdata().SV_TX[2].SV_pos = 950;
-    cxdata().SV_TX[3].SV_pos = 1024;
-    cxdata().SV_TX[4].SV_pos = 1024;
-    cxdata().SV_TX[5].SV_pos = 890;
+    cxdata().SV_TX[0].SV_pos = PARAM_SV1_POS_NEUTRAL;
+    cxdata().SV_TX[1].SV_pos = PARAM_SV2_POS_NEUTRAL;
+    cxdata().SV_TX[2].SV_pos = PARAM_SV3_POS_NEUTRAL;
+    cxdata().SV_TX[3].SV_pos = PARAM_SV4_POS_NEUTRAL;
+    cxdata().SV_TX[4].SV_pos = PARAM_SV5_POS_NEUTRAL;
+    cxdata().SV_TX[5].SV_pos = PARAM_SV6_POS_NEUTRAL;
 
     cxdata().SVTestState.ServoTestingID = 0;//Initiate with ID 0
 }
@@ -259,7 +259,7 @@ void Copter::userhook_MediumLoop()
         MAV_GCSTX_INV_State.t_b = (uint16_t)(cxdata().INV_data.t_b * 100.0);
         MAV_GCSTX_INV_State.t_c = (uint16_t)(cxdata().INV_data.t_c * 100.0);
         MAV_GCSTX_INV_State.V_dc = (uint16_t)(cxdata().INV_data.V_dc_input * 10.0);
-        MAV_GCSTX_INV_State.Fault_Flags = 7;//cxdata().INV_data.FLT.ALL;
+        MAV_GCSTX_INV_State.Fault_Flags = cxdata().INV_data.FLT.ALL;
         gcs().send_message(MSG_INV_STATE); //
     } else if (Count1Hz%10 == 2) {
         MAV_GCSTX_HBSYS.PMS_State = cxdata().DMI_PMS_data.PMS_State;
