@@ -57,6 +57,7 @@ H_SW2_H3_PHANG
 #include <AP_HAL/AP_HAL.h>
 #include "AP_MotorsHeli_Dual.h"
 #include <GCS_MAVLink/GCS.h>
+#include <AP_CoaxCAN2/Coaxial_data.h>
 
 extern const AP_HAL::HAL& hal;
 
@@ -684,7 +685,13 @@ void AP_MotorsHeli_Dual::move_actuators(float roll_out, float pitch_out, float c
     if (_swashplate2.get_swash_type() == SWASHPLATE_TYPE_H4_90 || _swashplate2.get_swash_type() == SWASHPLATE_TYPE_H4_45) {
         _servo_out[CH_8] = _swashplate2.get_servo_out(CH_4,swash2_pitch,swash2_roll,swash2_coll);
     }
-
+ //transfer to cxdata. _servo_out[x] is in range of -1 to 1
+    cxdata().SV_Pos[0].CtrlOut = _servo_out[CH_1];
+    cxdata().SV_Pos[1].CtrlOut = _servo_out[CH_2];
+    cxdata().SV_Pos[2].CtrlOut = _servo_out[CH_3];
+    cxdata().SV_Pos[3].CtrlOut = _servo_out[CH_4];
+    cxdata().SV_Pos[4].CtrlOut = _servo_out[CH_5];
+    cxdata().SV_Pos[5].CtrlOut = _servo_out[CH_6];
 }
 
 void AP_MotorsHeli_Dual::output_to_motors()

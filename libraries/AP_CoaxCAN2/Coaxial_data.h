@@ -89,6 +89,8 @@
 #define PARAM_SV4_T_Direction   0
 #define PARAM_SV5_T_Direction   1
 #define PARAM_SV6_T_Direction   0
+//Additional macro parameter
+#define PARAM_TRAVEL_ONEWAY     569     //Travel from neutral to both side 950 - 381 = 1519 - 950 = 1024 - 455 = 569
 typedef union {
     uint8_t ALL;
     struct {
@@ -331,7 +333,7 @@ struct TX_CoaxServo_data {
 
 struct RX_CoaxServo_pos {
     int16_t raw;
-    float angle;
+    float CtrlOut;  //set with _servo_out[CH_x] at AP_MotorsHeli_Dual::move_actuators()
 };
 
 union Err_msg_g{
