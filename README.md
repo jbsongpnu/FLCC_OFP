@@ -1,3 +1,25 @@
+# Coaxial Rotor Heli Peripheral : Load-cell Indicator project
+- User "./waf copter" for buiding the code
+***
+
+## Version History
+- V0.01.01 Starting a basic structure for the Load-cell Indicator
+
+***
+## Parameter Setup (for Pixhawk6X)
+- SERIAL Port Setup
+SERIAL0_BAUD :      115     (115,200bps)
+SERIAL0_PROTOCOL :  2       (MAVLink2 - USB)
+SERIAL1_BAUD :      57      (57,600bps)
+SERIAL1_PROTOCOL :  2       (MAVLink2 - Telemetry1 - SI400-1)
+SERIAL2_BAUD :      57      (57,600bps)
+SERIAL2_PROTOCOL :  46      (LCIND - Telemetry2 - SI400-2)
+SERIAL4_BAUD :      57      (57,600bps)
+SERIAL4_PROTOCOL :  46      (LCIND - GPS2 - SI400-4)
+SERIAL5_BAUD :      57      (57,600bps)     
+SERIAL5_PROTOCOL :  46      (LCIND - Telemetry3 - SI400-3)
+(Only communicate with USB port)
+***
 # ArduPilot Project
 
 <a href="https://ardupilot.org/discord"><img src="https://img.shields.io/discord/674039678562861068.svg" alt="Discord">

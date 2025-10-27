@@ -1,17 +1,31 @@
 #include "Copter.h"
 
+#include "LCIND.h"
+
+#define UART_LC_1   hal.serial(1)
+#define UART_LC_2   hal.serial(2)
+#define UART_LC_3   hal.serial(5)
+#define UART_LC_4   hal.serial(4)
+
 #ifdef USERHOOK_INIT
 void Copter::userhook_init()
 {
-    // put your initialisation code here
-    // this will be called once at start-up
+    // LCIND_class *LCIND = AP::LCIND_g();
+    // LCIND->testf(10);
 }
 #endif
 
 #ifdef USERHOOK_FASTLOOP
 void Copter::userhook_FastLoop()
 {
-    // put your 100Hz code here
+    static uint32_t s100Hz_Flag = 0;
+
+
+    if(s100Hz_Flag % 300 == 0) {
+        gcs().send_text(MAV_SEVERITY_INFO, "FASTLOOP %lu", s100Hz_Flag);
+    }
+
+    s100Hz_Flag++;
 }
 #endif
 

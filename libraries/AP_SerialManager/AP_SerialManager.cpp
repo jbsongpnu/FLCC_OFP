@@ -574,6 +574,13 @@ void AP_SerialManager::init()
                     uart->set_unbuffered_writes(true);
                     break;
 #endif
+                case SerialProtocol_LCIND:
+                    state[i].baud.set_default(AP_SERIALMANAGER_LCIND_BAUD/1000);
+                    uart->begin(state[i].baudrate(),
+                                         AP_SERIALMANAGER_LCIND_BUFSIZE_RX,
+                                         AP_SERIALMANAGER_LCIND_BUFSIZE_TX);
+                    uart->set_flow_control(AP_HAL::UARTDriver::FLOW_CONTROL_DISABLE);
+                    break;
 #if AP_NETWORKING_BACKEND_PPP
                 case SerialProtocol_PPP:
                     break;
