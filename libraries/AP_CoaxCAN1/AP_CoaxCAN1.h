@@ -8,6 +8,7 @@
 #include <AP_Param/AP_Param.h>
 #include "CoaxCAN_driver.hpp"
 #include <AP_CoaxCAN1/AP_CoaxCAN_INV_msg_List.h>
+#include <AP_Math/AP_Math.h>
 
 #define COAXCAN1_LOOP_HZ              (400U)    //400Hz 2.5ms (200U)  // 200Hz 5ms
 //#define COAXCAN1_MINOR_INTERVAL       (2U)      //(2U)        // 100Hz  5ms*2=10ms
@@ -158,6 +159,9 @@ private:
     void CoaxServoRun(void);
     void SV_Waiting_StateLoop(void);
     void SV_Waiting_State_TESTLoop(void);
+    int16_t round_to_i16(float v);
+    int ColTableLOW_LerpToI16(float x, int16_t* sv4, int16_t* sv5, int16_t* sv6);
+    int ColTableUpper_LerpToI16(float x, int16_t* sv1, int16_t* sv2, int16_t* sv3);
 };
 
 #endif

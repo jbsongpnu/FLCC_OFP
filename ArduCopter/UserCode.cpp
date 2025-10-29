@@ -3,7 +3,7 @@
 //Pegasus suervo has changed to HiTech servos. 
 //Following code contains temporary debugging 
 #define COAXSERVO_TEST 0
-#define COAXCAN_LOGGING 0
+#define COAXCAN_LOGGING 1
 #define CCB_AUTOSEQUENCE 1
 #ifdef USERHOOK_INIT
 
@@ -107,7 +107,7 @@ void Copter::userhook_init()
     cxdata().Swash.Lat = 0.0;
     cxdata().Swash.Lon = 0.0;
     cxdata().Swash.Rud = 0.0;
-    cxdata().Swash_CMD.Col = 0.0;
+    cxdata().Swash_CMD.Col = 1.0;   //Start with minimum : Minimum Collective set to 1 deg 2025.09.09
     cxdata().Swash_CMD.Lat = 0.0;
     cxdata().Swash_CMD.Lon = 0.0;
     cxdata().Swash_CMD.Rud = 0.0;
@@ -116,12 +116,29 @@ void Copter::userhook_init()
     cxdata().INV_data.pre_Rdy2useINV = 0;
     cxdata().Command_Received.NewCMD.bits.CCB_Motor_MAX = 0;
 
+    //After using table look-up method for collective, neutral point for servo has not much meaning
     cxdata().SV_TX[0].SV_pos = PARAM_SV1_POS_NEUTRAL;
     cxdata().SV_TX[1].SV_pos = PARAM_SV2_POS_NEUTRAL;
     cxdata().SV_TX[2].SV_pos = PARAM_SV3_POS_NEUTRAL;
     cxdata().SV_TX[3].SV_pos = PARAM_SV4_POS_NEUTRAL;
     cxdata().SV_TX[4].SV_pos = PARAM_SV5_POS_NEUTRAL;
     cxdata().SV_TX[5].SV_pos = PARAM_SV6_POS_NEUTRAL;
+
+    //Software reverse for servo
+    cxdata().SV_state[0].SW_Reversed = PARAM_SV1_SW_REVERSE;
+    cxdata().SV_state[1].SW_Reversed = PARAM_SV2_SW_REVERSE;
+    cxdata().SV_state[2].SW_Reversed = PARAM_SV3_SW_REVERSE;
+    cxdata().SV_state[3].SW_Reversed = PARAM_SV4_SW_REVERSE;
+    cxdata().SV_state[4].SW_Reversed = PARAM_SV5_SW_REVERSE;
+    cxdata().SV_state[5].SW_Reversed = PARAM_SV6_SW_REVERSE;
+
+    //Zero degree collective pitch position
+    cxdata().SV_state[0].Position_Zero = PARAM_SV1_POS_ZERO;
+    cxdata().SV_state[1].Position_Zero = PARAM_SV2_POS_ZERO;
+    cxdata().SV_state[2].Position_Zero = PARAM_SV3_POS_ZERO;
+    cxdata().SV_state[3].Position_Zero = PARAM_SV4_POS_ZERO;
+    cxdata().SV_state[4].Position_Zero = PARAM_SV5_POS_ZERO;
+    cxdata().SV_state[5].Position_Zero = PARAM_SV6_POS_ZERO;
 
     cxdata().SVTestState.ServoTestingID = 0;//Initiate with ID 0
 }
@@ -251,7 +268,7 @@ void Copter::userhook_MediumLoop()
         MAV_GCSTX_INV_State.Target_Motor_Speed = (uint16_t)cxdata().INV_data.Motor_RPM_CMD;
         MAV_GCSTX_INV_State.Motor_Speed_Limit = (uint16_t)cxdata().INV_data.Speed_Limit;
         MAV_GCSTX_INV_State.Target_Motor_Acceleration = (uint16_t)cxdata().INV_data.Motor_ACC_CMD;
-        MAV_GCSTX_INV_State.Motor_Aligned = 1;//(uint16_t)cxdata().INV_data.Motor_Align_flag;//Thetaoffset has changed to Align_flag
+        MAV_GCSTX_INV_State.Motor_Aligned = (uint16_t)cxdata().INV_data.Motor_Align_flag;//Thetaoffset has changed to Align_flag
         MAV_GCSTX_INV_State.i_a = (uint16_t)(cxdata().INV_data.i_a * 100.0);
         MAV_GCSTX_INV_State.i_b = (uint16_t)(cxdata().INV_data.i_b * 100.0);
         MAV_GCSTX_INV_State.i_c = (uint16_t)(cxdata().INV_data.i_c * 100.0);
@@ -284,12 +301,34 @@ void Copter::userhook_MediumLoop()
         gcs().send_message(MSG_CCB_STATE);
     } else if (Count1Hz%10 == 4) {
         MAV_GCSTX_CXSV_POS.Servo_State = cxdata().SVinitialized;
-        MAV_GCSTX_CXSV_POS.SV1_POS_RAW = cxdata().SV_Pos[0].raw;
-        MAV_GCSTX_CXSV_POS.SV2_POS_RAW = cxdata().SV_Pos[1].raw;
-        MAV_GCSTX_CXSV_POS.SV3_POS_RAW = cxdata().SV_Pos[2].raw;
-        MAV_GCSTX_CXSV_POS.SV4_POS_RAW = cxdata().SV_Pos[3].raw;
-        MAV_GCSTX_CXSV_POS.SV5_POS_RAW = cxdata().SV_Pos[4].raw;
-        MAV_GCSTX_CXSV_POS.SV6_POS_RAW = cxdata().SV_Pos[5].raw;
+        //=== If sending feedback position
+        // MAV_GCSTX_CXSV_POS.SV1_POS_RAW = cxdata().SV_Pos[0].raw;
+        // MAV_GCSTX_CXSV_POS.SV2_POS_RAW = cxdata().SV_Pos[1].raw;
+        // MAV_GCSTX_CXSV_POS.SV3_POS_RAW = cxdata().SV_Pos[2].raw;
+        // MAV_GCSTX_CXSV_POS.SV4_POS_RAW = cxdata().SV_Pos[3].raw;
+        // MAV_GCSTX_CXSV_POS.SV5_POS_RAW = cxdata().SV_Pos[4].raw;
+        // MAV_GCSTX_CXSV_POS.SV6_POS_RAW = cxdata().SV_Pos[5].raw;
+        //=== If sending commanded position
+        // MAV_GCSTX_CXSV_POS.SV1_POS_RAW = cxdata().SV_TX[0].SV_pos;
+        // MAV_GCSTX_CXSV_POS.SV2_POS_RAW = cxdata().SV_TX[1].SV_pos;
+        // MAV_GCSTX_CXSV_POS.SV3_POS_RAW = cxdata().SV_TX[2].SV_pos;
+        // MAV_GCSTX_CXSV_POS.SV4_POS_RAW = cxdata().SV_TX[3].SV_pos;
+        // MAV_GCSTX_CXSV_POS.SV5_POS_RAW = cxdata().SV_TX[4].SV_pos;
+        // MAV_GCSTX_CXSV_POS.SV6_POS_RAW = cxdata().SV_TX[5].SV_pos;
+        //=== If comparing Upper rotor TX and RX
+        MAV_GCSTX_CXSV_POS.SV1_POS_RAW = cxdata().SV_TX[0].SV_pos;
+        MAV_GCSTX_CXSV_POS.SV2_POS_RAW = cxdata().SV_TX[1].SV_pos;
+        MAV_GCSTX_CXSV_POS.SV3_POS_RAW = cxdata().SV_TX[2].SV_pos;
+        MAV_GCSTX_CXSV_POS.SV4_POS_RAW = cxdata().SV_Pos[0].raw;
+        MAV_GCSTX_CXSV_POS.SV5_POS_RAW = cxdata().SV_Pos[1].raw;
+        MAV_GCSTX_CXSV_POS.SV6_POS_RAW = cxdata().SV_Pos[2].raw;
+        //=== If comparing Lower rotor TX and RX
+        // MAV_GCSTX_CXSV_POS.SV1_POS_RAW = cxdata().SV_TX[3].SV_pos;
+        // MAV_GCSTX_CXSV_POS.SV2_POS_RAW = cxdata().SV_TX[4].SV_pos;
+        // MAV_GCSTX_CXSV_POS.SV3_POS_RAW = cxdata().SV_TX[5].SV_pos;
+        // MAV_GCSTX_CXSV_POS.SV4_POS_RAW = cxdata().SV_Pos[3].raw;
+        // MAV_GCSTX_CXSV_POS.SV5_POS_RAW = cxdata().SV_Pos[4].raw;
+        // MAV_GCSTX_CXSV_POS.SV6_POS_RAW = cxdata().SV_Pos[5].raw;
         gcs().send_message(MSG_CXSV_POS);
     } else if (Count1Hz%10 == 5) {
         MAV_GCSTX_CXSV_SWASH.Swash_State = static_cast<uint8_t>(cxdata().CX_State);
@@ -891,23 +930,19 @@ void Copter::userhook_MediumLoop()
         cxdata().INV_data.V_dc_input,                   //f     VIN
         MAV_GCSTX_INV_State.Fault_Flags                 //B     FLTBIT
     );
-    {
-        uint8_t tempMON = cxdata().CCB_data.State.bits.Motor1_run | cxdata().CCB_data.State.bits.Motor2_run;
-        AP::logger().Write("CCB", "TimeUS,FLOW,ACTIVE,MMAX,MON,TC1,TC2,TI1,TI2,TI3,TI4,BDTEMP", "QHBBBHHHHHHB",
-            AP_HAL::micros64(),                         //Q     TimeUS
-            cxdata().CCB_data.Flow_mL,                  //H     FLOW
-            cxdata().CCB_data.State.bits.IsActive,      //B     ACTIVE
-            cxdata().CCB_data.State.bits.IsForcedMax,   //B     MMAX
-            tempMON,                                    //B     MON
-            cxdata().CCB_data.ThCp1x10,                 //H     TC1
-            cxdata().CCB_data.ThCp2x10,                 //H     TC2
-            cxdata().CCB_data.Thermistor1x10,           //H     TI1
-            cxdata().CCB_data.Thermistor1x10,           //H     TI2
-            cxdata().CCB_data.Thermistor1x10,           //H     TI3
-            cxdata().CCB_data.Thermistor1x10,           //H     TI4
-            cxdata().CCB_data.Brd_temp                  //B     BDTEMP
-        );
-    }
+
+    AP::logger().Write("CCB", "TimeUS,FLOW,TI1,TI2,TI3,TI4,TC1,TC2,BDTEMP", "QHHHHHHHB",
+        AP_HAL::micros64(),                         //Q     TimeUS
+        cxdata().CCB_data.Flow_mL,                  //H     FLOW
+        cxdata().CCB_data.Thermistor1x10,           //H     TI1
+        cxdata().CCB_data.Thermistor2x10,           //H     TI2
+        cxdata().CCB_data.Thermistor3x10,           //H     TI3
+        cxdata().CCB_data.Thermistor4x10,           //H     TI4
+        cxdata().CCB_data.ThCp1x10,                 //H     TC1
+        cxdata().CCB_data.ThCp2x10,                 //H     TC2
+        cxdata().CCB_data.Brd_temp                  //B     BDTEMP
+    );
+
     AP::logger().Write("HBSYS", "TimeUS,ISTAT,PSTAT,HVOUT,HCOUT,HVIN,HCIN", "QBBffff",
         AP_HAL::micros64(),                             //Q     TimeUS
         cxdata().IFCU_data.State,                       //B     ISTAT
@@ -916,6 +951,35 @@ void Copter::userhook_MediumLoop()
         cxdata().DMI_PMS_data.HDC_OutputCurrent,        //f     HCOUT
         cxdata().DMI_PMS_data.HDC_InputVoltage,         //f     HVIN
         cxdata().DMI_PMS_data.HDC_InputCurrent          //f     HCIN
+    );
+
+    AP::logger().Write("CSV1", "TimeUS,SVSTAT,TXCOL,TXLAT,TXLON,TXRUD", "QBffff", 
+        AP_HAL::micros64(),                             //Q     TimeUS
+        ((uint8_t)cxdata().CX_State),                   //B     Coax Servo State
+        cxdata().Swash_CMD.Col,                         //f     collective 
+        cxdata().Swash_CMD.Lat,                         //f     lateral cyclic
+        cxdata().Swash_CMD.Lon,                         //f     longitudinal cyclic
+        cxdata().Swash_CMD.Rud                          //f     pedal = rudder
+    );
+
+    AP::logger().Write("CSV2", "TimeUS,TXSV1,TXSV2,TXSV3,TXSV4,TXSV5,TXSV6", "Qhhhhhh",
+        AP_HAL::micros64(),                             //Q     TimeUS
+        cxdata().SV_TX[0].SV_pos,                       //h     TX_SV1
+        cxdata().SV_TX[1].SV_pos,                       //h     TX_SV2
+        cxdata().SV_TX[2].SV_pos,                       //h     TX_SV3
+        cxdata().SV_TX[3].SV_pos,                       //h     TX_SV4
+        cxdata().SV_TX[4].SV_pos,                       //h     TX_SV5
+        cxdata().SV_TX[5].SV_pos                       //h     TX_SV6
+    );
+
+    AP::logger().Write("CSV3", "TimeUS,RXSV1,RXSV2,RXSV3,RXSV4,RXSV5,RXSV6", "Qhhhhhh",
+        AP_HAL::micros64(),                             //Q     TimeUS
+        cxdata().SV_Pos[0].raw,                         //h     TX_SV1
+        cxdata().SV_Pos[1].raw,                         //h     TX_SV2
+        cxdata().SV_Pos[2].raw,                         //h     TX_SV3
+        cxdata().SV_Pos[3].raw,                         //h     TX_SV4
+        cxdata().SV_Pos[4].raw,                         //h     TX_SV5
+        cxdata().SV_Pos[5].raw                          //h     TX_SV6
     );
 #endif
     /*

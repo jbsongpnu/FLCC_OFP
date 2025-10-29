@@ -149,7 +149,7 @@ enum LoggingParameters {
 #define FS_GCS_ENABLED_CONTINUE_MISSION        2    // Removed in 4.0+, now use fs_options
 #define FS_GCS_ENABLED_ALWAYS_SMARTRTL_OR_RTL  3
 #define FS_GCS_ENABLED_ALWAYS_SMARTRTL_OR_LAND 4
-#define FS_GCS_ENABLED_ALWAYS_LAND             5
+#define FS_GCS_ENABLED_ALWAYS_LAND             5    // Use Land option for Initial Coaxial Rotor Test
 #define FS_GCS_ENABLED_AUTO_RTL_OR_RTL         6
 
 // EKF failsafe definitions (FS_EKF_ACTION parameter)

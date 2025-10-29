@@ -1,4 +1,5 @@
 #include "Copter.h"
+#include <AP_CoaxCAN2/Coaxial_data.h>
 
 /*
  *       This event will be called when the failsafe changes
@@ -165,6 +166,8 @@ void Copter::failsafe_gcs_on_event(void)
     AP::logger().Write_Error(LogErrorSubsystem::FAILSAFE_GCS, LogErrorCode::FAILSAFE_OCCURRED);
     RC_Channels::clear_overrides();
 
+    // Coaxial helicopter's failsafe on
+    cxdata().Failsafe.GCS_lost = 1;
     // convert the desired failsafe response to the FailsafeAction enum
     FailsafeAction desired_action;
     switch (g.failsafe_gcs) {
@@ -234,6 +237,8 @@ void Copter::failsafe_gcs_off_event(void)
 {
     gcs().send_text(MAV_SEVERITY_WARNING, "GCS Failsafe Cleared");
     AP::logger().Write_Error(LogErrorSubsystem::FAILSAFE_GCS, LogErrorCode::FAILSAFE_RESOLVED);
+    //Clear Coaxial helicopter's failsafe
+    cxdata().Failsafe.GCS_lost = 0;
 }
 
 // executes terrain failsafe if data is missing for longer than a few seconds

@@ -52,7 +52,7 @@
 #define PARAM_POWER_CONFIG      2
 #define PARAM_EMERGENCY_STOP    0x1800    //Stop at Over-voltage and Under-voltage
 #define PARAM_ACTION_MODE       0x0060    //CR disabled, Velocity Mode, Acceleration Disabled
-#define PARAM_POSITION_SLOPE    3800      //3800 = 0x0ED8, Max position slope => large torque at target point
+#define PARAM_POSITION_SLOPE    4095      //Changed to 4095 for max torque at target position. Previously, 3800 = 0x0ED8
 #define PARAM_DEAD_BAND         2         //Set at minimum value of 2, smaller value creates vibration
 #define PARAM_VELOCITY_MAX      4095      //4095 = 0x0FFF, Max velocity set to max value of 4095 
 #define PARAM_TORQUE_MAX        4095      //4095 = 0x0FFF, Max torque set to max value of 4095
@@ -66,21 +66,56 @@
 #define PARAM_SV1_POS_START     381
 #define PARAM_SV1_POS_NEUTRAL   950
 #define PARAM_SV1_POS_END       1519
+#define PARAM_SV1_POS_ZERO      793     //Zero-degree collective achieved at this position
+
 #define PARAM_SV2_POS_START     455
-#define PARAM_SV2_POS_NEUTRAL   1024
+#define PARAM_SV2_POS_NEUTRAL   1042
 #define PARAM_SV2_POS_END       1593
+#define PARAM_SV2_POS_ZERO      894     //Zero-degree collective achieved at this position
+
 #define PARAM_SV3_POS_START     381
 #define PARAM_SV3_POS_NEUTRAL   950
 #define PARAM_SV3_POS_END       1519
+#define PARAM_SV3_POS_ZERO      791     //Zero-degree collective achieved at this position
+
 #define PARAM_SV4_POS_START     381
-#define PARAM_SV4_POS_NEUTRAL   950
+#define PARAM_SV4_POS_NEUTRAL   924     //950
 #define PARAM_SV4_POS_END       1519
-#define PARAM_SV5_POS_START     455     //0x01c7
-#define PARAM_SV5_POS_NEUTRAL   1024    //0x0400
-#define PARAM_SV5_POS_END       1593    //0x0639
+#define PARAM_SV4_POS_ZERO      1197     //Zero-degree collective achieved at this position
+
+#define PARAM_SV5_POS_START     455     
+#define PARAM_SV5_POS_NEUTRAL   1032    //1024    
+#define PARAM_SV5_POS_END       1593    
+#define PARAM_SV5_POS_ZERO      1314    //Zero-degree collective achieved at this position
+
 #define PARAM_SV6_POS_START     321
-#define PARAM_SV6_POS_NEUTRAL   890
+#define PARAM_SV6_POS_NEUTRAL   932     //890
 #define PARAM_SV6_POS_END       1459
+#define PARAM_SV6_POS_ZERO      1220    //Zero-degree collective achieved at this position
+// #define PARAM_SV1_POS_START     760     //381
+// #define PARAM_SV1_POS_NEUTRAL   800     //950
+// #define PARAM_SV1_POS_END       1150    //1519
+// #define PARAM_SV1_POS_ZERO      800     //Zero-degree collective achieved at this position
+// #define PARAM_SV2_POS_START     834     //455
+// #define PARAM_SV2_POS_NEUTRAL   874     //1024
+// #define PARAM_SV2_POS_END       1224    //1593
+// #define PARAM_SV2_POS_ZERO      874     //Zero-degree collective achieved at this position
+// #define PARAM_SV3_POS_START     760     //381
+// #define PARAM_SV3_POS_NEUTRAL   800     //950
+// #define PARAM_SV3_POS_END       1150    //1519
+// #define PARAM_SV3_POS_ZERO      800     //Zero-degree collective achieved at this position
+// #define PARAM_SV4_POS_START     770     //381
+// #define PARAM_SV4_POS_NEUTRAL   1280    //950
+// #define PARAM_SV4_POS_END       1350    //1519
+// #define PARAM_SV4_POS_ZERO      1280     //Zero-degree collective achieved at this position
+// #define PARAM_SV5_POS_START     844     //0x01c7
+// #define PARAM_SV5_POS_NEUTRAL   1354    //0x0400
+// #define PARAM_SV5_POS_END       1424    //0x0639
+// #define PARAM_SV5_POS_ZERO      1354    //Zero-degree collective achieved at this position
+// #define PARAM_SV6_POS_START     710     //321
+// #define PARAM_SV6_POS_NEUTRAL   1220    //890
+// #define PARAM_SV6_POS_END       1290    //1459
+// #define PARAM_SV6_POS_ZERO      1220    //Zero-degree collective achieved at this position
 //Servo 1, 3 Start 381 Neutral 950 End 1519  //range 569 for 50deg
 //Servo6 Start 321 Neutral 890 End 1459
 #define PARAM_SV1_T_Direction   0 //CCW : 0, CW : 1
@@ -91,6 +126,12 @@
 #define PARAM_SV6_T_Direction   0
 //Additional macro parameter
 #define PARAM_TRAVEL_ONEWAY     569     //Travel from neutral to both side 950 - 381 = 1519 - 950 = 1024 - 455 = 569
+#define PARAM_SV1_SW_REVERSE    0
+#define PARAM_SV2_SW_REVERSE    0
+#define PARAM_SV3_SW_REVERSE    0
+#define PARAM_SV4_SW_REVERSE    1
+#define PARAM_SV5_SW_REVERSE    1
+#define PARAM_SV6_SW_REVERSE    1
 typedef union {
     uint8_t ALL;
     struct {
@@ -352,6 +393,8 @@ union Err_msg_g{
 struct Data_CoaxSerovs {
     //User-defined
     uint8_t connected = 0;
+    uint8_t SW_Reversed = 0;
+    int16_t Position_Zero = 0;
     //Read from HiTech servo registry
     union Err_msg_g ErrorCode;          //REG_STATUS_FLAG
     int16_t Status_Velocity = 0;        //REG_VELOCITY
@@ -398,7 +441,8 @@ enum class CoaxState {
     CXSTATE_6_IDLERPM,
     CXSTATE_7_ONFLIGHT,
     CXSTATE_8_LANDED,
-    CXSTATE_F1_SERVOFAIL
+    CXSTATE_F1_SERVOFAIL,
+    CXSTATE_F2_GCS_FAIL_ON_GNDTEST
 };
 
 struct HiTechTestState {
@@ -414,6 +458,14 @@ struct SVErrorCode {
     uint8_t SV_Config_Error[6] = {0, };
     uint8_t SV_Vel_Set_Error[6] = {0, };
     uint8_t SV_Tq_Set_Error[6] = {0, };
+};
+
+struct failsafe {
+    uint8_t GCS_lost = 0;
+    uint8_t GCS_lost_prev = 0;
+    uint16_t GCS_FC_action_step = 0;    //mini state-machine step for GCS_Failsafe
+    uint8_t Should_Motor_Stop = 1;  //Should stop motor
+    uint8_t Motor_Stop_CMD = 0; //Motor stop command sent
 };
 
 class CoaxData
@@ -449,8 +501,35 @@ public:
     HiTechTestState SVTestState;
     SVErrorCode SVError;
 
-    //====State Machine
+    //====State Machine and Fail-safe
     CoaxState CX_State; //Coaxial State-machine state
+    failsafe Failsafe;
+
+    //====Collective Table for Lower Rotor (SV4 ~ SV6) => 2025.09.08
+    const float ColTable_LOW[11][4]  =  {{0.0,    1229.0, 1344.0, 1249.0  },
+                                         {2.0,    1164.0, 1284.0, 1190.0  },
+                                         {4.0,    1109.0, 1226.0, 1132.0  },
+                                         {6.0,    1061.0, 1171.0, 1077.0  },
+                                         {8.0,    1005.0, 1114.0, 1019.0  },
+                                         {10.0,   951.0,  1060.0, 961.0   },
+                                         {12.0,   899.0,  1008.0, 909.0   },
+                                         {14.0,   845.0,  954.0,  855.0   },
+                                         {16.0,   785.0,  894.0,  795.0   },
+                                         {18.0,   727.0,  838.0,  742.0   },
+                                         {20.0,   670.0,  781.0,  685.0   } };
+    //====Collective Table for Upper Rotor (SV1 ~ SV3)    
+    const float ColTable_UP[11][4]  =  { {0.0,    768.0,	875.0,	768.0   },
+                                         {2.0,    818.0,	913.0,	813.0   },
+                                         {4.1,    858.0,	953.0,	853.0   },
+                                         {6.0,    895.0,	990.0,	890.0   },
+                                         {8.0,    935.0,	1030.0,	930.0   },
+                                         {10.1,   977.0,	1072.0,	972.0   },
+                                         {12.0,   1013.0,	1108.0,	1008.0  },
+                                         {13.9,   1050.0,	1148.0,	1048.0  },
+                                         {15.9,   1092.0,	1190.0,	1090.0  },
+                                         {18.0,   1134.0,	1232.0,	1132.0  },
+                                         {19.9,   1176.0,	1274.0,	1174.0  }};
+
 private:
     CoaxData();
     

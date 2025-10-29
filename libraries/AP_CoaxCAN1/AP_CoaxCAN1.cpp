@@ -17,6 +17,8 @@ extern const AP_HAL::HAL& hal;
 #define DEBUG_CCB 0
 #define DEBUG_GCSCMD 1
 #define DEBUG_COAXSERVO 1
+
+#define P_CURRENT_SERVO_VEL     819     //changed from 4095 to 819
 // Table of user settable CAN bus parameters
 const AP_Param::GroupInfo AP_COAXCAN1::var_info[] = {
     // @Param: example
@@ -157,6 +159,28 @@ void AP_COAXCAN1::run(void)
     Check_INV_data();
     Check_CCB_data();
 
+    //failsafe code
+    if((cxdata().Failsafe.GCS_lost) && (!cxdata().Failsafe.GCS_lost_prev)) { //Detect Rising : GCS fail-safe first detected
+        //Testing code only applicable to Ground test mode
+        if(cxdata().INV_data.Rdy2useINV == 1) {
+            cxdata().Failsafe.GCS_FC_action_step = 0; //Step to 0
+            // cxdata().CX_State = CoaxState::CXSTATE_F2_GCS_FAIL_ON_GNDTEST; // Move servo to gcs-failsafe-at-ground-test mode
+            
+            //===Invoked Command
+            cxdata().Command_Received.NewCMD.bits.Motor_RPM = 1;
+            cxdata().Command_Received.Target_INV_RPM = 0;
+        }
+    } else if ((cxdata().Failsafe.GCS_lost) && (cxdata().Failsafe.GCS_lost_prev)) { //Continued GCS failsafe state
+        if((cxdata().INV_data.Rdy2useINV == 1) && (INV_GET_CMD.Ref1_RAW != 0)) { //
+            //===Invoked Command
+            cxdata().Command_Received.NewCMD.bits.Motor_RPM = 1;
+            cxdata().Command_Received.Target_INV_RPM = 0;
+        }
+    }
+    // else if((!cxdata().Failsafe.GCS_lost) && (cxdata().Failsafe.GCS_lost_prev)) { //Detect Falling : GCS fail-safe first detected
+    // }
+    cxdata().Failsafe.GCS_lost_prev = cxdata().Failsafe.GCS_lost;
+
     //from %8, loops 0~6 for servo, 7 for CCB and Inverter
     if(_AP_COAXCAN1_loop_cnt%8 == 7) { 
         //Inverter and CCB 
@@ -227,7 +251,7 @@ void AP_COAXCAN1::CoaxServoRun(void)
         case CoaxState::CXSTATE_2_WAIT :
             SV_Waiting_StateLoop(); //Enable this line for normal test
             //SV_Waiting_State_TESTLoop(); //Enable this line for temporary test
-            if(_AP_COAXCAN1_loop_cnt%4000 == 0) {
+            if(_AP_COAXCAN1_loop_cnt%8000 == 0) {
                 gcs().send_text(MAV_SEVERITY_INFO, "Servo Motor at Wait State");
             }
         break;
@@ -471,10 +495,10 @@ void AP_COAXCAN1::handleFrame(const AP_HAL::CANFrame& can_rxframe)
 
             _NewINV_msg = _NewINV_msg | 0x02;//bit1 : CC
 #if DEBUG_INVERTER == 1
-            gcs().send_text(MAV_SEVERITY_INFO, "INVGETCC : %u, %u, %u", 
-                INV_GET_CC.Gain_Kpc_RAW, INV_GET_CC.Gain_Kic_RAW, INV_GET_CC.Current_Limit);
-            gcs().send_text(MAV_SEVERITY_INFO, "Kpc %f, Kic %f", 
-                INV_GET_CC.Gain_Kpc, INV_GET_CC.Gain_Kic);
+            //gcs().send_text(MAV_SEVERITY_INFO, "INVGETCC : %u, %u, %u", 
+            //    INV_GET_CC.Gain_Kpc_RAW, INV_GET_CC.Gain_Kic_RAW, INV_GET_CC.Current_Limit);
+            gcs().send_text(MAV_SEVERITY_INFO, "INVCC Kpc %.2f, Kic %.2f, CL %u",
+                INV_GET_CC.Gain_Kpc, INV_GET_CC.Gain_Kic, INV_GET_CC.Current_Limit);
 #endif
             break;
         case RX_ID_INV_GET_SC:
@@ -498,11 +522,11 @@ void AP_COAXCAN1::handleFrame(const AP_HAL::CANFrame& can_rxframe)
 
             _NewINV_msg = _NewINV_msg | 0x04;//bit2 : SC
 #if DEBUG_INVERTER == 1
-            gcs().send_text(MAV_SEVERITY_INFO, "INVGETSC : %u, %u, %u, %u", 
-                INV_GET_SC.Gain_Kps_RAW, INV_GET_SC.Gain_Kis_RAW, 
-                INV_GET_SC.Theta_Offset_RAW, INV_GET_SC.Speed_Limit);
-            gcs().send_text(MAV_SEVERITY_INFO, "Kps %f, Kis %f, thoffset %f", 
-                INV_GET_SC.Gain_Kps, INV_GET_SC.Gain_Kis, INV_GET_SC.Theta_Offset);
+            // gcs().send_text(MAV_SEVERITY_INFO, "INVGETSC : %u, %u, %u, %u", 
+            //     INV_GET_SC.Gain_Kps_RAW, INV_GET_SC.Gain_Kis_RAW, 
+            //     INV_GET_SC.Theta_Offset_RAW, INV_GET_SC.Speed_Limit);
+            gcs().send_text(MAV_SEVERITY_INFO, "INVSC Kps %.2f, Kis %.2f, TO %.2f, SL %u", 
+                INV_GET_SC.Gain_Kps, INV_GET_SC.Gain_Kis, INV_GET_SC.Theta_Offset, INV_GET_SC.Speed_Limit);
 #endif
             break;
         case RX_ID_INV_GET_FLT:
@@ -995,9 +1019,9 @@ void AP_COAXCAN1::TX_INV_SETSC_MSG(void)
         return;
     }
 
-    INV_SET_SC.Gain_Kps_RAW = (uint16_t)(INV_SET_SC.Gain_Kps * 100);
-    INV_SET_SC.Gain_Kis_RAW = (uint16_t)(INV_SET_SC.Gain_Kis * 10);
-    INV_SET_SC.Theta_Offset_RAW = (uint16_t)(INV_SET_SC.Theta_Offset * 10);
+    INV_SET_SC.Gain_Kps_RAW = (uint16_t)(INV_SET_SC.Gain_Kps * 100.0);
+    INV_SET_SC.Gain_Kis_RAW = (uint16_t)(INV_SET_SC.Gain_Kis * 10.0);
+    INV_SET_SC.Theta_Offset_RAW = (uint16_t)(INV_SET_SC.Theta_Offset * 10.0);
     
     temp_data[0] = INV_SET_SC.Gain_Kps_RAW & 0x00FF;
     temp_data[1] = (INV_SET_SC.Gain_Kps_RAW >> 8) & 0x00FF;
@@ -1394,6 +1418,106 @@ void AP_COAXCAN1::Request_SVData(uint8_t id, uint8_t addrs) {
 #if DEBUG_COAXSERVO == 1
     //gcs().send_text(MAV_SEVERITY_INFO, "Req SVData to %u for %u", id, addrs);
 #endif
+}
+
+int16_t AP_COAXCAN1::round_to_i16(float v)
+{
+    long r = lroundf(v);
+    if (r > 32767)  r = 32767;
+    if (r < -32768) r = -32768;
+    return (int16_t)r;
+}
+
+int AP_COAXCAN1::ColTableLOW_LerpToI16(float x, int16_t* sv4, int16_t* sv5, int16_t* sv6)
+{
+    // Check Parameter
+    if (!sv4 || !sv5 || !sv6) return 1;
+
+    const int N = 11;
+    const float xmin = cxdata().ColTable_LOW[0][0];
+    const float xmax = cxdata().ColTable_LOW[N-1][0];
+
+    // Clamping min/max
+    if (x <= xmin) {
+        *sv4 = round_to_i16(cxdata().ColTable_LOW[0][1]);
+        *sv5 = round_to_i16(cxdata().ColTable_LOW[0][2]);
+        *sv6 = round_to_i16(cxdata().ColTable_LOW[0][3]);
+        return 1; // Min Clamp
+    }
+    if (x >= xmax) {
+        *sv4 = round_to_i16(cxdata().ColTable_LOW[N-1][1]);
+        *sv5 = round_to_i16(cxdata().ColTable_LOW[N-1][2]);
+        *sv6 = round_to_i16(cxdata().ColTable_LOW[N-1][3]);
+        return 2; // Max Clamp
+    }
+
+    // Lower-bound index i : cxdata().ColTable_LOW[i][0] <= x <= cxdata().ColTable_LOW[i+1][0]
+    int i = 0;
+    for (; i < N-1; ++i) {
+        if (cxdata().ColTable_LOW[i][0] <= x && x <= cxdata().ColTable_LOW[i+1][0]) {
+            break;
+        }
+    }
+
+    // Linear Interpolation
+    const float x0 = cxdata().ColTable_LOW[i][0];
+    const float x1 = cxdata().ColTable_LOW[i+1][0];
+    const float t  = (x - x0) / (x1 - x0); // 0..1
+
+    const float y1 = cxdata().ColTable_LOW[i][1]   + t * (cxdata().ColTable_LOW[i+1][1] - cxdata().ColTable_LOW[i][1]);
+    const float y2 = cxdata().ColTable_LOW[i][2]   + t * (cxdata().ColTable_LOW[i+1][2] - cxdata().ColTable_LOW[i][2]);
+    const float y3 = cxdata().ColTable_LOW[i][3]   + t * (cxdata().ColTable_LOW[i+1][3] - cxdata().ColTable_LOW[i][3]);
+
+    *sv4 = round_to_i16(y1);
+    *sv5 = round_to_i16(y2);
+    *sv6 = round_to_i16(y3);
+    return 0; // Normal output
+}
+
+int AP_COAXCAN1::ColTableUpper_LerpToI16(float x, int16_t* sv1, int16_t* sv2, int16_t* sv3)
+{
+    // Check Parameter
+    if (!sv1 || !sv2 || !sv3) return 1;
+
+    const int N = 11;
+    const float xmin = cxdata().ColTable_UP[0][0];
+    const float xmax = cxdata().ColTable_UP[N-1][0];
+
+    // Clamping min/max
+    if (x <= xmin) {
+        *sv1 = round_to_i16(cxdata().ColTable_UP[0][1]);
+        *sv2 = round_to_i16(cxdata().ColTable_UP[0][2]);
+        *sv3 = round_to_i16(cxdata().ColTable_UP[0][3]);
+        return 1; // Min Clamp
+    }
+    if (x >= xmax) {
+        *sv1 = round_to_i16(cxdata().ColTable_UP[N-1][1]);
+        *sv2 = round_to_i16(cxdata().ColTable_UP[N-1][2]);
+        *sv3 = round_to_i16(cxdata().ColTable_UP[N-1][3]);
+        return 2; // Max Clamp
+    }
+
+    // Lower-bound index i : cxdata().ColTable_UP[i][0] <= x <= cxdata().ColTable_UP[i+1][0]
+    int i = 0;
+    for (; i < N-1; ++i) {
+        if (cxdata().ColTable_UP[i][0] <= x && x <= cxdata().ColTable_UP[i+1][0]) {
+            break;
+        }
+    }
+
+    // Linear Interpolation
+    const float x0 = cxdata().ColTable_UP[i][0];
+    const float x1 = cxdata().ColTable_UP[i+1][0];
+    const float t  = (x - x0) / (x1 - x0); // 0..1
+
+    const float y1 = cxdata().ColTable_UP[i][1]   + t * (cxdata().ColTable_UP[i+1][1] - cxdata().ColTable_UP[i][1]);
+    const float y2 = cxdata().ColTable_UP[i][2]   + t * (cxdata().ColTable_UP[i+1][2] - cxdata().ColTable_UP[i][2]);
+    const float y3 = cxdata().ColTable_UP[i][3]   + t * (cxdata().ColTable_UP[i+1][3] - cxdata().ColTable_UP[i][3]);
+
+    *sv1 = round_to_i16(y1);
+    *sv2 = round_to_i16(y2);
+    *sv3 = round_to_i16(y3);
+    return 0; // Normal output
 }
 
 // Excecuted during CoaxState::CXSTATE_0_INIT to check all config parameters are correct, or to change parameters if needed
@@ -2308,8 +2432,8 @@ void AP_COAXCAN1::SV_Check_State(void)
                 }
             }
         break;
-        case 1 : //Set Position to Neutral
-            cxdata().SV_TX[tempSVID_0to5].SV_pos = cxdata().SV_state[tempSVID_0to5].Config_Pos_Neutral;
+        case 1 : //Set Position to Zero collective position
+            cxdata().SV_TX[tempSVID_0to5].SV_pos = cxdata().SV_state[tempSVID_0to5].Position_Zero;
             CMD_SET_POSITION(tempSVID_1to6, cxdata().SV_TX[tempSVID_0to5].SV_pos);
             //gcs().send_text(MAV_SEVERITY_INFO, "Preset SV %u Pos Neutral", tempSVID_1to6);
             if (cxdata().SVTestState.ServoTestingID < 6) {
@@ -2335,8 +2459,8 @@ void AP_COAXCAN1::SV_Check_State(void)
             }
         break;
         case 3 : //Set Action-Velocity
-            cxdata().SV_TX[tempSVID_0to5].SV_Vel = 4095;
-            Set_UINT_Config(tempSVID_1to6, REG_VELOCITY_NEW, 4095);
+            cxdata().SV_TX[tempSVID_0to5].SV_Vel = P_CURRENT_SERVO_VEL;    //4095 = 324deg/s , 819 = 65 deg/s
+            Set_UINT_Config(tempSVID_1to6, REG_VELOCITY_NEW, P_CURRENT_SERVO_VEL);
             //gcs().send_text(MAV_SEVERITY_INFO, "Set SV %u Max Vel", tempSVID_1to6);
             if (cxdata().SVTestState.ServoTestingID < 6) {
                 cxdata().SVTestState.ServoTestingID++;
@@ -2353,8 +2477,8 @@ void AP_COAXCAN1::SV_Check_State(void)
                 cxdata().SVTestState.SVDataRequested = 1;
             } else {
                 if ( (NewServoMessages) && (_new_SVmsg_ID == REG_POSITION_NEW) && (_new_MSG_SVID == tempSVID_1to6) ) {
-                    if(cxdata().SV_TXPos_feedback[tempSVID_0to5] == cxdata().SV_state[tempSVID_0to5].Config_Pos_Neutral) {
-                        gcs().send_text(MAV_SEVERITY_INFO, "SV %u Neutral Preset OK", tempSVID_1to6);
+                    if(cxdata().SV_TXPos_feedback[tempSVID_0to5] == cxdata().SV_state[tempSVID_0to5].Position_Zero) {
+                        gcs().send_text(MAV_SEVERITY_INFO, "SV %u Zero Preset OK", tempSVID_1to6);
                     } else {
                         gcs().send_text(MAV_SEVERITY_INFO, "Abnormal Servo %u", tempSVID_1to6);
                         cxdata().SVError.SV_Config_Error[tempSVID_0to5] = 1;
@@ -2488,48 +2612,141 @@ void AP_COAXCAN1::SV_Check_State(void)
 
 // From 400Hz loop, tick 1~6 for send position, 7 for reading state, 8 for rest to allow INV and CCB comm.
 // cxdata().Swash_CMD.Col to SV_TX diff
+#define TEST_SET 1
 void AP_COAXCAN1::SV_Waiting_StateLoop(void) {
     static uint8_t IndexLoop = 0;   //0~7 loop
     static uint8_t StateLoop = 0;   //0 ~5 loop
     static uint8_t CheckSV_ID = 1;  //1~6 loop
-    int16_t tempint16;
-
+    float collective_deg;
+    int16_t SV1, SV2, SV3, SV4, SV5, SV6;
+    //int16_t tempint16;
+    //int16_t tmp_neutral, tmp_start, tmp_end;
+    //uint8_t tempSVID_0to5; //ID for array codes of servos which starts from 0
+    //uint8_t tempSVID_1to6; //ID for physical servos which starts from 1
+        
+#if TEST_SET == 2
+    int16_t tmp_outRT;
+#endif
+    // cxdata().SV_state[0].SW_Reversed = 0;
+    // cxdata().SV_state[1].SW_Reversed = 0;
+    // cxdata().SV_state[2].SW_Reversed = 0;
+    // cxdata().SV_state[3].SW_Reversed = 1;
+    // cxdata().SV_state[4].SW_Reversed = 1;
+    // cxdata().SV_state[5].SW_Reversed = 1;
     if(IndexLoop < 6) {
         if(IndexLoop == 0) {
             //Step 1 Test : servo to collective pitch formulae 
-            tempint16 = (int16_t)(cxdata().Swash_CMD.Col * 100);
-            tempint16 = constrain_int16(tempint16, -PARAM_TRAVEL_ONEWAY, PARAM_TRAVEL_ONEWAY);
-            cxdata().SV_TX[0].SV_pos = constrain_int16((tempint16 + PARAM_SV1_POS_NEUTRAL), cxdata().SV_state[0].Config_Pos_Start, cxdata().SV_state[0].Config_Pos_End);
-            cxdata().SV_TX[1].SV_pos = constrain_int16((tempint16 + PARAM_SV2_POS_NEUTRAL), cxdata().SV_state[1].Config_Pos_Start, cxdata().SV_state[1].Config_Pos_End);
-            cxdata().SV_TX[2].SV_pos = constrain_int16((tempint16 + PARAM_SV3_POS_NEUTRAL), cxdata().SV_state[2].Config_Pos_Start, cxdata().SV_state[2].Config_Pos_End);
-            cxdata().SV_TX[3].SV_pos = constrain_int16((-tempint16 + PARAM_SV4_POS_NEUTRAL), cxdata().SV_state[3].Config_Pos_Start, cxdata().SV_state[3].Config_Pos_End);
-            cxdata().SV_TX[4].SV_pos = constrain_int16((-tempint16 + PARAM_SV5_POS_NEUTRAL), cxdata().SV_state[4].Config_Pos_Start, cxdata().SV_state[4].Config_Pos_End);
-            cxdata().SV_TX[5].SV_pos = constrain_int16((-tempint16 + PARAM_SV6_POS_NEUTRAL), cxdata().SV_state[5].Config_Pos_Start, cxdata().SV_state[5].Config_Pos_End);
+            // tempint16 = (int16_t)(cxdata().Swash_CMD.Col * 100);
+            // tempint16 = constrain_int16(tempint16, -PARAM_TRAVEL_ONEWAY, PARAM_TRAVEL_ONEWAY);
+            //=====Rigging Code Part 1 : Lower Rotor SV4~SV6
+            // cxdata().SV_TX[0].SV_pos = constrain_int16((PARAM_SV1_POS_NEUTRAL + tempint16), cxdata().SV_state[0].Config_Pos_Start, cxdata().SV_state[0].Config_Pos_End);
+            // cxdata().SV_TX[1].SV_pos = constrain_int16((PARAM_SV2_POS_NEUTRAL + tempint16), cxdata().SV_state[1].Config_Pos_Start, cxdata().SV_state[1].Config_Pos_End);
+            // cxdata().SV_TX[2].SV_pos = constrain_int16((PARAM_SV3_POS_NEUTRAL + tempint16), cxdata().SV_state[2].Config_Pos_Start, cxdata().SV_state[2].Config_Pos_End);
+            // cxdata().SV_TX[3].SV_pos = constrain_int16((PARAM_SV4_POS_NEUTRAL - tempint16 + (int16_t)(cxdata().Swash_CMD.Lon * 100)), cxdata().SV_state[3].Config_Pos_Start, cxdata().SV_state[3].Config_Pos_End);
+            // cxdata().SV_TX[4].SV_pos = constrain_int16((PARAM_SV5_POS_NEUTRAL - tempint16 + (int16_t)(cxdata().Swash_CMD.Lat * 100)), cxdata().SV_state[4].Config_Pos_Start, cxdata().SV_state[4].Config_Pos_End);
+            // cxdata().SV_TX[5].SV_pos = constrain_int16((PARAM_SV6_POS_NEUTRAL - tempint16 + (int16_t)(cxdata().Swash_CMD.Rud * 100)), cxdata().SV_state[5].Config_Pos_Start, cxdata().SV_state[5].Config_Pos_End);
             
-            // May get control output from AP_MotorsHeli_Dual::move_actuators()
-            //cxdata().SV_Pos[x].CtrlOut is set with _servo_out[CH_x] for CH_1 ~ CH_6
+            //=====Rigging Code Part 2 : Lower Rotor SV1~SV3
+            // cxdata().SV_TX[0].SV_pos = constrain_int16((PARAM_SV1_POS_NEUTRAL + tempint16 + (int16_t)(cxdata().Swash_CMD.Lon * 100)), cxdata().SV_state[0].Config_Pos_Start, cxdata().SV_state[0].Config_Pos_End);
+            // cxdata().SV_TX[1].SV_pos = constrain_int16((PARAM_SV2_POS_NEUTRAL + tempint16 + (int16_t)(cxdata().Swash_CMD.Lat * 100)), cxdata().SV_state[1].Config_Pos_Start, cxdata().SV_state[1].Config_Pos_End);
+            // cxdata().SV_TX[2].SV_pos = constrain_int16((PARAM_SV3_POS_NEUTRAL + tempint16 + (int16_t)(cxdata().Swash_CMD.Rud * 100)), cxdata().SV_state[2].Config_Pos_Start, cxdata().SV_state[2].Config_Pos_End);
+            // cxdata().SV_TX[3].SV_pos = constrain_int16((PARAM_SV4_POS_NEUTRAL - tempint16), cxdata().SV_state[3].Config_Pos_Start, cxdata().SV_state[3].Config_Pos_End);
+            // cxdata().SV_TX[4].SV_pos = constrain_int16((PARAM_SV5_POS_NEUTRAL - tempint16), cxdata().SV_state[4].Config_Pos_Start, cxdata().SV_state[4].Config_Pos_End);
+            // cxdata().SV_TX[5].SV_pos = constrain_int16((PARAM_SV6_POS_NEUTRAL - tempint16), cxdata().SV_state[5].Config_Pos_Start, cxdata().SV_state[5].Config_Pos_End);
+
+            //Step 2 Test : Table Look-up code
+            collective_deg = constrain_float( cxdata().Swash_CMD.Col, 1.0, 19.0);
+            ColTableUpper_LerpToI16(collective_deg, &SV1, &SV2, &SV3);
+            ColTableLOW_LerpToI16(collective_deg, &SV4, &SV5, &SV6);
+            cxdata().SV_TX[0].SV_pos = constrain_int16(SV1, cxdata().SV_state[0].Config_Pos_Start, cxdata().SV_state[0].Config_Pos_End);
+            cxdata().SV_TX[1].SV_pos = constrain_int16(SV2, cxdata().SV_state[1].Config_Pos_Start, cxdata().SV_state[1].Config_Pos_End);
+            cxdata().SV_TX[2].SV_pos = constrain_int16(SV3, cxdata().SV_state[2].Config_Pos_Start, cxdata().SV_state[2].Config_Pos_End);
+            cxdata().SV_TX[3].SV_pos = constrain_int16(SV4, cxdata().SV_state[3].Config_Pos_Start, cxdata().SV_state[3].Config_Pos_End);
+            cxdata().SV_TX[4].SV_pos = constrain_int16(SV5, cxdata().SV_state[4].Config_Pos_Start, cxdata().SV_state[4].Config_Pos_End);
+            cxdata().SV_TX[5].SV_pos = constrain_int16(SV6, cxdata().SV_state[5].Config_Pos_Start, cxdata().SV_state[5].Config_Pos_End);
+
         }
+    
+    //=====Tested but not applied : 2nd order formulae
+    // if(IndexLoop < 6) {
+    //     tempSVID_0to5 = IndexLoop;
+    //     tempSVID_1to6 = tempSVID_0to5 + 1;
+    //     tmp_neutral = cxdata().SV_state[tempSVID_0to5].Position_Zero;   //Position_Zero or Config_Pos_Neutral
+    //     tmp_start = cxdata().SV_state[tempSVID_0to5].Config_Pos_Start;
+    //     tmp_end = cxdata().SV_state[tempSVID_0to5].Config_Pos_End;
+    //     if(tempSVID_1to6 < 4) {
+    //         tempint16 = (int16_t)(-0.278 * cxdata().Swash_CMD.Col * cxdata().Swash_CMD.Col + 19.944 * cxdata().Swash_CMD.Col);
+    //     } else {
+    //         tempint16 = (int16_t)(0.3333 * cxdata().Swash_CMD.Col * cxdata().Swash_CMD.Col - 34.333 * cxdata().Swash_CMD.Col);
+    //     }
+    //     //SW reverser is not applied if we use direct formulae of collective to servo pos
+    //     cxdata().SV_TX[tempSVID_0to5].SV_pos = constrain_int16((tmp_neutral + tempint16), tmp_start, tmp_end);
+        
+
+#if TEST_SET == 1
+
+#endif
+        // if(IndexLoop == 0) {
+// #if TEST_SET == 1   //Step 1 Test : servo to collective pitch formulae 
+//             tempint16 = (int16_t)(cxdata().Swash_CMD.Col * 100);
+            
+//             for (int i = 0; i < 6 ; i++) {
+//                 tmp_neutral = cxdata().SV_state[i].Position_Zero;   //Position_Zero or Config_Pos_Neutral
+//                 tmp_start = cxdata().SV_state[i].Config_Pos_Start;
+//                 tmp_end = cxdata().SV_state[i].Config_Pos_End;
+//                 if(cxdata().SV_state[i].SW_Reversed) {
+//                     cxdata().SV_TX[i].SV_pos = constrain_int16((tmp_neutral - tempint16), tmp_start, tmp_end);
+//                 } else {
+//                     cxdata().SV_TX[i].SV_pos = constrain_int16((tmp_neutral + tempint16), tmp_start, tmp_end);
+//                 }
+//             }
+// #endif
+            // Step 2 Test : Get control output from AP_MotorsHeli_Dual::move_actuators()
+            //cxdata().SV_Pos[x].CtrlOut is set with _servo_out[CH_x] for CH_1 ~ CH_6
+            // for (int i = 0; i < 6; i++){
+            //     tmp_outRT = cxdata().SV_Pos[i].CtrlOut;
+                // tmp_neutral = cxdata().SV_state[i].Config_Pos_Neutral;
+                // tmp_start = cxdata().SV_state[i].Config_Pos_Start;
+                // tmp_end = cxdata().SV_state[i].Config_Pos_End;
+            //     if( ( tmp_outRT < 1.0) && (tmp_outRT > -1.0)) {
+            //         
+            //         if(cxdata().SV_state[i].SW_Reversed) {
+            //             cxdata().SV_TX[i].SV_pos = tmp_neutral - 0.5 * (tmp_end - tmp_start) * tmp_outRT;
+            //         } else {
+            //             cxdata().SV_TX[i].SV_pos = 0.5 * (tmp_end - tmp_start) * tmp_outRT + tmp_neutral;
+            //         }
+            //     }
+            // }
+            
+        // }
+#if TEST_SET != 2
         CMD_SET_POSITION((IndexLoop+1),cxdata().SV_TX[IndexLoop].SV_pos);
+#endif
     } else if (IndexLoop == 6) {
         switch (StateLoop)
         {
             case 0 :
-                Request_SVData(CheckSV_ID, REG_STATUS_FLAG);
+                // Request_SVData(CheckSV_ID, REG_STATUS_FLAG);
+                Request_SVData(CheckSV_ID, REG_POSITION);
             break;
             case 1 :
                 Request_SVData(CheckSV_ID, REG_POSITION);
             break;
             case 2 :
-                Request_SVData(CheckSV_ID, REG_VELOCITY);
+                // Request_SVData(CheckSV_ID, REG_VELOCITY);
+                Request_SVData(CheckSV_ID, REG_POSITION);
             break;
             case 3 :
-                Request_SVData(CheckSV_ID, REG_TORQUE);
+                // Request_SVData(CheckSV_ID, REG_TORQUE);
+                Request_SVData(CheckSV_ID, REG_POSITION);
             break;
             case 4 :
-                Request_SVData(CheckSV_ID, REG_MCU_TEMP);
+                // Request_SVData(CheckSV_ID, REG_MCU_TEMP);
+                Request_SVData(CheckSV_ID, REG_POSITION);
             break;
             case 5 :
-                Request_SVData(CheckSV_ID, REG_MOTOR_TEMP);
+                // Request_SVData(CheckSV_ID, REG_MOTOR_TEMP);
+                Request_SVData(CheckSV_ID, REG_POSITION);
             break;
             default :
             break;

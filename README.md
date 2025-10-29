@@ -1,10 +1,19 @@
 # Coaxial Rotor Heli Project
 
 @ Main Code Branch : CoaxialV2   
-@ Sub Code Branch : LoadCell_4p2p2
+@ Sub Code Branch : LoadCell_4p2p2, LoadCell_4p6p2
 ***
 
 ## Version History
+- V0.01.41 Grount test version updates 
++ GCS failsafe event will stop motor by resetting RPM command of the inverter to zero value.  
++ Enabled inverter control parameter change from GCS
++ Enabled data logging. Changed CCB loging terms. Added servo motor logging terms.  
++ Collective pitch control is using table look-up method. Servo reverse is modified with software reverse  
++ Properly shows Motor_Aligned flag of the inverter  
++ Servo motor(HiTech) control is modifed by reducing velocity value and maximizing position slope to increase torque  
++ Temporarily disabling all HiTech state feedback except position.
+
 - V0.01.40 Improving CoaxCAN1 loop. Added SV_Waiting_StateLoop() to get GCS command for collective. 
 - V0.01.39 CoaxCAN1 loop changed from 200Hz to 400Hz to realize maximum servo control rate. Inverter has changed from 10Hz to 5Hz, CCB remains 1Hz
 - V0.01.38 Communicating with HiTech servos with CAN protocol through CCB board. CCB board will relay CAN frames to RS-485 to servos. Also some Mavlink messages are changed.

@@ -1191,7 +1191,7 @@ MAV_RESULT GCS_MAVLINK_Copter::handle_command_INVERTER_OPTION(const mavlink_comm
             cxdata().Command_Received.INVSetValue.Gain_Kic = msg.param3;
             cxdata().Command_Received.INVSetValue.Current_Limit = (uint16_t)msg.param4;
 
-            gcs().send_text(MAV_SEVERITY_INFO, "Got 61111 %u %f %f %u", mode, msg.param2, msg.param3, (uint16_t)msg.param4);
+            gcs().send_text(MAV_SEVERITY_INFO, "SetCC, Kpc=%.2f, Kic=%.2f, CL=%u", msg.param2, msg.param3, (uint16_t)msg.param4);
             break;
         case 1 :
             cxdata().Command_Received.NewCMD.bits.Set_SC = 1;
@@ -1200,7 +1200,7 @@ MAV_RESULT GCS_MAVLINK_Copter::handle_command_INVERTER_OPTION(const mavlink_comm
             cxdata().Command_Received.INVSetValue.Theta_Offset = msg.param4;
             cxdata().Command_Received.INVSetValue.Speed_Limit = (uint16_t)msg.param5;
 
-            gcs().send_text(MAV_SEVERITY_INFO, "Got 61111 %u %f %f %f %u", mode, msg.param2, msg.param3, msg.param4, (uint16_t)msg.param5);
+            gcs().send_text(MAV_SEVERITY_INFO, "SetSC Kps=%.2f, Kis=%.2f, TO=%.2f, SL=%u", msg.param2, msg.param3, msg.param4, (uint16_t)msg.param5);
             break;
         case 2 :
             cxdata().Command_Received.NewCMD.bits.Set_FLT = 1;
