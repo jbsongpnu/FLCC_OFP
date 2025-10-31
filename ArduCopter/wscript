@@ -25,7 +25,12 @@ def build(bld):
             'AP_Devo_Telem',
             'AC_AutoTune',
             'AP_KDECAN',
-            'AP_SurfaceDistance'
+            'AP_SurfaceDistance',
+#  ==================================================================================
+#  KAL OFP Firmware version : UNCLASSIFIED
+#  ==================================================================================
+            'AP_Q30',
+            'AP_PMUCAN',
         ],
     )
 

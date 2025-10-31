@@ -6684,5 +6684,85 @@
       <field type="int16_t" name="temperature" units="cdegC">Temperature</field>
       <field type="uint16_t" name="humidity" units="c%">Humidity</field>
     </message>
-  </messages>
-</mavlink>
+
+<!-- ================================================================================== -->
+<!-- KAL OFP Firmware version : UNCLASSIFIED                                            -->
+<!-- ================================================================================== -->
+
+   <!-- TC -->
+    <message id="50001" name="SYS_ICD_GCS_FLCC_PMU_CTRL">
+    <description>TC1 (PMU).</description>
+      <field type="uint8_t" name="Engine_OnOff" units="N/A">Engine_OnOff[SF:N/A, MIN:N/A, MAX:N/A]</field>
+      <field type="uint8_t" name="Battery_Control_CMD" units="%">Battery_Control_CMD[SF:1, MIN:0, MAX:100]</field>
+      <field type="uint8_t" name="Engine_Manual" units="N/A">Engine_Manual[SF:N/A, MIN:N/A, MAX:N/A]</field>
+      <field type="uint8_t" name="Engine_Throttle_CMD" units="%">Engine_Throttle_CMD[SF:1, MIN:0, MAX:100]</field>
+      <field type="uint8_t" name="Engine_CHK_CMD" units="N/A">Engine_CHK_CMD[SF:N/A, MIN:N/A, MAX:N/A]</field>
+    </message>
+
+    <message id="50002" name="SYS_ICD_GCS_FLCC_CAM_CMD">
+    <description>TC2 (CAM).</description>
+      <field type="int16_t" name="Roll_Speed_CMD" units="deg/s">Roll_Speed_CMD[SF:N/A, MIN:-60, MAX:60]</field>
+      <field type="int16_t" name="Roll_Angle_CMD" units="deg">Roll_Angle_CMD[SF:N/A, MIN:-85, MAX:85]</field>
+      <field type="int16_t" name="Pitch_Speed_CMD" units="deg/s">Pitch_Speed_CMD[SF:N/A, MIN:-60, MAX:60]</field>
+      <field type="int16_t" name="Pitch_Angle_CMD" units="deg">Pitch_Angle_CMD[SF:N/A, MIN:-90, MAX:90]</field>
+      <field type="int16_t" name="Yaw_Speed_CMD" units="deg/s">Yaw_Speed_CMD[SF:N/A, MIN:-60, MAX:60]</field>
+      <field type="int16_t" name="Yaw_Angle_CMD" units="deg">Yaw_Angle_CMD[SF:N/A, MIN:-150, MAX:150]</field>
+      <field type="uint8_t" name="Control_Mode" units="N/A">Control_Mode[SF:N/A, MIN:N/A, MAX:N/A]</field>
+      <field type="uint8_t" name="Zoom_Focus_Stop_CMD" units="N/A">Zoom_Focus_Stop_CMD[SF:N/A, MIN:N/A, MAX:N/A]</field>
+      <field type="uint8_t" name="Shutter_CMD" units="N/A">Shutter_CMD[SF:N/A, MIN:N/A, MAX:N/A]</field>
+      <field type="uint8_t" name="Tracking_CMD" units="N/A">Tracking_CMD[SF:N/A, MIN:N/A, MAX:N/A]</field>
+    </message>
+
+   <!-- TM -->
+    <message id="51001" name="SYS_ICD_FLCC_GCS_PMU_STATUS">
+    <description>TM1 (PMU).</description>
+      <field type="uint32_t" name="Engine_Hour_Count" units="s">Engine_Hour_Count[SF:N/A, MIN:TBD, MAX:TBD]</field>
+      <field type="uint32_t" name="Date" units="bcd">Date[SF:N/A, MIN:N/A, MAX:N/A]</field>
+      <field type="int16_t" name="Battery_Current" units="A">Battery_Current[SF:0.1, MIN:TBD, MAX:TBD]</field>
+      <field type="int16_t" name="Battery_Temp" units="degC">Battery_Temp[SF:0.1, MIN:TBD, MAX:TBD]</field>
+      <field type="uint16_t" name="Battery_Status" units="N/A">Battery_Status[SF:N/A, MIN:TBD, MAX:TBD]</field>
+      <field type="uint16_t" name="Engine_RPM" units="rpm">Engine_RPM[SF:1, MIN:0, MAX:8000]</field>
+      <field type="int16_t" name="Engine_Head1_Temp" units="degC">Engine_Head1_Temp[SF:0.1, MIN:-20, MAX:250]</field>
+      <field type="int16_t" name="Engine_Head2_Temp" units="degC">Engine_Head2_Temp[SF:0.1, MIN:-20, MAX:250]</field>
+      <field type="int16_t" name="Battery_Quantity_Command" units="%">Battery_Quantity_Command[SF:0.1, MIN:TBD, MAX:TBD]</field>
+      <field type="int16_t" name="System_Voltage" units="V">System_Voltage[SF:0.1, MIN:TBD, MAX:TBD]</field>
+      <field type="int16_t" name="Load_Current" units="A">Load_Current[SF:0.1, MIN:TBD, MAX:TBD]</field>
+      <field type="int16_t" name="Current_Control_Command" units="N/A">Current_Control_Command[SF:N/A, MIN:TBD, MAX:TBD]</field>
+      <field type="int16_t" name="PMU_Temp" units="degC">PMU_Temp[SF:0.1, MIN:TBD, MAX:TBD]</field>
+      <field type="uint16_t" name="PMU_Status" units="N/A">PMU_Status[SF:N/A, MIN:N/A, MAX:N/A]</field>
+      <field type="int8_t" name="Throttle_Position_Report" units="%">Throttle_Position_Report[SF:1, MIN:0, MAX:100]</field>
+      <field type="int8_t" name="Fuel_Quantity" units="%">Fuel_Quantity[SF:1, MIN:0, MAX:100]</field>
+      <field type="int8_t" name="Version_Sub_Number" units="N/A">Version_Sub_Number[SF:N/A, MIN:N/A, MAX:N/A]</field>
+      <field type="int8_t" name="Version_Main_Number" units="N/A">Version_Main_Number[SF:N/A, MIN:N/A, MAX:N/A]</field>
+      <field type="int8_t" name="Version_FLCC_Sub_Number" units="N/A">Version_FLCC_Sub_Number[SF:N/A, MIN:N/A, MAX:N/A]</field>
+      <field type="int8_t" name="Version_FLCC_Main_Number" units="N/A">Version_FLCC_Main_Number[SF:N/A, MIN:N/A, MAX:N/A]</field>
+      <field type="int8_t" name="Version_FLCC_REV_Number" units="N/A">Version_FLCC_REV_Number[SF:N/A, MIN:N/A, MAX:N/A]</field>
+      <field type="int8_t" name="Version_REV_Number" units="N/A">Version_REV_Number[SF:N/A, MIN:N/A, MAX:N/A]</field>
+    </message>
+
+    <message id="51002" name="SYS_ICD_FLCC_GCS_CAM_ATTITUDE_STATUS">
+    <description>TM2 (CAM).</description>
+      <field type="int32_t" name="Roll_REL_ANG" units="deg">Roll_REL_ANG[SF:0.1, MIN:-180, MAX:180]</field>
+      <field type="int32_t" name="Pitch_REL_ANG" units="deg">Pitch_REL_ANG[SF:0.1, MIN:-180, MAX:180]</field>
+      <field type="int32_t" name="Yaw_REL_ANG" units="deg">Yaw_REL_ANG[SF:0.1, MIN:-180, MAX:180]</field>
+      <field type="int16_t" name="Roll_IMU_ANG" units="deg">Roll_IMU_ANG[SF:0.1, MIN:-180, MAX:180]</field>
+      <field type="int16_t" name="Roll_RC_Target_ANG" units="deg">Roll_RC_Target_ANG[SF:0.1, MIN:-180, MAX:180]</field>
+      <field type="int16_t" name="Pitch_IMU_ANG" units="deg">Pitch_IMU_ANG[SF:0.1, MIN:-180, MAX:180]</field>
+      <field type="int16_t" name="Pitch_RC_Target_ANG" units="deg">Pitch_RC_Target_ANG[SF:0.1, MIN:-180, MAX:180]</field>
+      <field type="int16_t" name="Yaw_IMU_ANG" units="deg">Yaw_IMU_ANG[SF:0.1, MIN:-180, MAX:180]</field>
+      <field type="int16_t" name="Yaw_RC_Target_ANG" units="deg">Yaw_RC_Target_ANG[SF:0.1, MIN:-180, MAX:180]</field>
+      <field type="int8_t" name="Zoom_POS_FB" units="N/A">Zoom_POS_FB[SF:1, MIN:1, MAX:30]</field>
+    </message>
+
+    <message id="51003" name="SYS_ICD_GCS_FLCC_PMU_CTRL_ECHO">
+    <description>TM3 (ED).</description>
+      <field type="uint8_t" name="Engine_OnOff_Echo" units="N/A">Engine_OnOff_Echo[SF:N/A, MIN:TBD, MAX:TBD]</field>
+      <field type="uint8_t" name="Battery_Control_CMD_Echo" units="%">Battery_Control_CMD_Echo[SF:1, MIN:0, MAX:100]</field>
+      <field type="uint8_t" name="Engine_Manual_Echo" units="N/A">Engine_Manual_Echo[SF:N/A, MIN:TBD, MAX:TBD]</field>
+      <field type="uint8_t" name="Engine_Throttle_CMD_Echo" units="%">Engine_Throttle_CMD_Echo[SF:1, MIN:0, MAX:100]</field>
+      <field type="uint8_t" name="Engine_CHK_CMD_Echo" units="N/A">Engine_CHK_CMD_Echo[SF:N/A, MIN:TBD, MAX:TBD]</field>
+      <field type="uint8_t" name="Componet_ID" units="N/A">Componet[SF:N/A, MIN:0, MAX:255]</field>
+      <field type="uint8_t" name="PMUCAN_Fail" units="N/A">PMUCAN_Fail[SF:N/A, MIN:0, MAX:5]</field>
+      <field type="uint32_t" name="Reserved" units="N/A">Reserved[SF:TBD, MIN:TBD, MAX:TBD]</field>
+    </message>
+    <!-- KAL -->
