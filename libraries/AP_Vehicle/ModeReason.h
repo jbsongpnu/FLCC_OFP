@@ -73,4 +73,8 @@ enum class ModeReason : uint8_t {
   AUX_FUNCTION = 53,
   FIXED_WING_AUTOLAND = 54,
   FENCE_REENABLE = 55,
+// ==================================================================================
+// KAL OFP Firmware version : UNCLASSIFIED
+// ==================================================================================
+  FAILSAFE_PMU                                  = 56,     // PMU Failsafe Error Code (KAL) : previously, 51
 };

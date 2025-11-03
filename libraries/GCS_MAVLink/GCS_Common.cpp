@@ -76,6 +76,11 @@
 #include <AP_Notify/AP_Notify.h>
 #include <AP_Vehicle/AP_Vehicle_config.h>
 
+// ==================================================================================
+// KAL OFP Firmware version : UNCLASSIFIED
+// ==================================================================================
+#include <AP_Q30/AP_Q30.h>
+
 #include <stdio.h>
 
 #if AP_RADIO_ENABLED
@@ -128,6 +133,29 @@ GCS *GCS::_singleton = nullptr;
 
 GCS_MAVLINK_InProgress GCS_MAVLINK_InProgress::in_progress_tasks[1];
 uint32_t GCS_MAVLINK_InProgress::last_check_ms;
+
+// ==================================================================================
+// KAL OFP Firmware version : UNCLASSIFIED
+// ==================================================================================
+// Define variables for CAM & PMU (KAL)
+extern int32_t tracking_counter;                                            // Tracking Counter for CAM (KAL)
+extern uint32_t CAM_Scheduler_Count;                                        // Scheduler Counter for CAM (KAL)
+extern uint8_t debug_cam_gimbal_cmd;                                        // Gimbal status for logging (KAL)
+extern uint8_t debug_cam_zoom_cmd;                                          // Zoom status for logging (KAL)
+extern uint8_t debug_cam_focus_cmd;                                         // Focus status for logging (KAL)
+extern uint8_t debug_cam_record_cmd;                                        // Record status for logging (KAL)
+extern uint8_t debug_cam_track_cmd;                                         // Tracking status for logging (KAL)
+extern uint8_t debug_cam_ir_cmd;                                            // IR status for logging (KAL)
+
+
+extern mavlink_sys_icd_gcs_flcc_cam_cmd_t               PREV_CAM_CMD;       // Backup CAM_CMD (KAL)
+extern mavlink_sys_icd_flcc_gcs_cam_attitude_status_t   CAM_ATTITUDE_STATUS;// MAVLINK Message for CAM (KAL)
+
+extern mavlink_sys_icd_flcc_gcs_pmu_status_t            PMU_Status;         // MAVLINK Message for PMU Status (KAL)
+extern mavlink_sys_icd_gcs_flcc_pmu_ctrl_echo_t         PMU_Ctrl_Echo;      // MAVLINK Message for PMU Command ECHO (KAL)
+
+extern struct TYPE_Q30_TARGET Q30_Target;
+// END KAL
 
 GCS_MAVLINK::GCS_MAVLINK(AP_HAL::UARTDriver &uart)
 {
@@ -4603,6 +4631,20 @@ void GCS_MAVLINK::handle_message(const mavlink_message_t &msg)
         handle_generator_message(msg);
         break;
 #endif
+    
+
+// ==================================================================================
+// KAL OFP Firmware version : OFP_Orange v1.99.1
+// Data  : 21/04/30 
+// ==================================================================================
+    case MAVLINK_MSG_ID_SYS_ICD_GCS_FLCC_PMU_CTRL:  // Receive Command to PMU Control (KAL)
+        handle_gcs_flcc_pmu_ctrl(msg);
+        break;
+
+    case MAVLINK_MSG_ID_SYS_ICD_GCS_FLCC_CAM_CMD:   // Receive Command to CAM Control (KAL)
+        handle_gcs_flcc_cam_cmd(msg);
+        break;
+
     }
 
 }
@@ -6704,6 +6746,24 @@ bool GCS_MAVLINK::try_send_message(const enum ap_message id)
         break;
 #endif
 
+// ==================================================================================
+// KAL OFP Firmware version : UNCLASSIFIED
+// ==================================================================================
+    case MSG_PMU_STATUS:                    // Send PMU Status to GCS (KAL)
+        CHECK_PAYLOAD_SIZE(SYS_ICD_FLCC_GCS_PMU_STATUS);
+        send_message_gcs_flcc_pmu_status();
+        break;
+
+    case MSG_CAM_STATUS:                    // Send CAM Status to GCS (KAL)
+        CHECK_PAYLOAD_SIZE(SYS_ICD_FLCC_GCS_CAM_ATTITUDE_STATUS);
+        send_message_gcs_flcc_cam_status();
+        break;
+
+    case MSG_PMU_CTRL_ECHO:                 // Send PMU_CMD Echo to GCS (KAL)
+        CHECK_PAYLOAD_SIZE(SYS_ICD_GCS_FLCC_PMU_CTRL_ECHO);
+        send_message_gcs_flcc_pmu_ctrl_echo();
+        break;
+
 #if HAL_HIGH_LATENCY2_ENABLED
     case MSG_HIGH_LATENCY2:
         CHECK_PAYLOAD_SIZE(HIGH_LATENCY2);
@@ -7513,5 +7573,350 @@ void GCS_MAVLINK::handle_radio_rc_channels(const mavlink_message_t &msg)
     AP::RC().handle_radio_rc_channels(&packet);
 }
 #endif // AP_RCPROTOCOL_MAVLINK_RADIO_ENABLED
+
+// ==================================================================================
+// KAL OFP Firmware version : OFP_Orange v1.99.1
+// Data  : 21/04/30 
+// ==================================================================================
+
+// -------------------------------------------------------------------------
+// Send CAM Status to GCS with Mavlink Message KAL
+// -------------------------------------------------------------------------
+#define GCS_DEBUG
+#ifdef GCS_DEBUG
+#define GCS_DEBUG_PRINT(...) gcs().send_text(__VA_ARGS__)
+#else
+#define GCS_DEBUG_PRINT(...)
+#endif
+
+// -------------------------------------------------------------------------
+// Send CAM Status to GCS with Mavlink Message
+// -------------------------------------------------------------------------
+void GCS_MAVLINK::send_message_gcs_flcc_cam_status() const
+{
+    uint16_t buffer[CAM_UART_BUFFER_SIZE] = {0};
+
+    uint8_t debug_cam_attitude_req=0U;
+    uint8_t debug_cam_zoom_pos_req=0U;
+
+    AP_Q30 *Q30 = AP::Q30();
+
+    // Send Command to CAM
+    switch (CAM_Scheduler_Count)
+    {
+    case 0:
+        Q30->get_cmd_angle();
+
+        debug_cam_attitude_req = 1U; //debug //0: not sent, 1: sent
+        break;
+
+    case 3:
+        Q30->get_cmd_zoom();
+
+        debug_cam_zoom_pos_req = 1U; //debug //0: not sent, 1: sent
+        break;
+
+    default:
+        break;
+    }
+
+    CAM_Scheduler_Count = (uint32_t)(CAM_Scheduler_Count + 1);
+    if (5 <= CAM_Scheduler_Count)
+    {
+        CAM_Scheduler_Count = 0U;
+    }
+
+
+    // Receive Data from CAM & Parse
+    int32_t recv_size = Q30->receive_cam_uart_data(buffer);
+
+    if (7 == recv_size)
+    {
+        Q30->parse_zoom_position(buffer);
+    }
+
+    if (59 <= recv_size)
+    {
+        Q30->parse_cam_angle(buffer);
+    }
+
+    // Debug
+    debug_cam_zoom_pos_req = debug_cam_zoom_pos_req + 1U;
+    debug_cam_attitude_req = debug_cam_attitude_req + 1U;
+
+    //temp debug test for V4.0.03 only
+    CAM_ATTITUDE_STATUS.Roll_REL_ANG = 1;
+    CAM_ATTITUDE_STATUS.Pitch_REL_ANG = 2;
+    CAM_ATTITUDE_STATUS.Yaw_REL_ANG = 3;
+    CAM_ATTITUDE_STATUS.Roll_IMU_ANG = 4;
+    CAM_ATTITUDE_STATUS.Roll_RC_Target_ANG = 5;
+    CAM_ATTITUDE_STATUS.Pitch_IMU_ANG = 6;
+    CAM_ATTITUDE_STATUS.Pitch_RC_Target_ANG = 7;
+    CAM_ATTITUDE_STATUS.Yaw_IMU_ANG = 8;
+    CAM_ATTITUDE_STATUS.Yaw_RC_Target_ANG = 9;
+    CAM_ATTITUDE_STATUS.Zoom_POS_FB = 10; //end of debugging test
+
+    mavlink_msg_sys_icd_flcc_gcs_cam_attitude_status_send(
+            chan,
+            CAM_ATTITUDE_STATUS.Roll_REL_ANG,	        // int32_t Roll_REL_ANG
+            CAM_ATTITUDE_STATUS.Pitch_REL_ANG,          // int32_t Pitch_REL_ANG
+            CAM_ATTITUDE_STATUS.Yaw_REL_ANG,            // int32_t Yaw_REL_ANG
+            CAM_ATTITUDE_STATUS.Roll_IMU_ANG,           // int16_t Roll_IMU_ANG
+            CAM_ATTITUDE_STATUS.Roll_RC_Target_ANG,     // int16_t Roll_RC_Target_ANG
+            CAM_ATTITUDE_STATUS.Pitch_IMU_ANG,          // int16_t Pitch_IMU_ANG
+            CAM_ATTITUDE_STATUS.Pitch_RC_Target_ANG,    // int16_t Pitch_RC_Target_ANG
+            CAM_ATTITUDE_STATUS.Yaw_IMU_ANG,            // int16_t Yaw_IMU_ANG
+            CAM_ATTITUDE_STATUS.Yaw_RC_Target_ANG,      // int16_t Yaw_RC_Target_ANG
+            CAM_ATTITUDE_STATUS.Zoom_POS_FB);           // int8_t Zoom_POS_FB
+
+    //Data Logging (KAL)
+    AP::logger().Write("TC_R","TimeUS,RRLA,PRLA,YRLA,RIMA,RRCA,PIMA,PRCA,YIMA,YRCA,ZPOS","Qiiihhhhhhb",
+        AP_HAL::micros64(),
+        CAM_ATTITUDE_STATUS.Roll_REL_ANG,	        // int32_t Roll_REL_ANG
+        CAM_ATTITUDE_STATUS.Pitch_REL_ANG,          // int32_t Pitch_REL_ANG
+        CAM_ATTITUDE_STATUS.Yaw_REL_ANG,            // int32_t Yaw_REL_ANG
+        CAM_ATTITUDE_STATUS.Roll_IMU_ANG,           // int16_t Roll_IMU_ANG
+        CAM_ATTITUDE_STATUS.Roll_RC_Target_ANG,     // int16_t Roll_RC_Target_ANG
+        CAM_ATTITUDE_STATUS.Pitch_IMU_ANG,          // int16_t Pitch_IMU_ANG
+        CAM_ATTITUDE_STATUS.Pitch_RC_Target_ANG,    // int16_t Pitch_RC_Target_ANG
+        CAM_ATTITUDE_STATUS.Yaw_IMU_ANG,            // int16_t Yaw_IMU_ANG
+        CAM_ATTITUDE_STATUS.Yaw_RC_Target_ANG,      // int16_t Yaw_RC_Target_ANG
+        CAM_ATTITUDE_STATUS.Zoom_POS_FB);           // int8_t Zoom_POS_FB
+
+}
+
+
+// -------------------------------------------------------------------------
+// Receive CAM Control Command from GCS with Mavlink Message
+// -------------------------------------------------------------------------
+void GCS_MAVLINK::handle_gcs_flcc_cam_cmd(const mavlink_message_t &msg)
+{
+    // Declare Variables
+    Vector3f angles_to_target_rad;
+
+    mavlink_sys_icd_gcs_flcc_cam_cmd_t  cam_cmd;
+    mavlink_msg_sys_icd_gcs_flcc_cam_cmd_decode(&msg, &cam_cmd);
+
+    AP_Q30 *Q30 = AP::Q30();
+
+    // Initialize Variables
+    debug_cam_gimbal_cmd    = 0U;
+    debug_cam_zoom_cmd      = 0U;
+    debug_cam_focus_cmd     = 0U;
+    debug_cam_record_cmd    = 0U;
+    debug_cam_track_cmd     = 0U;
+    debug_cam_ir_cmd        = 0U;
+
+    //For Test
+    //cam_cmd.Control_Mode = 3;
+
+    // Check the Control Mode for CAM
+    switch (cam_cmd.Control_Mode)
+    {
+        case 0: // No Control
+            Q30->no_control_mode_operation(cam_cmd);
+            break;
+
+        case 1: // Speed Control
+
+            // CAM flow stop code
+            if((cam_cmd.Roll_Speed_CMD!=0) || (cam_cmd.Pitch_Speed_CMD!=0) || (cam_cmd.Yaw_Speed_CMD!=0))
+            {
+                tracking_counter = 0U;
+                Q30->send_cmd_speed(cam_cmd);
+
+                debug_cam_gimbal_cmd = 1U;      // debug //0: not sent, 1: rate, 2: angle, 3: fix, 4: ROI
+            }
+            else if(tracking_counter == 0U)
+            {
+                tracking_counter = 1U;
+                Q30->send_cmd_hold_angle();     // hold cam angle
+
+                debug_cam_gimbal_cmd = 3U;      // debug //0: not sent, 1: rate, 2: angle, 3: fix, 4: ROI
+            }
+            //Note : debug example : gcs().send_text(MAV_SEVERITY_NOTICE,"Spd P %d Y %d", cam_cmd.Pitch_Speed_CMD, cam_cmd.Yaw_Speed_CMD);//JBS 23.11.08
+
+            break;
+
+        case 2: // Angle Control
+            // Due to error when checking roll/pitch/yaw state, send angle command directly - JBS 23.11.08
+            Q30->send_cmd_angle(cam_cmd);
+            debug_cam_gimbal_cmd = 2U;
+            //Note : debug example : gcs().send_text(MAV_SEVERITY_NOTICE,"Ang P %d Y %d", cam_cmd.Pitch_Angle_CMD, cam_cmd.Yaw_Angle_CMD);//JBS 23.11.08
+            //To Do : check previous code again after acquiring gimbal state is finished - JBS 23.11.08
+            /*if((abs(cam_cmd.Roll_Angle_CMD*10  - CAM_ATTITUDE_STATUS.Roll_REL_ANG)  > 10)
+            || (abs(cam_cmd.Pitch_Angle_CMD*10 - CAM_ATTITUDE_STATUS.Pitch_REL_ANG) > 10)
+            || (abs(cam_cmd.Yaw_Angle_CMD*10   - CAM_ATTITUDE_STATUS.Yaw_REL_ANG)   > 10))
+            {
+                tracking_counter = 0U;
+                Q30->send_cmd_angle(cam_cmd);
+
+                debug_cam_gimbal_cmd = 2U;      // debug //0: not sent, 1: rate, 2: angle, 3: fix, 4: ROI
+            }
+            else if(tracking_counter == 0U)
+            {
+                tracking_counter = 1U;
+                Q30->send_cmd_hold_angle();     // hold cam angle
+
+                debug_cam_gimbal_cmd = 3U;      // debug //0: not sent, 1: rate, 2: angle, 3: fix, 4: ROI
+            }*/
+
+            break;
+
+        case 3: // ROI Control
+
+            Q30->calc_angle_to_location(angles_to_target_rad);
+            Q30_Target.new_loc = false;
+
+            // Update Camera Control Command
+            cam_cmd.Pitch_Angle_CMD = angles_to_target_rad.y * RAD_TO_DEG;
+            cam_cmd.Yaw_Angle_CMD   = angles_to_target_rad.z * RAD_TO_DEG;
+
+            // Send Camera Control Command
+            // Cmd frequency
+            Q30->send_cmd_angle(cam_cmd);
+
+            debug_cam_gimbal_cmd = 4U;      // debug //0: not sent, 1: rate, 2: angle, 3: fix, 4: ROI
+
+            break;
+
+        default:
+            break;
+    }
+
+    // Control IR Function
+    Q30->IR_operation(cam_cmd);
+
+    // Log Data
+    AP::logger().Write("TC_C","TimeUS,RSPD,RAGL,PSPD,PANG,YSPD,YANG,CNTM,ZOOM,SHUT,TRAK","QhhhhhhBBBB",
+        AP_HAL::micros64(),
+        cam_cmd.Roll_Speed_CMD,
+        cam_cmd.Roll_Angle_CMD,
+        cam_cmd.Pitch_Speed_CMD,
+        cam_cmd.Pitch_Angle_CMD,
+        cam_cmd.Yaw_Speed_CMD,
+        cam_cmd.Yaw_Angle_CMD,
+        cam_cmd.Control_Mode,
+        cam_cmd.Zoom_Focus_Stop_CMD,
+        cam_cmd.Shutter_CMD,
+        cam_cmd.Tracking_CMD);
+
+    AP::logger().Write("CM_C","TimeUS,GIMB,ZOOM,FOCS,RECD,TRAK,IR","QBBBBBB",
+        AP_HAL::micros64(),
+        debug_cam_gimbal_cmd,
+        debug_cam_zoom_cmd,
+        debug_cam_focus_cmd,
+        debug_cam_record_cmd,
+        debug_cam_track_cmd,
+        debug_cam_ir_cmd);
+
+}
+
+
+// -------------------------------------------------------------------------
+// Send PMU Status to GCS with Mavlink Message KAL
+// -------------------------------------------------------------------------
+void GCS_MAVLINK::send_message_gcs_flcc_pmu_status() const
+{
+    // Send PMU Status using Mavlink Message
+    // mavlink_msg_sys_icd_flcc_gcs_pmu_status_send(
+    //         chan,
+    //         PMU_Status.Engine_Hour_Count,
+    //         PMU_Status.Date,
+    //         PMU_Status.Battery_Current,
+    //         PMU_Status.Battery_Temp,
+    //         PMU_Status.Battery_Status,
+    //         PMU_Status.Engine_RPM,
+    //         PMU_Status.Engine_Head1_Temp,
+    //         PMU_Status.Engine_Head2_Temp,
+    //         PMU_Status.Battery_Quantity_Command,
+    //         PMU_Status.System_Voltage,
+    //         PMU_Status.Load_Current,
+    //         PMU_Status.Current_Control_Command,
+    //         PMU_Status.PMU_Temp,
+    //         PMU_Status.PMU_Status,
+    //         PMU_Status.Throttle_Position_Report,
+    //         PMU_Status.Fuel_Quantity,
+    //         PMU_Status.Version_Sub_Number,
+    //         PMU_Status.Version_Main_Number,
+    //         PMU_Status.Version_FLCC_Sub_Number,
+    //         PMU_Status.Version_FLCC_Main_Number,
+    //         PMU_Status.Version_FLCC_REV_Number,
+    //         PMU_Status.Version_REV_Number);
+
+    // // Log Data
+    // AP::logger().Write("TM11","TimeUS,HOURCNT,DATE,IBAT,TEMP,BSTS,RPM,TEMP1,TEMP2,GCMD","QIIhhHHhhh",
+    //                    AP_HAL::micros64(),
+    //                    PMU_Status.Engine_Hour_Count,
+    //                    PMU_Status.Date,
+    //                    PMU_Status.Battery_Current,
+    //                    PMU_Status.Battery_Temp,
+    //                    PMU_Status.Battery_Status,
+    //                    PMU_Status.Engine_RPM,
+    //                    PMU_Status.Engine_Head1_Temp,
+    //                    PMU_Status.Engine_Head2_Temp,
+    //                    PMU_Status.Battery_Quantity_Command);
+
+    // AP::logger().Write("TM12","TimeUS,VBUS,ILD,ICMD,PTEMP,PSTS,PCL,GAS,MN,MJ","QhhhhHbbbb",
+    //                    AP_HAL::micros64(),
+    //                    PMU_Status.System_Voltage,
+    //                    PMU_Status.Load_Current,
+    //                    PMU_Status.Load_Current,
+    //                    PMU_Status.PMU_Temp,
+    //                    PMU_Status.PMU_Status,
+    //                    PMU_Status.Throttle_Position_Report,
+    //                    PMU_Status.Fuel_Quantity,
+    //                    PMU_Status.Version_Sub_Number,
+    //                    PMU_Status.Version_Main_Number);
+
+    // AP::logger().Write("TM13","TimeUS,FLMJ,FLMN,FLRV,PMRV","Qbbbb",
+    //                    AP_HAL::micros64(),
+    //                    PMU_Status.Version_FLCC_Sub_Number,
+    //                    PMU_Status.Version_FLCC_Main_Number,
+    //                    PMU_Status.Version_FLCC_REV_Number,
+    //                    PMU_Status.Version_REV_Number);
+}
+
+
+// -------------------------------------------------------------------------
+// Send PMU Command(Echo) to GCS with Mavlink Message KAL
+// -------------------------------------------------------------------------
+void GCS_MAVLINK::send_message_gcs_flcc_pmu_ctrl_echo() const
+{
+    // Send PMU Control(Echo) using Mavlink Message
+    // mavlink_msg_sys_icd_gcs_flcc_pmu_ctrl_echo_send(
+    //         chan,
+    //         PMU_Ctrl_Echo.Engine_OnOff_Echo,
+    //         PMU_Ctrl_Echo.Battery_Control_CMD_Echo,
+    //         PMU_Ctrl_Echo.Engine_Manual_Echo,
+    //         PMU_Ctrl_Echo.Engine_Throttle_CMD_Echo,
+    //         PMU_Ctrl_Echo.Engine_CHK_CMD_Echo,
+    //         PMU_Ctrl_Echo.Componet_ID,
+    //         PMU_Ctrl_Echo.PMUCAN_Fail,
+    //         PMU_Ctrl_Echo.Reserved);
+}
+
+
+// -------------------------------------------------------------------------
+// Receive PMU Control Command from GCS with Mavlink Message KAL
+// -------------------------------------------------------------------------
+void GCS_MAVLINK::handle_gcs_flcc_pmu_ctrl(const mavlink_message_t &msg)
+{
+    // Declare Variables
+    // mavlink_msg_sys_icd_gcs_flcc_pmu_ctrl_decode(&msg, &gcs().PMU_Ctrl);
+
+    // Increase Sequence Number
+    // gcs().PMU_Ctrl_Seq = gcs().PMU_Ctrl_Seq + 1;
+
+    // Log Data
+    // AP::logger().Write("TC1","TimeUS,EGOF,BCTC,EGM,ETRC,ECHK","QBBBBB",
+    //                                        AP_HAL::micros64(),
+    //                                        gcs().PMU_Ctrl.Engine_OnOff,
+    //                                        gcs().PMU_Ctrl.Battery_Control_CMD,
+    //                                        gcs().PMU_Ctrl.Engine_Manual,
+    //                                        gcs().PMU_Ctrl.Engine_Throttle_CMD,
+    //                                        gcs().PMU_Ctrl.Engine_CHK_CMD);
+
+}
 
 #endif  // HAL_GCS_ENABLED

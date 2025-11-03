@@ -2077,7 +2077,10 @@ void AP_Arming::check_forced_logging(const AP_Arming::Method method)
             // keep logging for longer if disarmed for a bad reason
             AP::logger().set_long_log_persist(true);
             return;
-
+        case Method::FAILSAFE_PMU: // KAL 23.05.23 
+            // keep logging for longer if disarmed for a bad reason
+            AP::logger().set_long_log_persist(true);
+            return;
         case Method::RUDDER:
         case Method::TOYMODE:
         case Method::MAVLINK:

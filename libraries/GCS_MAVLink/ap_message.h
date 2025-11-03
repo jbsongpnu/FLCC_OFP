@@ -113,5 +113,12 @@ enum ap_message : uint8_t {
 #if AP_MAVLINK_MSG_FLIGHT_INFORMATION_ENABLED
     MSG_FLIGHT_INFORMATION,
 #endif
+    // ==================================================================================
+// KAL OFP Firmware version : OFP_Orange v1.99.1
+// Data  : 21/04/30 
+// ==================================================================================
+	MSG_PMU_STATUS,                 // Mavlink Message to send PMU_STATUS (KAL)
+    MSG_CAM_STATUS,                 // Mavlink Message to send CAM_STATUS (KAL)
+	MSG_PMU_CTRL_ECHO,              // Mavlink Message to send PMU_CMD_EGHO (KAL)
     MSG_LAST // MSG_LAST must be the last entry in this enum
 };

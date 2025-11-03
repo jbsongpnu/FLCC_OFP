@@ -99,6 +99,17 @@ bool check_payload_size(mavlink_channel_t chan, uint16_t max_payload_len);
         return (subclass_name *)_chan[ofs];                        \
     }
 
+// ==================================================================================
+// KAL OFP Firmware version : OFP_Orange v1.99.1
+// Data  : 21/04/30 
+// ==================================================================================
+// Define Parameters for CAM
+#define UART_TELEM2 hal.serial(2)
+#define UART_GPS2   hal.serial(4)
+// #define CAM_UART                        UART_TELEM2       // Serial Port for CAM Interface (KAL)
+#define CAM_UART                        hal.serial(4)       // Serial Port for CAM Interface (KAL)
+// #define CAM_UART_BUFFER_SIZE            128                  // Serial Buffer Size (KAL)
+// #define CAM_TRACK_UART_BUFFER_SIZE      48                  // Serial Buffer Size for Track (KAL)
 
 #if HAL_MAVLINK_INTERVALS_FROM_FILES_ENABLED
 class DefaultIntervalsFromFiles
@@ -703,6 +714,14 @@ protected:
     MAV_RESULT handle_command_set_ekf_source_set(const mavlink_command_int_t &packet);
     MAV_RESULT handle_command_airframe_configuration(const mavlink_command_int_t &packet);
 
+// ==================================================================================
+// KAL OFP Firmware version : OFP_Orange v1.99.1
+// Data  : 21/04/30 
+// ==================================================================================
+    // Declare Functions for Handling Mavlink Message
+    void handle_gcs_flcc_cam_cmd(const mavlink_message_t &msg);                 // Handle Message of 'gcs_flcc_cam_cmd' (KAL)
+    void handle_gcs_flcc_pmu_ctrl(const mavlink_message_t &msg);                // Handle Message of 'gcs_flcc_pmu_cmd' (KAL)
+
     /*
       handle MAV_CMD_CAN_FORWARD and CAN_FRAME messages for CAN over MAVLink
      */
@@ -1154,6 +1173,21 @@ private:
     } available_modes;
     bool send_available_modes();
     bool send_available_mode_monitor();
+
+// ==================================================================================
+// KAL OFP Firmware version : OFP_Orange v1.99.1
+// Data  : 21/04/30 
+// ==================================================================================
+    // -------------------------------------------------------------------------
+    // Declare Functions to Control CAM
+    // void no_control_mode_operation(mavlink_sys_icd_gcs_flcc_cam_cmd_t cmd);             // Stop CAM & Stabilize (KAL)
+    // void IR_operation(mavlink_sys_icd_gcs_flcc_cam_cmd_t cam_cmd);                      // Control IR Functions (KAL)
+
+    // -------------------------------------------------------------------------
+    // Declare Functions to parse data with CAM
+    void send_message_gcs_flcc_cam_status() const;                                      // Send CAM Status to GCS with Mavlink Message (KAL)
+    void send_message_gcs_flcc_pmu_status() const;                                      // Send PMU Status to GCS with Mavlink Message (KAL)
+    void send_message_gcs_flcc_pmu_ctrl_echo() const;                                   // Send PMU Command(Echo) to GCS with Mavlink Message (KAL)
 
 };
 

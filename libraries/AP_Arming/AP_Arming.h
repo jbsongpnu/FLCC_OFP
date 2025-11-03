@@ -85,7 +85,8 @@ public:
         AUTO_ARM_ONCE = 36,
         TURTLE_MODE = 37,
         TOYMODE = 38,
-        UNKNOWN = 100,
+        FAILSAFE_PMU    = 99,   // PMU Failsafe Error Code (KAL)
+        UNKNOWN         = 100,
     };
 
     enum class Required {

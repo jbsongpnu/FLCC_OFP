@@ -6766,3 +6766,6 @@
       <field type="uint32_t" name="Reserved" units="N/A">Reserved[SF:TBD, MIN:TBD, MAX:TBD]</field>
     </message>
     <!-- KAL -->
+
+  </messages>
+</mavlink>

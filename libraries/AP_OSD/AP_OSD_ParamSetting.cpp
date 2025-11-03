@@ -133,13 +133,13 @@ static_assert((uint32_t)AP_OSD_ParamSetting::Type::NUM_TYPES == (uint32_t)AP_OSD
 // at the cost of a little flash, we can create much better ranges and values for certain important settings
 // common labels - all strings must be upper case
 #if APM_BUILD_TYPE(APM_BUILD_ArduPlane) || APM_BUILD_COPTER_OR_HELI
-
+//"Q30" is added below
 static const char* SERIAL_PROTOCOL_VALUES[] = {
     "", "MAV", "MAV2", "FSKY_D", "FSKY_S", "GPS", "", "ALEX", "STORM", "RNG", 
     "FSKY_TX", "LID360", "", "BEACN", "VOLZ", "SBUS", "ESC_TLM", "DEV_TLM", "OPTFLW", "RBTSRV",
     "NMEA", "WNDVNE", "SLCAN", "RCIN", "MGSQRT", "LTM", "RUNCAM", "HOT_TLM", "SCRIPT", "CRSF",
     "GEN", "WNCH", "MSP", "DJI", "AIRSPD", "ADSB", "AHRS", "AUDIO", "FETTEC", "TORQ",
-    "AIS", "CD_ESC", "MSP_DP", "MAV_HL", "TRAMP", "DDS", "IMUOUT", "IQ", "PPP", "IBUS_TLM", "IOMCU"
+    "AIS", "CD_ESC", "MSP_DP", "MAV_HL", "TRAMP", "DDS", "IMUOUT", "IQ", "PPP", "IBUS_TLM", "Q30", "IOMCU"
 };
 static_assert(AP_SerialManager::SerialProtocol_NumProtocols == ARRAY_SIZE(SERIAL_PROTOCOL_VALUES), "Wrong size SerialProtocol_NumProtocols");
 
