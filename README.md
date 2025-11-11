@@ -1,5 +1,6 @@
 # Work Note for KAL FLCC version-up from 4.6.2
 
+ - V4.0.04. Applying PMUCAN, full Mavlink, logger codes
  - V4.0.03. Applying basic Mavlink messages of KAL HD ICD, definition of serial ports
  - V4.0.02. Applying basic library folder structure. Updated Mavlink definition(common.xml)
  - V4.0.01. Starting version-up process from 4.3.6 to 4.6.2

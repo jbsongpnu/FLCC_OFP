@@ -20,7 +20,7 @@
 #include <AP_Common/AP_Common.h>
 #include "AP_CANManager.h"
 
-#if HAL_CANMANAGER_ENABLED
+// #if HAL_CANMANAGER_ENABLED
 
 #include <AP_BoardConfig/AP_BoardConfig.h>
 #include <AP_Vehicle/AP_Vehicle_Type.h>
@@ -42,6 +42,7 @@
 #include <AP_Common/ExpandingString.h>
 #include <AP_Common/sorting.h>
 #include <AP_Logger/AP_Logger.h>
+#include <AP_PMUCAN/AP_PMUCAN.h>
 
 #define LOG_TAG "CANMGR"
 #define LOG_BUFFER_SIZE 1024
@@ -225,6 +226,13 @@ void AP_CANManager::init()
             AP_Param::load_object_from_eeprom((AP_PiccoloCAN*)_drivers[drv_num], AP_PiccoloCAN::var_info);
             break;
 #endif
+        case AP_CAN::Protocol::PMUCAN :
+            _drivers[drv_num] = _drv_param[drv_num]._pmucan = NEW_NOTHROW AP_PMUCAN;
+            if (_drivers[drv_num] == nullptr) {
+                AP_BoardConfig::allocation_error("PMUCAN %d", drv_num + 1);
+                continue;
+            }
+            break;
         default:
             continue;
         }
@@ -484,5 +492,5 @@ AP_CANManager& AP::can()
     return *AP_CANManager::get_singleton();
 }
 
-#endif
+//#endif
 

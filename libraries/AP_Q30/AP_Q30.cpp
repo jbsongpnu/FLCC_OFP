@@ -848,54 +848,54 @@ void AP_Q30::parse_zoom_position(uint16_t* buffer) const
 // -------------------------------------------------------------------------
 bool AP_Q30::calc_angle_to_location(Vector3f& angles_to_target_rad)
 {
-    // Location current_loc;
+    Location current_loc;
 
-    // if (!AP::ahrs().get_location(current_loc)) {
-    //     return false;
-    // }
+    if (!AP::ahrs().get_location(current_loc)) {
+        return false;
+    }
 
-    // // Calculate relative distance from target to vehicle position
-    // // Now North direction in X, East direction is Y (KAL)
-    // const float GPS_vector_y = (Q30_Target.lng-current_loc.lng)*cosf(ToRad((current_loc.lat+Q30_Target.lat)*0.00000005f))*0.01113195f;
-    // const float GPS_vector_x = (Q30_Target.lat-current_loc.lat)*0.01113195f;
+    // Calculate relative distance from target to vehicle position
+    // Now North direction in X, East direction is Y (KAL)
+    const float GPS_vector_y = (Q30_Target.lng-current_loc.lng)*cosf(radians((current_loc.lat+Q30_Target.lat)*0.00000005f))*0.01113195f;
+    const float GPS_vector_x = (Q30_Target.lat-current_loc.lat)*0.01113195f;
 
-    // int32_t current_alt_cm = 0;
-    // if (!current_loc.get_alt_cm(Location::AltFrame::ABOVE_HOME, current_alt_cm)) {
-    //     return false;
-    // }
+    int32_t current_alt_cm = 0;
+    if (!current_loc.get_alt_cm(Location::AltFrame::ABOVE_HOME, current_alt_cm)) {
+        return false;
+    }
 
-    // float GPS_vector_z = (float)((current_alt_cm - Q30_Target.alt)*0.01);// Convert to meter (KAL)
+    float GPS_vector_z = (float)((current_alt_cm - Q30_Target.alt)*0.01);// Convert to meter (KAL)
 
-    // // 3-2-1 DCM Matrix for Gimbal coordinate (Gimbal Coordinate is just same as KUS-HD3 Attitude) (KAL)
-    // float phi   = wrap_PI(AP::ahrs().roll);
-    // float theta = wrap_PI(AP::ahrs().pitch);
-    // float psi   = wrap_PI(AP::ahrs().yaw);
+    // 3-2-1 DCM Matrix for Gimbal coordinate (Gimbal Coordinate is just same as KUS-HD3 Attitude) (KAL)
+    float phi   = wrap_PI(AP::ahrs().get_roll_rad());
+    float theta = wrap_PI(AP::ahrs().get_pitch_rad());
+    float psi   = wrap_PI(AP::ahrs().get_yaw_rad());
 
-    // float body_x = 0.0f;
-    // float body_y = 0.0f;
-    // float body_z = 0.0f;
+    float body_x = 0.0f;
+    float body_y = 0.0f;
+    float body_z = 0.0f;
 
-    // body_x =                                 cosf(theta)*cosf(psi)*GPS_vector_x +                                 cosf(theta)*sinf(psi)*GPS_vector_y -           sinf(theta)*GPS_vector_z;
-    // body_y = (sinf(phi)*sinf(theta)*cosf(psi)-cosf(phi)*sinf(psi))*GPS_vector_x + (sinf(phi)*sinf(theta)*sinf(psi)+cosf(phi)*cosf(psi))*GPS_vector_y + sinf(phi)*cosf(theta)*GPS_vector_z;
-    // body_z = (cosf(phi)*sinf(theta)*cosf(psi)+sinf(phi)*sinf(psi))*GPS_vector_x + (cosf(phi)*sinf(theta)*sinf(psi)-sinf(phi)*cosf(psi))*GPS_vector_y + cosf(phi)*cosf(theta)*GPS_vector_z;
+    body_x =                                 cosf(theta)*cosf(psi)*GPS_vector_x +                                 cosf(theta)*sinf(psi)*GPS_vector_y -           sinf(theta)*GPS_vector_z;
+    body_y = (sinf(phi)*sinf(theta)*cosf(psi)-cosf(phi)*sinf(psi))*GPS_vector_x + (sinf(phi)*sinf(theta)*sinf(psi)+cosf(phi)*cosf(psi))*GPS_vector_y + sinf(phi)*cosf(theta)*GPS_vector_z;
+    body_z = (cosf(phi)*sinf(theta)*cosf(psi)+sinf(phi)*sinf(psi))*GPS_vector_x + (cosf(phi)*sinf(theta)*sinf(psi)-sinf(phi)*cosf(psi))*GPS_vector_y + cosf(phi)*cosf(theta)*GPS_vector_z;
 
-    // float target_distance = norm(body_x, body_y); // Now every thing changed to meter Careful , centimeters here locally. Baro/alt is in cm, lat/lon is in meters.
+    float target_distance = norm(body_x, body_y); // Now every thing changed to meter Careful , centimeters here locally. Baro/alt is in cm, lat/lon is in meters.
 
-    // // Initialize all angles to zero
-    // angles_to_target_rad.zero();
+    // Initialize all angles to zero
+    angles_to_target_rad.zero();
 
-    // // Calculate tilt angle
-    // angles_to_target_rad.y = atan2f(body_z,target_distance);// Using body axis coordinate 21.10.12
+    // Calculate tilt angle
+    angles_to_target_rad.y = atan2f(body_z,target_distance);// Using body axis coordinate 21.10.12
 
-    // //Gimbal cmd expend
-    // float pan_cmd = 0.0f;
-    // float pan_limit = radians(290);
-    // float pan_original = wrap_PI(atan2f(body_y,body_x));//Using body axis coordinate 21.10.12
+    //Gimbal cmd expend
+    float pan_cmd = 0.0f;
+    float pan_limit = radians(290);
+    float pan_original = wrap_PI(atan2f(body_y,body_x));//Using body axis coordinate 21.10.12
 
-    // pan_cmd = pan_angle_calc(pan_original, Q30_Target.new_loc);
-    // pan_cmd = pan_angle_limit(pan_cmd, pan_original, pan_limit);
+    pan_cmd = pan_angle_calc(pan_original, Q30_Target.new_loc);
+    pan_cmd = pan_angle_limit(pan_cmd, pan_original, pan_limit);
 
-    // angles_to_target_rad.z = pan_cmd;
+    angles_to_target_rad.z = pan_cmd;
 
     return true;
 }

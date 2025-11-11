@@ -18,10 +18,10 @@
  */
 
 #define ALLOW_DOUBLE_MATH_FUNCTIONS
-
+#define NMEA_UPDATE_RATE_HZ		1   // JBS - 23.11.09
 #include "AP_NMEA_Output.h"
 
-#if HAL_NMEA_OUTPUT_ENABLED
+// #if HAL_NMEA_OUTPUT_ENABLED
 
 #include <AP_Math/definitions.h>
 #include <AP_RTC/AP_RTC.h>
@@ -83,13 +83,18 @@ void AP_NMEA_Output::init()
 
 void AP_NMEA_Output::update()
 {
-    if (_num_outputs == 0 || _message_enable_bitmask == 0) {
-        return;
-    }
+    // if (_num_outputs == 0 || _message_enable_bitmask == 0) { //New in 4.6.2 but disabling - JBS 20201104
+    //     return;
+    // }
 
     const uint32_t now_ms = AP_HAL::millis();
 
-    if ((now_ms - _last_run_ms) < static_cast<uint32_t>(MAX(_interval_ms.get(), 20))) {
+    // AP_GPS *gps = AP_GPS::get_singleton();  //Prepare GPS class, 
+    // if(gps == nullptr)return;               //return if GPS is not available - JBS - 23.11.09
+
+    //if ((now_ms - _last_run_ms) < static_cast<uint32_t>(MAX(_interval_ms.get(), 20))) {
+    // only send at NMEA_UPDATE_RATE_HZ - JBS - 23.11.09
+    if ((now_ms - _last_run_ms) < (1000/NMEA_UPDATE_RATE_HZ)) { //JBS - 23.11.09
         return;
     }
     _last_run_ms = now_ms;
@@ -112,11 +117,11 @@ void AP_NMEA_Output::update()
     struct tm* tm = gmtime_r(&time_sec, &tmd);
 
     // format time string
-    char tstring[10];
-    hal.util->snprintf(tstring, sizeof(tstring), "%02u%02u%05.2f", tm->tm_hour, tm->tm_min, tm->tm_sec + (time_usec % 1000000) * 1.0e-6);
+    char tstring[11];
+    hal.util->snprintf(tstring, sizeof(tstring), "%02u%02u%06.3f", tm->tm_hour, tm->tm_min, tm->tm_sec + (time_usec % 1000000) * 1.0e-6);
 
     Location loc;
-    const auto &gps = AP::gps();
+    const auto &gps = AP::gps();    //This was added in 4.6.2. Use this.
     const AP_GPS::GPS_Status gps_status = gps.status();
 
 #if AP_AHRS_ENABLED
@@ -150,8 +155,10 @@ void AP_NMEA_Output::update()
             min_dec,
             loc.lng < 0 ? 'W' : 'E');
 
-
+    // format GGA message with real data and Drone ID - JBS - 23.11.09
     char gga[100];
+    uint16_t HDOP = gps.get_hdop();	//get HDOP in cm - JBS - 23.11.09
+    uint16_t NoSV = gps.num_sats();	//get number of satellites in view - JBS - 23.11.09
     uint16_t gga_length = 0;
     if ((_message_enable_bitmask.get() & static_cast<int16_t>(Enabled_Messages::GPGGA)) != 0) {
         // format GGA message
@@ -201,95 +208,44 @@ void AP_NMEA_Output::update()
                 fix_quality = 4;
                 break;
         }
-
+        // format GGA messages - JBS 23.11.09, 25.11.04
         gga_length = nmea_printf_buffer(gga, sizeof(gga),
-                                    "$GPGGA,%s,%s,%s,%01d,%02d,%04.1f,%07.2f,M,0.0,M,,",
+                                    "$GPGGA,%s,%s,%s,%01d,%d,%d.%02d,%.2f,M,0.0,M,,PNUDRONE,", //Drone ID : Embed C4NM0008084 or C4NM0008820 for Jeju
                                     tstring,
                                     lat_string,
                                     lng_string,
                                     fix_quality,
-                                    gps.num_sats(),
-                                    gps.get_hdop()*0.01,
+                                    NoSV,
+                                    HDOP * 0.01,
+                                    HDOP%100,
                                     loc.alt * 0.01f);
 
         space_required += gga_length;
     }
 
-    char rmc[100];
-    uint16_t rmc_length = 0;
-    if ((_message_enable_bitmask.get() & static_cast<int16_t>(Enabled_Messages::GPRMC)) != 0) {
-        // format date string
-        char dstring[7];
-        hal.util->snprintf(dstring, sizeof(dstring), "%02u%02u%02u", tm->tm_mday, tm->tm_mon+1, tm->tm_year % 100);
+    char vtg[100];
+    uint16_t vtg_length = 0;
+    if ((_message_enable_bitmask.get() & static_cast<int16_t>(Enabled_Messages::GPVTG)) != 0) {
 
         // get speed
-#if AP_AHRS_ENABLED
-        const Vector2f speed = ahrs.groundspeed_vector();
-        const float speed_knots = speed.length() * M_PER_SEC_TO_KNOTS;
-        const float heading = wrap_360(degrees(atan2f(speed.x, speed.y)));
-#else
-        const float speed_knots = gps.ground_speed() * M_PER_SEC_TO_KNOTS;
-        const float heading = gps.ground_course();
-#endif
+        Vector2f speed = ahrs.groundspeed_vector();
+        float speed_mps = norm(speed.x, speed.y);//get speed in m/sec - JBS - 23.11.09
+        float speed_kph = speed_mps * 3.6;//convert speed to km/hour - JBS - 23.11.09
+        float speed_knots = speed_mps * M_PER_SEC_TO_KNOTS;//convert speed to knots - JBS - 23.11.09
+        float course_heading = wrap_360(degrees(atan2f(speed.x, speed.y)));//get course heading - JBS - 23.11.09
+        float mag_heading = wrap_360(degrees(ahrs.get_yaw()));//get magnetic heading - JBS - 23.11.09
 
-        // format RMC message
-        rmc_length = nmea_printf_buffer(rmc, sizeof(rmc),
-                                    "$GPRMC,%s,%c,%s,%s,%.2f,%.2f,%s,,",
+        // format VTG message instead of RMC - JBS - 23.11.09, 25.11.04
+        vtg_length = nmea_printf_buffer(vtg, sizeof(vtg),
+                                    "$GPVTG,%s,%.1f,T,%.1f,M,%.1f,N,%.1f,K,",
                                     tstring,
-                                    pos_valid ? 'A' : 'V',
-                                    lat_string,
-                                    lng_string,
+                                    course_heading,
+                                    mag_heading,
                                     speed_knots,
-                                    heading,
-                                    dstring);
+                                    speed_kph);
 
-        space_required += rmc_length;
+        space_required += vtg_length;
     }
-
-    uint16_t pashr_length = 0;
-    char pashr[100];
-#if AP_AHRS_ENABLED
-    if ((_message_enable_bitmask.get() & static_cast<int16_t>(Enabled_Messages::PASHR)) != 0) {
-        // get roll, pitch, yaw
-        const float roll_deg = wrap_180(degrees(ahrs.get_roll_rad()));
-        const float pitch_deg = wrap_180(degrees(ahrs.get_pitch_rad()));
-        const float yaw_deg = wrap_360(degrees(ahrs.get_yaw_rad()));
-        const float heave_m = 0; // instantaneous heave in meters
-        const float roll_deg_accuracy = 0; // stddev of roll_deg;
-        const float pitch_deg_accuracy = 0; // stddev of pitch_deg;
-        const float heading_deg_accuracy = 0; // stddev of yaw_deg;
-
-        // GPS Update Quality Flag:
-        // 0 = no position
-        // 1 = All non-RTK fixed integer positions
-        // 2 = RTK fixed integer positions
-        const uint8_t gps_status_flag = (gps_status >= AP_GPS::GPS_OK_FIX_3D_RTK_FIXED) ? 2 :
-                                                    (gps_status >= AP_GPS::GPS_OK_FIX_2D ? 1 : 0);
-
-        // INS Status Flag:
-        // 0 = All SPAN Pre-Alignment INS Status
-        // 1 = All SPAN Post-Alignment INS Status
-        const bool ins_status_flag = ahrs.initialised() &&
-                                        ahrs.healthy() &&
-                                        (!ahrs.have_inertial_nav() || AP::ins().accel_calibrated_ok_all());
-
-        // format PASHR message
-        pashr_length = nmea_printf_buffer(pashr, sizeof(pashr),
-                                "$PASHR,%s,%.2f,T,%c%.2f,%c%.2f,%c%.2f,%.3f,%.3f,%.3f,%u,%u",
-                                tstring,
-                                yaw_deg, // This is a TRUE NORTH value
-                                roll_deg<0? '-':'+', fabs(roll_deg),    // always show + or - symbol
-                                pitch_deg<0?'-':'+', fabs(pitch_deg),   // always show + or - symbol
-                                heave_m<0?  '-':'+', fabs(heave_m),     // always show + or - symbol
-                                roll_deg_accuracy,
-                                pitch_deg_accuracy,
-                                heading_deg_accuracy,
-                                (unsigned)gps_status_flag,
-                                (unsigned)ins_status_flag);
-
-        space_required += pashr_length;
-    }
-#endif
 
     // send to all NMEA output ports
     for (uint8_t i = 0; i < _num_outputs; i++) {
@@ -301,15 +257,11 @@ void AP_NMEA_Output::update()
             _uart[i]->write(gga);
         }
 
-        if (rmc_length > 0) {
-            _uart[i]->write(rmc);
-        }
-
-        if (pashr_length > 0) {
-            _uart[i]->write(pashr);
+        if (vtg_length > 0) {
+            _uart[i]->write(vtg);
         }
     }
 }
 
 
-#endif  // HAL_NMEA_OUTPUT_ENABLED
+// #endif  // HAL_NMEA_OUTPUT_ENABLED

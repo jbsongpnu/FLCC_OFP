@@ -34,6 +34,14 @@
 
 #define GCS_DEBUG_SEND_MESSAGE_TIMINGS 0
 
+// Define FCC OFP Version // KAL 23.05.23 BW
+//  Base ardupilot version of OFP v2.0.1 is 4.1.0-dev
+//  This NEW version is based on Ardupilot v4.3.6
+//  Therefore, BW chagned OFP Version.
+#define OFP_VER_MAIN        4
+#define OFP_VER_SUB         02
+#define OFP_VER_REV         00
+
 #ifndef HAL_GCS_ALLOW_PARAM_SET_DEFAULT
 #define HAL_GCS_ALLOW_PARAM_SET_DEFAULT 1
 #endif  // HAL_GCS_IGNORE_PARAM_SET_DEFAULT
@@ -1284,6 +1292,12 @@ public:
     static class MissionItemProtocol *missionitemprotocols[3];
     class MissionItemProtocol *get_prot_for_mission_type(const MAV_MISSION_TYPE mission_type) const;
     void try_send_queued_message_for_type(MAV_MISSION_TYPE type) const;
+
+// ==================================================================================
+// KAL OFP Firmware version : UNCLASSIFIED
+// ==================================================================================
+    mavlink_sys_icd_gcs_flcc_pmu_ctrl_t    PMU_Ctrl;                                        // MAVLINK Message for PMU Command (KAL)
+    uint8_t PMU_Ctrl_Seq;                                                                   // Sequence Number of PMU Control Command (KAL)
 
     void update_send();
     void update_receive();
