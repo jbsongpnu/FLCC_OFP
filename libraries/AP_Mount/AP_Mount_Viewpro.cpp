@@ -22,7 +22,7 @@ extern const AP_HAL::HAL& hal;
 #define AP_MOUNT_VIEWPRO_UPDATE_INTERVAL_MS 100 // resend angle or rate targets to gimbal at this interval
 #define AP_MOUNT_VIEWPRO_EO_ZOOM_SPEED     0x07    // hard-coded zoom speed (fast)
 #define AP_MOUNT_VIEWPRO_IR_ZOOM_SPEED     1 
-#define AP_MOUNT_VIEWPRO_ZOOM_MAX       10      // hard-coded absolute zoom times max
+#define AP_MOUNT_VIEWPRO_ZOOM_MAX       30      // hard-coded absolute zoom times max
 #define AP_MOUNT_VIEWPRO_DEG_TO_OUTPUT  (65536.0 / 360.0)   // scalar to convert degrees to the viewpro angle scaling
 #define AP_MOUNT_VIEWPRO_OUTPUT_TO_DEG  (360.0 / 65536.0)   // scalar to convert viewpro angle scaling to degrees
 
@@ -778,8 +778,10 @@ bool AP_Mount_Viewpro::set_zoom(ZoomType zoom_type, float zoom_value)
 
     // zoom percentage
     if (zoom_type == ZoomType::PCT) {
-        // convert zoom percentage (0 ~ 100) to zoom value (0 ~ max zoom * 10)
-        return send_camera_command2(CameraCommand2::SET_EO_ZOOM, linear_interpolate(0, AP_MOUNT_VIEWPRO_ZOOM_MAX * 10, zoom_value, 0, 100));
+        // Zoom value times 10 : 0 ~ 30 => 0 ~ 300
+        return send_camera_command2(CameraCommand2::SET_EO_ZOOM, zoom_value * 10);    
+        // Original code : convert zoom percentage (0 ~ 100) to zoom value (0 ~ max zoom * 10)
+        // return send_camera_command2(CameraCommand2::SET_EO_ZOOM, linear_interpolate(0, AP_MOUNT_VIEWPRO_ZOOM_MAX * 10, zoom_value, 0, 100));
     }
 
     // unsupported zoom type
@@ -991,6 +993,12 @@ bool AP_Mount_Viewpro::get_rangefinder_distance(float& distance_m) const
 bool AP_Mount_Viewpro::set_rangefinder_enable(bool enable)
 {
     return send_camera_command(ImageSensor::NO_ACTION, CameraCommand::NO_ACTION, 0, enable ? LRFCommand::CONTINUOUS_RANGING_START : LRFCommand::STOP_RANGING);
+}
+
+// Get zoom times - JBSong
+float AP_Mount_Viewpro::get_zoom_times(uint8_t instance)
+{
+    return _zoom_times;
 }
 
 #endif // HAL_MOUNT_VIEWPRO_ENABLED

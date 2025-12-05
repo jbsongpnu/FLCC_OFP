@@ -1,9 +1,14 @@
 # Work Note for KAL FLCC version-up from 4.6.2
 
- - V4.0.04. Applying PMUCAN, full Mavlink, logger codes
- - V4.0.03. Applying basic Mavlink messages of KAL HD ICD, definition of serial ports
- - V4.0.02. Applying basic library folder structure. Updated Mavlink definition(common.xml)
- - V4.0.01. Starting version-up process from 4.3.6 to 4.6.2
+ - V4.0.05. Camera control has changed to work with legacy code of Ardupilot for communication with Viewpro camera  
+    - Disabled message id="285" name="GIMBAL_DEVICE_ATTITUDE_STATUS" due to error in KGCS  
+    - Have to set SERIAL4_PROTOCOL = 8 (Gimbal), SERIAL4_BAUD = 115, MNT1_TYPE = 11 (Viewpro), CAM1_TYPE = 4 (Mount)  
+    - get_zoom_times() is added to legacy structure of AP_Mount library to send zoom level to KGCS  
+    - Functions in AP_Q30.cpp, GCS_Common.cpp related to Viewpro camera have changed to use legacy AP_Mount and AP_Mount_Viewpro libraries  
+ - V4.0.04. Applying PMUCAN, full Mavlink, logger codes  
+ - V4.0.03. Applying basic Mavlink messages of KAL HD ICD, definition of serial ports  
+ - V4.0.02. Applying basic library folder structure. Updated Mavlink definition(common.xml)  
+ - V4.0.01. Starting version-up process from 4.3.6 to 4.6.2  
 
 # ArduPilot Project
 

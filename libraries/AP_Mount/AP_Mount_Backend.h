@@ -67,6 +67,9 @@ public:
     // yaw is in body-frame.
     virtual bool get_attitude_quaternion(Quaternion& att_quat) = 0;
 
+    //Get zoom times - JBSong
+    virtual float get_zoom_times(uint8_t instance) { return 0.0f; }
+
     // get angular velocity of mount. Only available on some backends
     virtual bool get_angular_velocity(Vector3f& rates) { return false; }
 

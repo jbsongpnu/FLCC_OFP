@@ -97,6 +97,9 @@ public:
     // enable/disable rangefinder.  Returns true on success
     bool set_rangefinder_enable(bool enable) override;
 
+    //Get zoom times - JBSong
+    float get_zoom_times(uint8_t instance) override;
+
 protected:
 
     // get attitude as a quaternion.  returns true on success

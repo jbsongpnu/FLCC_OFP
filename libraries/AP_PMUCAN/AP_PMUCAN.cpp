@@ -187,10 +187,7 @@ void AP_PMUCAN::loop(void)
         //     gcs().send_text(MAV_SEVERITY_INFO, "[PMU] %8ld V%5d %5d", PMU_Status.Date, PMU_Status.System_Voltage*100, PMU_Status.PMU_Status); // KAL
             sendchanges();
         }
-        //temp debug!!!
-        if(_AP_PMUCAN_loop_cnt%300 == 0) {
-            gcs().send_text(MAV_SEVERITY_INFO, "[PMU] loop %llu, %u", _AP_PMUCAN_loop_cnt, PMUCAN_Fail_Status);
-        }
+
         _AP_PMUCAN_loop_cnt++;                                  // 10ms period increase
     }
 }

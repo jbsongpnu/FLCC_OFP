@@ -193,34 +193,35 @@ void AP_Mount_Backend::set_target_sysid(uint8_t sysid)
 // send a GIMBAL_DEVICE_ATTITUDE_STATUS message to GCS
 void AP_Mount_Backend::send_gimbal_device_attitude_status(mavlink_channel_t chan)
 {
-    if (suppress_heartbeat()) {
-        // block heartbeat from transmitting to the GCS
-        GCS_MAVLINK::disable_channel_routing(chan);
-    }
+    // Disabled message id="285" name="GIMBAL_DEVICE_ATTITUDE_STATUS" due to error in KGCS
+    // if (suppress_heartbeat()) {
+    //     // block heartbeat from transmitting to the GCS
+    //     GCS_MAVLINK::disable_channel_routing(chan);
+    // }
 
-    Quaternion att_quat;
-    if (!get_attitude_quaternion(att_quat)) {
-        return;
-    }
-    Vector3f ang_velocity { nanf(""), nanf(""), nanf("") };
-    IGNORE_RETURN(get_angular_velocity(ang_velocity));
+    // Quaternion att_quat;
+    // if (!get_attitude_quaternion(att_quat)) {
+    //     return;
+    // }
+    // Vector3f ang_velocity { nanf(""), nanf(""), nanf("") };
+    // IGNORE_RETURN(get_angular_velocity(ang_velocity));
 
-    // construct quaternion array
-    const float quat_array[4] = {att_quat.q1, att_quat.q2, att_quat.q3, att_quat.q4};
+    // // construct quaternion array
+    // const float quat_array[4] = {att_quat.q1, att_quat.q2, att_quat.q3, att_quat.q4};
 
-    mavlink_msg_gimbal_device_attitude_status_send(chan,
-                                                   0,   // target system
-                                                   0,   // target component
-                                                   AP_HAL::millis(),    // autopilot system time
-                                                   get_gimbal_device_flags(),
-                                                   quat_array,    // attitude expressed as quaternion
-                                                   ang_velocity.x,    // roll axis angular velocity (NaN for unknown)
-                                                   ang_velocity.y,    // pitch axis angular velocity (NaN for unknown)
-                                                   ang_velocity.z,    // yaw axis angular velocity (NaN for unknown)
-                                                   0,                                           // failure flags (not supported)
-                                                   std::numeric_limits<double>::quiet_NaN(),    // delta_yaw (NaN for unknonw)
-                                                   std::numeric_limits<double>::quiet_NaN(),    // delta_yaw_velocity (NaN for unknonw)
-                                                   _instance + 1);  // gimbal_device_id
+    // mavlink_msg_gimbal_device_attitude_status_send(chan,
+    //                                                0,   // target system
+    //                                                0,   // target component
+    //                                                AP_HAL::millis(),    // autopilot system time
+    //                                                get_gimbal_device_flags(),
+    //                                                quat_array,    // attitude expressed as quaternion
+    //                                                ang_velocity.x,    // roll axis angular velocity (NaN for unknown)
+    //                                                ang_velocity.y,    // pitch axis angular velocity (NaN for unknown)
+    //                                                ang_velocity.z,    // yaw axis angular velocity (NaN for unknown)
+    //                                                0,                                           // failure flags (not supported)
+    //                                                std::numeric_limits<double>::quiet_NaN(),    // delta_yaw (NaN for unknonw)
+    //                                                std::numeric_limits<double>::quiet_NaN(),    // delta_yaw_velocity (NaN for unknonw)
+    //                                                _instance + 1);  // gimbal_device_id
 }
 #endif
 

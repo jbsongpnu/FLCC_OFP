@@ -139,7 +139,6 @@ uint32_t GCS_MAVLINK_InProgress::last_check_ms;
 // ==================================================================================
 // Define variables for CAM & PMU (KAL)
 extern int32_t tracking_counter;                                            // Tracking Counter for CAM (KAL)
-extern uint32_t CAM_Scheduler_Count;                                        // Scheduler Counter for CAM (KAL)
 extern uint8_t debug_cam_gimbal_cmd;                                        // Gimbal status for logging (KAL)
 extern uint8_t debug_cam_zoom_cmd;                                          // Zoom status for logging (KAL)
 extern uint8_t debug_cam_focus_cmd;                                         // Focus status for logging (KAL)
@@ -154,7 +153,6 @@ extern mavlink_sys_icd_flcc_gcs_cam_attitude_status_t   CAM_ATTITUDE_STATUS;// M
 extern mavlink_sys_icd_flcc_gcs_pmu_status_t            PMU_Status;         // MAVLINK Message for PMU Status (KAL)
 extern mavlink_sys_icd_gcs_flcc_pmu_ctrl_echo_t         PMU_Ctrl_Echo;      // MAVLINK Message for PMU Command ECHO (KAL)
 
-extern struct TYPE_Q30_TARGET Q30_Target;
 // END KAL
 
 GCS_MAVLINK::GCS_MAVLINK(AP_HAL::UARTDriver &uart)
@@ -7594,90 +7592,25 @@ void GCS_MAVLINK::handle_radio_rc_channels(const mavlink_message_t &msg)
 // -------------------------------------------------------------------------
 void GCS_MAVLINK::send_message_gcs_flcc_cam_status() const
 {
-    uint16_t buffer[CAM_UART_BUFFER_SIZE] = {0};
-
-    uint8_t debug_cam_attitude_req=0U;
-    uint8_t debug_cam_zoom_pos_req=0U;
-
-    AP_Q30 *Q30 = AP::Q30();
-
-    // Send Command to CAM
-    switch (CAM_Scheduler_Count)
-    {
-    case 0:
-        Q30->get_cmd_angle();
-
-        debug_cam_attitude_req = 1U; //debug //0: not sent, 1: sent
-        break;
-
-    case 3:
-        Q30->get_cmd_zoom();
-
-        debug_cam_zoom_pos_req = 1U; //debug //0: not sent, 1: sent
-        break;
-
-    default:
-        break;
+    AP_Mount *mount = AP::mount();
+    if (mount == nullptr) {
+        return;
     }
+    float roll=0, pitch = 0, yaw = 0, zoom_times = 0;
+    if(mount->get_attitude_euler(0, roll, pitch, yaw)) {
 
-    CAM_Scheduler_Count = (uint32_t)(CAM_Scheduler_Count + 1);
-    if (5 <= CAM_Scheduler_Count)
-    {
-        CAM_Scheduler_Count = 0U;
+        CAM_ATTITUDE_STATUS.Roll_REL_ANG = roll * 10;
+        CAM_ATTITUDE_STATUS.Pitch_REL_ANG = pitch * 10;
+        CAM_ATTITUDE_STATUS.Yaw_REL_ANG = yaw * 10;
+    } else {
+        CAM_ATTITUDE_STATUS.Roll_REL_ANG = 110;
+        CAM_ATTITUDE_STATUS.Pitch_REL_ANG = 120;
+        CAM_ATTITUDE_STATUS.Yaw_REL_ANG = 130;
     }
+    zoom_times = mount->get_zoom_times(0);
 
-
-    // Receive Data from CAM & Parse
-    int32_t recv_size = Q30->receive_cam_uart_data(buffer);
-
-    if (7 == recv_size)
-    {
-        Q30->parse_zoom_position(buffer);
-
-        // Display zoom position feedback
-        gcs().send_text(MAV_SEVERITY_INFO, "CAM: Zoom Pos = %d", (int)CAM_ATTITUDE_STATUS.Zoom_POS_FB);
-    }
-
-    if (59 <= recv_size)
-    {
-        Q30->parse_cam_angle(buffer);
-
-        // Display decoded camera angle data (values are in 0.1 degree units)
-        gcs().send_text(MAV_SEVERITY_INFO, "CAM: P=%.1f Y=%.1f deg",
-                       CAM_ATTITUDE_STATUS.Pitch_REL_ANG * 0.1f,
-                       CAM_ATTITUDE_STATUS.Yaw_REL_ANG * 0.1f);
-
-        // Display IMU angles for verification
-        gcs().send_text(MAV_SEVERITY_INFO, "CAM_IMU: P=%.1f Y=%.1f deg",
-                       CAM_ATTITUDE_STATUS.Pitch_IMU_ANG * 0.1f,
-                       CAM_ATTITUDE_STATUS.Yaw_IMU_ANG * 0.1f);
-    }
-
-    // Display when no data received for debugging
-    if (recv_size == 0)
-    {
-        // Only display periodically to avoid flooding (every 5th cycle when scheduler is 0)
-        if (CAM_Scheduler_Count == 0)
-        {
-            gcs().send_text(MAV_SEVERITY_WARNING, "CAM: No data received");
-        }
-    }
-
-    // Debug
-    debug_cam_zoom_pos_req = debug_cam_zoom_pos_req + 1U;
-    debug_cam_attitude_req = debug_cam_attitude_req + 1U;
-
-    // //temp debug test for V4.0.03 only
-    // CAM_ATTITUDE_STATUS.Roll_REL_ANG = 1;
-    // CAM_ATTITUDE_STATUS.Pitch_REL_ANG = 2;
-    // CAM_ATTITUDE_STATUS.Yaw_REL_ANG = 3;
-    // CAM_ATTITUDE_STATUS.Roll_IMU_ANG = 4;
-    // CAM_ATTITUDE_STATUS.Roll_RC_Target_ANG = 5;
-    // CAM_ATTITUDE_STATUS.Pitch_IMU_ANG = 6;
-    // CAM_ATTITUDE_STATUS.Pitch_RC_Target_ANG = 7;
-    // CAM_ATTITUDE_STATUS.Yaw_IMU_ANG = 8;
-    // CAM_ATTITUDE_STATUS.Yaw_RC_Target_ANG = 9;
-    // CAM_ATTITUDE_STATUS.Zoom_POS_FB = 10; //end of debugging test
+    CAM_ATTITUDE_STATUS.Zoom_POS_FB = (int16_t)zoom_times;
+    CAM_ATTITUDE_STATUS.Roll_IMU_ANG = (int16_t)(zoom_times * 10.0);
 
     mavlink_msg_sys_icd_flcc_gcs_cam_attitude_status_send(
             chan,
@@ -7741,31 +7674,33 @@ void GCS_MAVLINK::handle_gcs_flcc_cam_cmd(const mavlink_message_t &msg)
             break;
 
         case 1: // Speed Control
-
-            // CAM flow stop code
-            if((cam_cmd.Roll_Speed_CMD!=0) || (cam_cmd.Pitch_Speed_CMD!=0) || (cam_cmd.Yaw_Speed_CMD!=0))
+        {
+            // Legacy protocol: 2-axis speed control only
+            // if((cam_cmd.Roll_Speed_CMD!=0) || (cam_cmd.Pitch_Speed_CMD!=0) || (cam_cmd.Yaw_Speed_CMD!=0))
+            if((cam_cmd.Pitch_Speed_CMD!=0) || (cam_cmd.Yaw_Speed_CMD!=0))
             {
                 tracking_counter = 0U;
                 Q30->send_cmd_speed(cam_cmd);
-
-                debug_cam_gimbal_cmd = 1U;      // debug //0: not sent, 1: rate, 2: angle, 3: fix, 4: ROI
+                debug_cam_gimbal_cmd = 1U;      // 1: rate control
             }
             else if(tracking_counter == 0U)
             {
                 tracking_counter = 1U;
                 Q30->send_cmd_hold_angle();     // hold cam angle
-
-                debug_cam_gimbal_cmd = 3U;      // debug //0: not sent, 1: rate, 2: angle, 3: fix, 4: ROI
+                debug_cam_gimbal_cmd = 3U;      // 3: fix/hold
             }
-            //Note : debug example : gcs().send_text(MAV_SEVERITY_NOTICE,"Spd P %d Y %d", cam_cmd.Pitch_Speed_CMD, cam_cmd.Yaw_Speed_CMD);//JBS 23.11.08
-
+            // gcs().send_text(MAV_SEVERITY_ERROR,"Spd P %d Y %d", cam_cmd.Pitch_Speed_CMD, cam_cmd.Yaw_Speed_CMD);//JBS 23.11.08
+        }
             break;
 
         case 2: // Angle Control
-            // Due to error when checking roll/pitch/yaw state, send angle command directly - JBS 23.11.08
+            
+            // Legacy protocol: Send angle command directly
             Q30->send_cmd_angle(cam_cmd);
             debug_cam_gimbal_cmd = 2U;
-            //Note : debug example : gcs().send_text(MAV_SEVERITY_NOTICE,"Ang P %d Y %d", cam_cmd.Pitch_Angle_CMD, cam_cmd.Yaw_Angle_CMD);//JBS 23.11.08
+
+            gcs().send_text(MAV_SEVERITY_ERROR,"Ang P %d Y %d", cam_cmd.Pitch_Angle_CMD, cam_cmd.Yaw_Angle_CMD);//JBS 23.11.08
+            
             //To Do : check previous code again after acquiring gimbal state is finished - JBS 23.11.08
             /*if((abs(cam_cmd.Roll_Angle_CMD*10  - CAM_ATTITUDE_STATUS.Roll_REL_ANG)  > 10)
             || (abs(cam_cmd.Pitch_Angle_CMD*10 - CAM_ATTITUDE_STATUS.Pitch_REL_ANG) > 10)
@@ -7787,22 +7722,6 @@ void GCS_MAVLINK::handle_gcs_flcc_cam_cmd(const mavlink_message_t &msg)
             break;
 
         case 3: // ROI Control
-
-            Q30->calc_angle_to_location(angles_to_target_rad);
-            Q30_Target.new_loc = false;
-
-            // Update Camera Control Command
-            cam_cmd.Pitch_Angle_CMD = angles_to_target_rad.y * RAD_TO_DEG;
-            cam_cmd.Yaw_Angle_CMD   = angles_to_target_rad.z * RAD_TO_DEG;
-
-            // Send Camera Control Command
-            // Cmd frequency
-            Q30->send_cmd_angle(cam_cmd);
-
-            debug_cam_gimbal_cmd = 4U;      // debug //0: not sent, 1: rate, 2: angle, 3: fix, 4: ROI
-
-            break;
-
         default:
             break;
     }

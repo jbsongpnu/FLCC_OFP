@@ -210,7 +210,7 @@ const AP_Scheduler::Task Copter::scheduler_tasks[] = {
     SCHED_TASK_CLASS(GCS,                  (GCS*)&copter._gcs,          update_receive, 400, 180, 102),
     SCHED_TASK_CLASS(GCS,                  (GCS*)&copter._gcs,          update_send,    400, 550, 105),
 #if HAL_MOUNT_ENABLED
-    SCHED_TASK_CLASS(AP_Mount,             &copter.camera_mount,        update,          50,  75, 108),
+    SCHED_TASK_CLASS(AP_Mount,             &copter.camera_mount,        update,          10,  75, 108),
 #endif
 #if AP_CAMERA_ENABLED
     SCHED_TASK_CLASS(AP_Camera,            &copter.camera,              update,          50,  75, 111),

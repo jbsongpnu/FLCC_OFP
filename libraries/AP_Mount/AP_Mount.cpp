@@ -671,6 +671,17 @@ bool AP_Mount::get_attitude_euler(uint8_t instance, float& roll_deg, float& pitc
     return true;
 }
 
+// Get zoom times - JBSong
+float AP_Mount::get_zoom_times(uint8_t instance)
+{
+    auto *backend = get_instance(instance);
+    if (backend == nullptr) {
+        return false;
+    }
+
+    return backend->get_zoom_times(instance); // return _zoom_times for Viewpro camera
+}
+
 // run pre-arm check.  returns false on failure and fills in failure_msg
 // any failure_msg returned will not include a prefix
 bool AP_Mount::pre_arm_checks(char *failure_msg, uint8_t failure_msg_len)

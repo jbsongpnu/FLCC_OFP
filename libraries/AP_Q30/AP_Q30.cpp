@@ -1,4 +1,5 @@
 #include "AP_Q30.h"
+#include <AP_Mount/AP_Mount.h>
 
 extern const AP_HAL::HAL& hal;
 
@@ -7,20 +8,15 @@ extern const AP_HAL::HAL& hal;
 // Define variables for CAM
 // -------------------------------------------------------------------------
 int32_t tracking_counter     = 0U;                                          // Tracking Counter for CAM (KAL)
-uint32_t CAM_Scheduler_Count = 0U;                                          // Scheduler Counter for CAM (KAL)
 uint8_t debug_cam_gimbal_cmd = 0U;                                          // Gimbal status for logging (KAL)
 uint8_t debug_cam_zoom_cmd   = 0U;                                          // Zoom status for logging (KAL)
 uint8_t debug_cam_focus_cmd  = 0U;                                          // Focus status for logging (KAL)
 uint8_t debug_cam_record_cmd = 0U;                                          // Record status for logging (KAL)
 uint8_t debug_cam_track_cmd  = 0U;                                          // Tracking status for logging (KAL)
 uint8_t debug_cam_ir_cmd     = 0U;                                          // IR status for logging (KAL)
-static float Pan_CMD_Prev    = 0.0f;
 
 mavlink_sys_icd_gcs_flcc_cam_cmd_t              PREV_CAM_CMD = {0};         // Backup CAM_CMD (KAL)
 mavlink_sys_icd_flcc_gcs_cam_attitude_status_t  CAM_ATTITUDE_STATUS = {0};  // MAVLINK Message for CAM (KAL)
-
-
-struct TYPE_Q30_TARGET Q30_Target {0, 0, 0, false};
 
 AP_Q30::AP_Q30()
 {
@@ -45,53 +41,13 @@ AP_Q30 *AP_Q30::get_singleton()
 // -------------------------------------------------------------------------
 void AP_Q30::send_cmd_angle(mavlink_sys_icd_gcs_flcc_cam_cmd_t cmd)
 {
-    // Declare Variables
-    uint8_t buffer[CAM_UART_BUFFER_SIZE];
-
-    // Update Buffer  Header to Mode  - JBS 23.11.08
-    buffer[0] = 0x55;   //Header
-    buffer[1] = 0xAA;   //Header 
-    buffer[2] = 0xDC;   //Header
-    buffer[3] = 0x0C;   //Length
-    buffer[4] = 0x1A;   //ID : A1 Servo Control Common
-    buffer[5] = 0x0B;   //Mode : Absolute Angle mode 0x0B
-
-    // Check Roll Status & Set Command
-    if (PREV_CAM_CMD.Roll_Angle_CMD != cmd.Roll_Angle_CMD)
-    {
-        PREV_CAM_CMD.Roll_Angle_CMD = cmd.Roll_Angle_CMD;
-        //Note : Roll can't be controlled anymore - JBS 23.11.08
-        //Note : Remove unnecessary part here - JBS 23.11.08
+    AP_Mount *mount = AP::mount();
+    if (mount == nullptr) {
+        return;
     }
+
+    mount->set_angle_target(0, cmd.Roll_Angle_CMD, cmd.Pitch_Angle_CMD, cmd.Yaw_Angle_CMD, 0);
     
-    // Check Pitch Status & Set Command
-    if (PREV_CAM_CMD.Pitch_Angle_CMD  != cmd.Pitch_Angle_CMD)
-    {
-        PREV_CAM_CMD.Pitch_Angle_CMD = cmd.Pitch_Angle_CMD;
-        //Note : Remove unnecessary part here - JBS 23.11.08
-    }
-
-    // Check Yaw Status & Set Command
-    if (PREV_CAM_CMD.Yaw_Angle_CMD  != cmd.Yaw_Angle_CMD)
-    {
-        PREV_CAM_CMD.Yaw_Angle_CMD = cmd.Yaw_Angle_CMD;
-        //Note : Remove unnecessary part here - JBS 23.11.08
-    }
-
-    // Update Buffer - with new protocol JBS 23.11.08
-    // Note : Big-endian is used instead of little-endian - JBS 23.11.08
-    buffer[6] = get_cam_angle_byte_h(cmd.Yaw_Angle_CMD);   // YAH
-    buffer[7] = get_cam_angle_byte_l(cmd.Yaw_Angle_CMD);   // YAL
-    buffer[8] = get_cam_angle_byte_h(cmd.Pitch_Angle_CMD); // PAH
-    buffer[9] = get_cam_angle_byte_l(cmd.Pitch_Angle_CMD); // PAL
-    buffer[10] = 0x00;  // dummy
-    buffer[11] = 0x00;  // dummy
-    buffer[12] = 0x00;  // dummy
-    buffer[13] = 0x00;  // dummy
-    buffer[14] = get_cam_checksumX(buffer, 3, 14); // New checksum rule - JBS 23.11.08
-
-    // Send Buffer
-    CAM_UART->write(buffer, 15);    //Size changed from 20 to 15 - JBS 23.11.08
 }
 
 
@@ -100,361 +56,106 @@ void AP_Q30::send_cmd_angle(mavlink_sys_icd_gcs_flcc_cam_cmd_t cmd)
 // -------------------------------------------------------------------------
 void AP_Q30::send_cmd_speed(mavlink_sys_icd_gcs_flcc_cam_cmd_t cmd)
 {
-    // Declare Variables
-    uint8_t buffer[CAM_UART_BUFFER_SIZE];
-
-    // Update Buffer  Header to Mode  - JBS 23.11.08
-    buffer[0] = 0x55;   //Header
-    buffer[1] = 0xAA;   //Header
-    buffer[2] = 0xDC;   //Header
-    buffer[3] = 0x0C;   //Length
-    buffer[4] = 0x1A;   //ID : A1 Servo Control Common
-    buffer[5] = 0x01;   //Mode : Speed mode 0x01
+    AP_Mount *mount = AP::mount();
+    if (mount == nullptr) {
+        return;
+    }
 
     // Check Roll Status & Set Command
     if (PREV_CAM_CMD.Roll_Speed_CMD != cmd.Roll_Speed_CMD)
     {
         PREV_CAM_CMD.Roll_Speed_CMD = cmd.Roll_Speed_CMD;
         //Note : Roll can't be controlled anymore - JBS 23.11.08
-        //Note : Remove unnecessary part here - JBS 23.11.08
     }
 
     // Check Pitch Status & Set Command
     if (PREV_CAM_CMD.Pitch_Speed_CMD != cmd.Pitch_Speed_CMD)
     {
         PREV_CAM_CMD.Pitch_Speed_CMD = cmd.Pitch_Speed_CMD;
-        //Note : Remove unnecessary part here - JBS 23.11.08
     }
 
     // Check Yaw Status & Set Command
     if (PREV_CAM_CMD.Yaw_Speed_CMD != cmd.Yaw_Speed_CMD)
     {
         PREV_CAM_CMD.Yaw_Speed_CMD = cmd.Yaw_Speed_CMD;
-        //Note : Remove unnecessary part here - JBS 23.11.08
     }
 
-    // Update Buffer - with new protocol JBS 23.11.08
-    // Note : Big-endian is used instead of little-endian - JBS 23.11.08
-    buffer[6] = get_cam_speed_byte_h(cmd.Yaw_Speed_CMD);   // YSH
-    buffer[7] = get_cam_speed_byte_l(cmd.Yaw_Speed_CMD);   // YSL
-    buffer[8] = get_cam_speed_byte_h(cmd.Pitch_Speed_CMD); // PSH
-    buffer[9] = get_cam_speed_byte_l(cmd.Pitch_Speed_CMD); // PSL
-    buffer[10] = 0x00;  // dummy
-    buffer[11] = 0x00;  // dummy
-    buffer[12] = 0x00;  // dummy
-    buffer[13] = 0x00;  // dummy
-    buffer[14] = get_cam_checksumX(buffer, 3, 14);  // New checksum rule - JBS 23.11.08
-
-    // Send Buffer
-    CAM_UART->write(buffer, 15);    //Size changed from 20 to 15 - JBS 23.11.08
+    // sets rate target in deg/s
+    // yaw_lock should be true if the yaw rate is earth-frame, false if body-frame (e.g. rotates with body of vehicle)
+    // void AP_Mount_Backend::set_rate_target(float roll_degs, float pitch_degs, float yaw_degs, bool yaw_is_earth_frame)
+    mount->set_rate_target(0,cmd.Pitch_Speed_CMD,cmd.Yaw_Speed_CMD, 0);
+    
 }
 
-
 // -------------------------------------------------------------------------
-// Send "start_track" Command to CAM
+// Removed : Send "start_track" Command to CAM
 // -------------------------------------------------------------------------
-void AP_Q30::send_cmd_track_start()
-{
-    // Declare Variables
-    uint8_t buffer[CAM_TRACK_UART_BUFFER_SIZE]={0U};
-
-    // Initialize Buffer
-    memset(buffer, 0, CAM_TRACK_UART_BUFFER_SIZE);
-
-    // Set Start Command
-    buffer[0]=0x7e;
-    buffer[1]=0x7e;
-    buffer[2]=0x44;
-    buffer[3]=0x00;
-    buffer[4]=0x00;
-    buffer[5]=0x71;
-    buffer[6]=0xfe;
-    buffer[7]=0x00;
-    buffer[8]=0x00;
-    buffer[9]=0x00;
-    buffer[10]=0x00;
-    buffer[11]=0x01;
-    buffer[12]=0x00;
-    buffer[13]=0x3c;
-    buffer[47]=0xEC;
-
-    // Send Buffer
-    CAM_UART->write(buffer, CAM_TRACK_UART_BUFFER_SIZE);
-}
-
-
+// void AP_Q30::send_cmd_track_start()
 // -------------------------------------------------------------------------
-// Send "end_track" Command to CAM
+// Removed : Send "end_track" Command to CAM
 // -------------------------------------------------------------------------
-void AP_Q30::send_cmd_track_end()
-{
-    // Declare Variables
-    uint8_t buffer[CAM_TRACK_UART_BUFFER_SIZE]={0U};
-
-    // Initialize Buffer
-    memset(buffer, 0, CAM_TRACK_UART_BUFFER_SIZE);
-
-    // Set End Command
-    buffer[0]=0x7e;
-    buffer[1]=0x7e;
-    buffer[2]=0x44;
-    buffer[3]=0x00;
-    buffer[4]=0x00;
-    buffer[5]=0x00;
-    buffer[6]=0xfe;
-    buffer[7]=0x00;
-    buffer[8]=0x00;
-    buffer[9]=0x00;
-    buffer[10]=0x00;
-    buffer[11]=0x00;
-    buffer[12]=0x00;
-    buffer[13]=0x3c;
-    buffer[47]=0x7A;
-
-    // Send Buffer
-    CAM_UART->write(buffer, CAM_TRACK_UART_BUFFER_SIZE);
-}
-
-
+// void AP_Q30::send_cmd_track_end()
 // -------------------------------------------------------------------------
-// Send "set ir_color" Command to CAM
+// Removed : Send "set ir_color" Command to CAM
 // -------------------------------------------------------------------------
-void AP_Q30::send_cmd_ir_color(uint8_t Color, uint8_t White, uint8_t checksum)
-{
-    // Declare Variables
-    uint8_t buffer[CAM_TRACK_UART_BUFFER_SIZE]={0U};
-
-    // Initialize Buffer
-    memset(buffer, 0, CAM_TRACK_UART_BUFFER_SIZE);
-
-    // Set Color Command
-    buffer[0]=0x7e;
-    buffer[1]=0x7e;
-    buffer[2]=0x44;
-    buffer[3]=0x00;
-    buffer[4]=0x00;
-    buffer[5]=0x78;
-    buffer[6]=Color;
-    buffer[7]=0x00;
-    buffer[8]=0x00;
-    buffer[9]=0x00;
-    buffer[10]=0x00;
-    buffer[11]=0x00;
-    buffer[12]=0x00;
-    buffer[13]=0x00;
-    buffer[14]=0x01;
-    buffer[15]=White;
-    buffer[47]=checksum;
-
-    // Send Buffer
-    CAM_UART->write(buffer, CAM_TRACK_UART_BUFFER_SIZE);
-}
-
-
+// void AP_Q30::send_cmd_ir_color(uint8_t Color, uint8_t White, uint8_t checksum)
 // -------------------------------------------------------------------------
-// Send "set eo/ir_mode" Command to CAM
+// Removed : Send "set eo/ir_mode" Command to CAM
 // -------------------------------------------------------------------------
-void AP_Q30::send_cmd_eo_ir_mode(uint8_t mode, uint8_t checksum)
-{
-    // Declare Variables
-    uint8_t buffer[CAM_TRACK_UART_BUFFER_SIZE]={0U};
-
-    // Initialize Buffer
-    memset(buffer, 0, CAM_TRACK_UART_BUFFER_SIZE);
-
-    // Set EO/IR Mode
-    buffer[0]=0x7e;
-    buffer[1]=0x7e;
-    buffer[2]=0x44;
-    buffer[3]=0x00;
-    buffer[4]=0x00;
-    buffer[5]=0x78;
-    buffer[6]=0x00;
-    buffer[7]=0x00;
-    buffer[8]=0x00;
-    buffer[9]=0x00;
-    buffer[10]=0x00;
-    buffer[11]=0x00;
-    buffer[12]=0x00;
-    buffer[13]=0x00;
-    buffer[14]=mode;
-    buffer[47]=checksum;
-
-    // Send Buffer
-    CAM_UART->write(buffer, CAM_TRACK_UART_BUFFER_SIZE);
-}
-
-
+// void AP_Q30::send_cmd_eo_ir_mode(uint8_t mode, uint8_t checksum)
 // -------------------------------------------------------------------------
-// Send "set ir zoom" Command to CAM
+// Removed : Send "set ir zoom" Command to CAM
 // -------------------------------------------------------------------------
-void AP_Q30::send_cmd_ir_digital_zoom(uint8_t ratio)
-{
-    // Declare Variables
-    uint8_t buffer[CAM_UART_BUFFER_SIZE] = {0};
-
-    // Update Buffer
-    buffer[0] = 0x7E;
-    buffer[1] = 0x7E;
-    buffer[2] = 0x44;
-    buffer[3] = 0x00;
-    buffer[4] = 0x00;
-    buffer[5] = 0x7D;
-    buffer[6] = 0x80 + ratio;
-    buffer[14] = 0x00;
-    buffer[47] = get_cam_checksum(buffer, 0, 47);
-
-    // Send Buffer
-    CAM_UART->write(buffer, 48);
-}
-
-
+// void AP_Q30::send_cmd_ir_digital_zoom(uint8_t ratio)
 // -------------------------------------------------------------------------
-// Send "set zoom" Command to CAM
+// Removed : Send "set zoom" Command to CAM
 // -------------------------------------------------------------------------
-void AP_Q30::send_cmd_zoom(uint8_t zoom)
-{
-    // Declare Variables
-    uint8_t buffer[CAM_UART_BUFFER_SIZE];
-
-    // Update Buffer
-    buffer[0] = 0x81;
-    buffer[1] = 0x01;
-    buffer[2] = 0x04;
-    buffer[3] = 0x07;
-    buffer[4] = zoom;
-    buffer[5] = 0xFF;
-
-    // Send Buffer
-    CAM_UART->write(buffer, 6);
-}
-
-
+// void AP_Q30::send_cmd_zoom(uint8_t zoom)
 // -------------------------------------------------------------------------
-// Send "set focus" Command to CAM
+// Removed : Send "set focus" Command to CAM
 // -------------------------------------------------------------------------
-void AP_Q30::send_cmd_focus(uint8_t focus)
-{
-    // Declare Variables
-    uint8_t buffer[CAM_UART_BUFFER_SIZE];
-
-    // Update Buffer
-    buffer[0] = 0x81;
-    buffer[1] = 0x01;
-    buffer[2] = 0x04;
-    buffer[3] = 0x08;
-    buffer[4] = focus;
-    buffer[5] = 0xFF;
-
-    // Send Buffer
-    CAM_UART->write(buffer, 6);
-}
-
-
+// void AP_Q30::send_cmd_focus(uint8_t focus)
 // -------------------------------------------------------------------------
-// Send "set shutter" Command to CAM
+// Removed : Send "set shutter" Command to CAM
 // -------------------------------------------------------------------------
-void AP_Q30::send_cmd_shutter(uint8_t shutter)
-{
-    // Declare Variables
-    uint8_t buffer[CAM_UART_BUFFER_SIZE] = {0};
-
-    // Update Buffer
-    buffer[0] = 0x7E;
-    buffer[1] = 0x7E;
-    buffer[2] = 0x44;
-    buffer[3] = 0x00;
-    buffer[4] = 0x00;
-    buffer[5] = 0x7C;
-    buffer[6] = shutter;
-    buffer[47] = get_cam_checksum(buffer, 0, 47);
-
-    // Send Buffer
-    CAM_UART->write(buffer, 48);
-}
-
-
+// void AP_Q30::send_cmd_shutter(uint8_t shutter)
 // -------------------------------------------------------------------------
 // Send "Hold angle" Command to CAM
 // -------------------------------------------------------------------------
 void AP_Q30::send_cmd_hold_angle(void)
 {
-    // Declare Variables
-    uint8_t buffer[CAM_UART_BUFFER_SIZE];
+    AP_Mount *mount = AP::mount();
+    if (mount == nullptr) {
+        return;
+    }
 
-    // Update Buffer with new protocol - JBS 23.11.08
-    buffer[0] = 0x55;   //header
-    buffer[1] = 0xAA;   //header
-    buffer[2] = 0xDC;   //header
-    buffer[3] = 0x0C;   //Length
-    buffer[4] = 0x1A;   //ID : A1 Servo Control Common
-    buffer[5] = 0x01;   //Mode : Speed mode 0x01
-    buffer[6] = 0x00;   //YSH
-    buffer[7] = 0x00;   // YSL
-    buffer[8] = 0x00;   // PSH
-    buffer[9] = 0x00;   // PSL
-    buffer[10] = 0x00;  // dummy
-    buffer[11] = 0x00;  // dummy
-    buffer[12] = 0x00;  // dummy
-    buffer[13] = 0x00;  // dummy
-    buffer[14] = get_cam_checksumX(buffer, 3, 14); // New checksum rule - JBS 23.11.08
-
-    // Send Buffer
-    CAM_UART->write(buffer, 15); //Size changed from 20 to 15 - JBS 23.11.08
+    mount->set_rate_target(0,0,0,0);
 }
 
-
 // -------------------------------------------------------------------------
-// Send "get_angle" Command to CAM
+// Removed : Send "get_angle" Command to CAM
 // -------------------------------------------------------------------------
-void AP_Q30::get_cmd_angle() const
-{
-    // Declare Variables
-    uint8_t buffer[CAM_UART_BUFFER_SIZE];
-
-    // Update Buffer
-    buffer[0] = 0x3E;
-    buffer[1] = 0x3D;
-    buffer[2] = 0x00;
-    buffer[3] = 0x3D;
-    buffer[4] = 0x00;
-
-    // Send Buffer
-    CAM_UART->write(buffer, 5);
-}
-
-
+// void AP_Q30::get_cmd_angle() const
 // -------------------------------------------------------------------------
-// Send "get_zoom" Command to CAM
+// Removed : Send "get_zoom" Command to CAM
 // -------------------------------------------------------------------------
-void AP_Q30::get_cmd_zoom() const
-{
-    // Declare Variables
-    uint8_t buffer[CAM_UART_BUFFER_SIZE];
-
-    // Update Buffer
-    buffer[0] = 0x81;
-    buffer[1] = 0x09;
-    buffer[2] = 0x04;
-    buffer[3] = 0x47;
-    buffer[4] = 0xFF;
-
-    // Send Buffer
-    CAM_UART->write(buffer, 5);
-}
-
-
+// void AP_Q30::get_cmd_zoom() const
 // -------------------------------------------------------------------------
 // Stop CAM & Stabilize
 // -------------------------------------------------------------------------
 void AP_Q30::no_control_mode_operation(mavlink_sys_icd_gcs_flcc_cam_cmd_t cam_cmd)
 {
+    AP_Mount *mount = AP::mount();
+    if (mount == nullptr) {
+        return;
+    }
+
     switch (cam_cmd.Zoom_Focus_Stop_CMD)
     {
         // Stop //19.5.20 수정
         case 0:
-            send_cmd_zoom(0x00);
-            send_cmd_focus(0x00);
+            mount->set_zoom(0, ZoomType::RATE, 0);
+            //Focus also stops. So, same as :  mount->set_focus(0, FocusType::RATE, 0);
 
             debug_cam_zoom_cmd = 3U; //debug //0: not sent, 1: IN, 2: OUT, 3: STOP
             debug_cam_focus_cmd = 3U; //debug //0: not sent, 1: IN, 2: OUT, 3: STOP
@@ -462,27 +163,25 @@ void AP_Q30::no_control_mode_operation(mavlink_sys_icd_gcs_flcc_cam_cmd_t cam_cm
 
         // Zoom In
         case 1:
-            send_cmd_zoom(0x27);
-
+            mount->set_zoom(0, ZoomType::RATE, 1);
             debug_cam_zoom_cmd = 1U; //debug //0: not sent, 1: IN, 2: OUT, 3: STOP
             break;
 
         // Zoom Out
         case 2:
-            send_cmd_zoom(0x37);
-
+            mount->set_zoom(0, ZoomType::RATE, -1);
             debug_cam_zoom_cmd = 2U; //debug //0: not sent, 1: IN, 2: OUT, 3: STOP
             break;
 
         // Focus In
         case 3:
-            send_cmd_focus(0x27);
+            mount->set_focus(0, FocusType::RATE, 1);
             debug_cam_focus_cmd = 1U; //debug //0: not sent, 1: IN, 2: OUT, 3: STOP
             break;
 
         // Focus Out
         case 4:
-            send_cmd_focus(0x37);
+            mount->set_focus(0, FocusType::RATE, -1);
             debug_cam_focus_cmd = 2U; //debug //0: not sent, 1: IN, 2: OUT, 3: STOP
             break;
 
@@ -498,19 +197,19 @@ void AP_Q30::no_control_mode_operation(mavlink_sys_icd_gcs_flcc_cam_cmd_t cam_cm
         {
         // Record Start
         case 1:
-            send_cmd_shutter(0x01);
+            mount->record_video(0, 1);
             debug_cam_record_cmd = 1U; //debug //0: not sent, 1: start, 2: stop, 3: shutter
             break;
 
         // Record Stop
         case 2:
-            send_cmd_shutter(0x00);
+            mount->record_video(0, 0);
             debug_cam_record_cmd = 2U; //debug //0: not sent, 1: start, 2: stop, 3: shutter
             break;
 
         // Shutter
         case 4:
-            send_cmd_shutter(0x02);
+            mount->take_picture(0);
             debug_cam_record_cmd = 3U; //debug //0: not sent, 1: start, 2: stop, 3: shutter
             break;
 
@@ -522,514 +221,217 @@ void AP_Q30::no_control_mode_operation(mavlink_sys_icd_gcs_flcc_cam_cmd_t cam_cm
     // TRACKING
     if(cam_cmd.Tracking_CMD==1U)        //start
     {
-        send_cmd_track_start();
+        mount->set_tracking(0, TrackingType::TRK_POINT, Vector2f{0.5, 0.5}, Vector2f{});    //check do_aux_function_camera_image_tracking() in RC_Channel.cpp for usage
         debug_cam_track_cmd = 1U; //debug //0: not sent, 1: start, 2: stop
     }
     else if(cam_cmd.Tracking_CMD==2U)   //stop
     {
-        send_cmd_track_end();
+        mount->set_tracking(0, TrackingType::TRK_NONE, Vector2f{0.5, 0.5}, Vector2f{});    //check do_aux_function_camera_image_tracking() in RC_Channel.cpp for usage
         debug_cam_track_cmd = 2U; //debug //0: not sent, 1: start, 2: stop
-    }
-    else
-    {
-        //nothing
     }
 
 }
-
 
 // -------------------------------------------------------------------------
 // Control IR Functions
 // -------------------------------------------------------------------------
 void AP_Q30::IR_operation(mavlink_sys_icd_gcs_flcc_cam_cmd_t cam_cmd)
 {
+    AP_Mount *mount = AP::mount();
+    if (mount == nullptr) {
+        return;
+    }
+    
     // Control Window Combination
     if(cam_cmd.Tracking_CMD==10)                // EO FULL & IR PIP
     {
-        send_cmd_eo_ir_mode(0x00, 0xb8);
+        mount->set_camera_source(0, 1, 2);
+        _primary_EOIR_source = 1;
         debug_cam_ir_cmd = 1U; //debug //0: not sent, 1: mode, 2: coler, 3: zoom
     }
     else if(cam_cmd.Tracking_CMD==11)           // IR FULL
     {
-        send_cmd_eo_ir_mode(0x01, 0xb9);
+        mount->set_camera_source(0, 2, 0);
+        _primary_EOIR_source = 2;
         debug_cam_ir_cmd = 1U; //debug //0: not sent, 1: mode, 2: coler, 3: zoom
     }
     else if(cam_cmd.Tracking_CMD==12)           // IR FULL & EO PIP
     {
-        send_cmd_eo_ir_mode(0x02, 0xba);
+        mount->set_camera_source(0, 2, 1);
+        _primary_EOIR_source = 2;
         debug_cam_ir_cmd = 1U; //debug //0: not sent, 1: mode, 2: coler, 3: zoom
     }
     else if(cam_cmd.Tracking_CMD==13U)          // EO FULL
     {
-        send_cmd_eo_ir_mode(0x03, 0xbb);
+        mount->set_camera_source(0, 1, 0);
+        _primary_EOIR_source = 1;
         debug_cam_ir_cmd = 1U; //debug //0: not sent, 1: mode, 2: coler, 3: zoom
     }
     else
     {
-        //nothing
-    }
-
-
-    // Control Image Color
-    if(cam_cmd.Tracking_CMD==14U)               // White Hot
-    {
-        send_cmd_ir_color(0x00, 0x01, 0xba);
-        debug_cam_ir_cmd = 2U; //debug //0: not sent, 1: mode, 2: coler, 3: zoom
-    }
-    else if(cam_cmd.Tracking_CMD==15U)          // Black Hot
-    {
-        send_cmd_ir_color(0x00, 0x00, 0xb9);
-        debug_cam_ir_cmd = 2U; //debug //0: not sent, 1: mode, 2: coler, 3: zoom
-    }
-    else if(cam_cmd.Tracking_CMD==16U)          // Color 1
-    {
-        send_cmd_ir_color(0x01, 0x00, 0xba);
-        debug_cam_ir_cmd = 2U; //debug //0: not sent, 1: mode, 2: coler, 3: zoom
-    }
-    else if(cam_cmd.Tracking_CMD==17U)          // Color 2
-    {
-        send_cmd_ir_color(0x02, 0x00, 0xbb);
-        debug_cam_ir_cmd = 2U; //debug //0: not sent, 1: mode, 2: coler, 3: zoom
-    }
-    else if(cam_cmd.Tracking_CMD==18U)          // Color 3
-    {
-        send_cmd_ir_color(0x03, 0x00, 0xbc);
-        debug_cam_ir_cmd = 2U; //debug //0: not sent, 1: mode, 2: coler, 3: zoom
-    }
-    else if(cam_cmd.Tracking_CMD==19U)          // Color 4
-    {
-        send_cmd_ir_color(0x04, 0x00, 0xbd);
-        debug_cam_ir_cmd = 2U; //debug //0: not sent, 1: mode, 2: coler, 3: zoom
-    }
-    else
-    {
-        //nothing
-    }
-
-
-    // Control IR Zoom
-    if(cam_cmd.Tracking_CMD==21U)           // IR Zoom 1x
-    {
-        send_cmd_ir_digital_zoom(1);
-        debug_cam_ir_cmd = 3U; //debug //0: not sent, 1: mode, 2: coler, 3: zoom
-    }
-    else if(cam_cmd.Tracking_CMD==22U)      // IR Zoom 2x
-    {
-        send_cmd_ir_digital_zoom(2);
-        debug_cam_ir_cmd = 3U; //debug //0: not sent, 1: mode, 2: coler, 3: zoom
-    }
-    else if(cam_cmd.Tracking_CMD==23U)      // IR Zoom 3x
-    {
-        send_cmd_ir_digital_zoom(3);
-        debug_cam_ir_cmd = 3U; //debug //0: not sent, 1: mode, 2: coler, 3: zoom
-    }
-    else if(cam_cmd.Tracking_CMD==24U)      // IR Zoom 4x
-    {
-        send_cmd_ir_digital_zoom(4);
-        debug_cam_ir_cmd = 3U; //debug //0: not sent, 1: mode, 2: coler, 3: zoom
-    }
-    else
-    {
-        //nothing
-    }
-}
-
-
-// -------------------------------------------------------------------------
-// Receive Data from CAM
-// -------------------------------------------------------------------------
-int32_t AP_Q30::receive_cam_uart_data(uint16_t* buffer) const
-{
-    int32_t recv_size = 0;
-
-    while ((CAM_UART->available() > 0) && (CAM_UART_BUFFER_SIZE > recv_size))
-    {
-        buffer[recv_size] = CAM_UART->read();
-        recv_size = recv_size + 1;
-    }
-
-    return recv_size;
-}
-
-
-// -------------------------------------------------------------------------
-// Calculate Checksum
-// -------------------------------------------------------------------------
-uint8_t AP_Q30::get_cam_checksum(uint8_t* buffer, int pos, int size)
-{
-    uint8_t checksum = 0;
-
-    for (int i = pos; i < size; i++)
-    {
-        checksum = (uint8_t)(checksum + buffer[i]);
-    }
-
-    return checksum;
-}
-
-// -------------------------------------------------------------------------
-// Calculate Checksum for new Viewpro protocol - JBS 23.11.08
-// -------------------------------------------------------------------------
-uint8_t AP_Q30::get_cam_checksumX(uint8_t* buffer, int pos, int size)
-{
-    uint8_t checksum = buffer[pos]; //This should be the length
-
-    for (int i = (pos+1); i < size; i++)
-    {
-        checksum = (uint8_t)(checksum ^ buffer[i]); //bit-wise add(=XOR)
-    }
-
-    return checksum;
-}
-
- // -------------------------------------------------------------------------
- // Parse the "angle" Data from CAM
- // -------------------------------------------------------------------------
-void AP_Q30::parse_cam_angle(uint16_t* buffer) const
-{
-    if ((0x003E == buffer[0]) && (0x003D == buffer[1]) && (0x0036 == buffer[2]) && (0x0073 == buffer[3]))
-    {
-        CAM_ATTITUDE_STATUS.Roll_REL_ANG        = (int32_t)(get_cam_angle_32(&buffer[8]) * 10.0f);
-        CAM_ATTITUDE_STATUS.Pitch_REL_ANG       = (int32_t)(get_cam_angle_32(&buffer[26]) * 10.0f);
-        CAM_ATTITUDE_STATUS.Yaw_REL_ANG         = (int32_t)(get_cam_angle_32(&buffer[44]) * 10.0f);
-        CAM_ATTITUDE_STATUS.Roll_IMU_ANG        = (int16_t)(get_cam_angle_16(&buffer[4]) * 10.0f);
-        CAM_ATTITUDE_STATUS.Roll_RC_Target_ANG  = (int16_t)(get_cam_angle_16(&buffer[6]) * 10.0f);
-        CAM_ATTITUDE_STATUS.Pitch_IMU_ANG       = (int16_t)(get_cam_angle_16(&buffer[22]) * 10.0f);
-        CAM_ATTITUDE_STATUS.Pitch_RC_Target_ANG = (int16_t)(get_cam_angle_16(&buffer[24]) * 10.0f);
-        CAM_ATTITUDE_STATUS.Yaw_IMU_ANG         = (int16_t)(get_cam_angle_16(&buffer[40]) * 10.0f);
-        CAM_ATTITUDE_STATUS.Yaw_RC_Target_ANG   = (int16_t)(get_cam_angle_16(&buffer[42]) * 10.0f);
-    }
-}
-
-
-// -------------------------------------------------------------------------
-// Parse the "zoom" Data from CAM
-// -------------------------------------------------------------------------
-void AP_Q30::parse_zoom_position(uint16_t* buffer) const
-{
-    if ((0x0090 == buffer[0]) && (0x0050 == buffer[1]))
-    {
-        uint16_t Zoom = (uint16_t)(((buffer[2] << 12) & 0xF000) | ((buffer[3] << 8) & 0x0F00) | ((buffer[4] << 4) & 0x00F0) | (buffer[5] & 0x000F));
-
-        if(Zoom <= 0)//iajo
-            {
-                CAM_ATTITUDE_STATUS.Zoom_POS_FB = 1;
-            }
-
-        else if(Zoom > 0 && Zoom <= 0x16A1)
-            {
-                CAM_ATTITUDE_STATUS.Zoom_POS_FB = 2;
-            }
-
-        else if(Zoom > 0x16A1 && Zoom <= 0x2063)
-            {
-                CAM_ATTITUDE_STATUS.Zoom_POS_FB = 3;
-            }
-
-        else if(Zoom > 0x2063 && Zoom <= 0x2628)
-            {
-                CAM_ATTITUDE_STATUS.Zoom_POS_FB = 4;
-            }
-
-        else if(Zoom > 0x2628 && Zoom <= 0x2A1D)
-            {
-                CAM_ATTITUDE_STATUS.Zoom_POS_FB = 5;
-            }
-        else if(Zoom > 0x2A1D && Zoom <= 0x2D13)
-            {
-                CAM_ATTITUDE_STATUS.Zoom_POS_FB = 6;
-            }
-        else if(Zoom > 0x2D13 && Zoom <= 0x2F6D)
-            {
-                CAM_ATTITUDE_STATUS.Zoom_POS_FB = 7;
-            }
-        else if(Zoom > 0x2F6D && Zoom <= 0x3161)
-            {
-                CAM_ATTITUDE_STATUS.Zoom_POS_FB = 8;
-            }
-        else if(Zoom > 0x3161 && Zoom <= 0x330D)
-            {
-                CAM_ATTITUDE_STATUS.Zoom_POS_FB = 9;
-            }
-        else if(Zoom > 0x330D && Zoom <= 0x3486)
-            {
-                CAM_ATTITUDE_STATUS.Zoom_POS_FB = 10;
-            }
-        else if(Zoom > 0x3486 && Zoom <= 0x35D7)
-            {
-                CAM_ATTITUDE_STATUS.Zoom_POS_FB = 11;
-            }
-        else if(Zoom > 0x35D7 && Zoom <= 0x3709)
-            {
-                CAM_ATTITUDE_STATUS.Zoom_POS_FB = 12;
-            }
-        else if(Zoom > 0x3709 && Zoom <= 0x3820)
-            {
-                CAM_ATTITUDE_STATUS.Zoom_POS_FB = 13;
-            }
-        else if(Zoom > 0x3820 && Zoom <= 0x3920)
-            {
-                CAM_ATTITUDE_STATUS.Zoom_POS_FB = 14;
-            }
-        else if(Zoom > 0x3920 && Zoom <= 0x3A0A)
-            {
-                CAM_ATTITUDE_STATUS.Zoom_POS_FB = 15;
-            }
-        else if(Zoom > 0x3A0A && Zoom <= 0x3ADD)
-            {
-                CAM_ATTITUDE_STATUS.Zoom_POS_FB = 16;
-            }
-        else if(Zoom > 0x3ADD && Zoom <= 0x3B9C)
-            {
-                CAM_ATTITUDE_STATUS.Zoom_POS_FB = 17;
-            }
-        else if(Zoom > 0x3B9C && Zoom <= 0x3C46)
-            {
-                CAM_ATTITUDE_STATUS.Zoom_POS_FB = 18;
-            }
-        else if(Zoom > 0x3C46 && Zoom <= 0x3CDC)
-            {
-                CAM_ATTITUDE_STATUS.Zoom_POS_FB = 19;
-            }
-        else if(Zoom > 0x3CDC && Zoom <= 0x3D60)
-            {
-                CAM_ATTITUDE_STATUS.Zoom_POS_FB = 20;
-            }
-        else if(Zoom > 0x3D60 && Zoom <= 0x3DD4)
-            {
-                CAM_ATTITUDE_STATUS.Zoom_POS_FB = 21;
-            }
-        else if(Zoom > 0x3DD4 && Zoom <= 0x3E39)
-            {
-                CAM_ATTITUDE_STATUS.Zoom_POS_FB = 22;
-            }
-        else if(Zoom > 0x3E39 && Zoom <= 0x3E90)
-            {
-                CAM_ATTITUDE_STATUS.Zoom_POS_FB = 23;
-            }
-        else if(Zoom > 0x3E90 && Zoom <= 0x3EDC)
-            {
-                CAM_ATTITUDE_STATUS.Zoom_POS_FB = 24;
-            }
-        else if(Zoom > 0x3EDC && Zoom <= 0x3F1E)
-            {
-                CAM_ATTITUDE_STATUS.Zoom_POS_FB = 25;
-            }
-        else if(Zoom > 0x3F1E && Zoom <= 0x3F57)
-            {
-                CAM_ATTITUDE_STATUS.Zoom_POS_FB = 26;
-            }
-        else if(Zoom > 0x3F57 && Zoom <= 0x3F8A)
-            {
-                CAM_ATTITUDE_STATUS.Zoom_POS_FB = 27;
-            }
-        else if(Zoom > 0x3F8A && Zoom <= 0x3FB6)
-            {
-                CAM_ATTITUDE_STATUS.Zoom_POS_FB = 28;
-            }
-        else if(Zoom > 0x3FB6 && Zoom <= 0x3FDC)
-            {
-                CAM_ATTITUDE_STATUS.Zoom_POS_FB = 29;
-            }
-        else if(Zoom > 0x3FDC && Zoom <= 0x4000)
-            {
-                CAM_ATTITUDE_STATUS.Zoom_POS_FB = 30;
-            }
-        else
-        {
-
+        if(_primary_EOIR_source == 1) {     //if EO is the main source, get zoom for EO
+            _current_zoom_EO = mount->get_zoom_times(0);
+        } else if (_primary_EOIR_source == 2) { //if IR is the main source, get zoom for IR
+            _current_zoom_IR = mount->get_zoom_times(0);
         }
     }
-}
+    // gcs().send_text(MAV_SEVERITY_ERROR,"Zoom %u Foc %u Rec %u Trk %u IR %u", debug_cam_zoom_cmd, debug_cam_focus_cmd, debug_cam_record_cmd, debug_cam_track_cmd, debug_cam_ir_cmd);
 
+    //IR color is not supported by Ardupilot yet
 
-// -------------------------------------------------------------------------
-// calculates the earth-frame roll, tilt and pan angles (and radians) to point at the given target
-// -------------------------------------------------------------------------
-bool AP_Q30::calc_angle_to_location(Vector3f& angles_to_target_rad)
-{
-    Location current_loc;
+    // // Control Image Color
+    // if(cam_cmd.Tracking_CMD==14U)               // White Hot
+    // {
+    //     send_cmd_ir_color(0x00, 0x01, 0xba);
+    //     debug_cam_ir_cmd = 2U; //debug //0: not sent, 1: mode, 2: coler, 3: zoom
+    // }
+    // else if(cam_cmd.Tracking_CMD==15U)          // Black Hot
+    // {
+    //     send_cmd_ir_color(0x00, 0x00, 0xb9);
+    //     debug_cam_ir_cmd = 2U; //debug //0: not sent, 1: mode, 2: coler, 3: zoom
+    // }
+    // else if(cam_cmd.Tracking_CMD==16U)          // Color 1
+    // {
+    //     send_cmd_ir_color(0x01, 0x00, 0xba);
+    //     debug_cam_ir_cmd = 2U; //debug //0: not sent, 1: mode, 2: coler, 3: zoom
+    // }
+    // else if(cam_cmd.Tracking_CMD==17U)          // Color 2
+    // {
+    //     send_cmd_ir_color(0x02, 0x00, 0xbb);
+    //     debug_cam_ir_cmd = 2U; //debug //0: not sent, 1: mode, 2: coler, 3: zoom
+    // }
+    // else if(cam_cmd.Tracking_CMD==18U)          // Color 3
+    // {
+    //     send_cmd_ir_color(0x03, 0x00, 0xbc);
+    //     debug_cam_ir_cmd = 2U; //debug //0: not sent, 1: mode, 2: coler, 3: zoom
+    // }
+    // else if(cam_cmd.Tracking_CMD==19U)          // Color 4
+    // {
+    //     send_cmd_ir_color(0x04, 0x00, 0xbd);
+    //     debug_cam_ir_cmd = 2U; //debug //0: not sent, 1: mode, 2: coler, 3: zoom
+    // }
+    // else
+    // {
+    //     //nothing
+    // }
 
-    if (!AP::ahrs().get_location(current_loc)) {
-        return false;
-    }
+    //IR zoom => Now control main source zoom
 
-    // Calculate relative distance from target to vehicle position
-    // Now North direction in X, East direction is Y (KAL)
-    const float GPS_vector_y = (Q30_Target.lng-current_loc.lng)*cosf(radians((current_loc.lat+Q30_Target.lat)*0.00000005f))*0.01113195f;
-    const float GPS_vector_x = (Q30_Target.lat-current_loc.lat)*0.01113195f;
+    if ((cam_cmd.Zoom_Focus_Stop_CMD == 0)&&(cam_cmd.Tracking_CMD >= 21)&&(cam_cmd.Tracking_CMD <= 24)) {
 
-    int32_t current_alt_cm = 0;
-    if (!current_loc.get_alt_cm(Location::AltFrame::ABOVE_HOME, current_alt_cm)) {
-        return false;
-    }
+        debug_cam_ir_cmd = 3U; //debug //0: not sent, 1: mode, 2: coler, 3: zoom
 
-    float GPS_vector_z = (float)((current_alt_cm - Q30_Target.alt)*0.01);// Convert to meter (KAL)
-
-    // 3-2-1 DCM Matrix for Gimbal coordinate (Gimbal Coordinate is just same as KUS-HD3 Attitude) (KAL)
-    float phi   = wrap_PI(AP::ahrs().get_roll_rad());
-    float theta = wrap_PI(AP::ahrs().get_pitch_rad());
-    float psi   = wrap_PI(AP::ahrs().get_yaw_rad());
-
-    float body_x = 0.0f;
-    float body_y = 0.0f;
-    float body_z = 0.0f;
-
-    body_x =                                 cosf(theta)*cosf(psi)*GPS_vector_x +                                 cosf(theta)*sinf(psi)*GPS_vector_y -           sinf(theta)*GPS_vector_z;
-    body_y = (sinf(phi)*sinf(theta)*cosf(psi)-cosf(phi)*sinf(psi))*GPS_vector_x + (sinf(phi)*sinf(theta)*sinf(psi)+cosf(phi)*cosf(psi))*GPS_vector_y + sinf(phi)*cosf(theta)*GPS_vector_z;
-    body_z = (cosf(phi)*sinf(theta)*cosf(psi)+sinf(phi)*sinf(psi))*GPS_vector_x + (cosf(phi)*sinf(theta)*sinf(psi)-sinf(phi)*cosf(psi))*GPS_vector_y + cosf(phi)*cosf(theta)*GPS_vector_z;
-
-    float target_distance = norm(body_x, body_y); // Now every thing changed to meter Careful , centimeters here locally. Baro/alt is in cm, lat/lon is in meters.
-
-    // Initialize all angles to zero
-    angles_to_target_rad.zero();
-
-    // Calculate tilt angle
-    angles_to_target_rad.y = atan2f(body_z,target_distance);// Using body axis coordinate 21.10.12
-
-    //Gimbal cmd expend
-    float pan_cmd = 0.0f;
-    float pan_limit = radians(290);
-    float pan_original = wrap_PI(atan2f(body_y,body_x));//Using body axis coordinate 21.10.12
-
-    pan_cmd = pan_angle_calc(pan_original, Q30_Target.new_loc);
-    pan_cmd = pan_angle_limit(pan_cmd, pan_original, pan_limit);
-
-    angles_to_target_rad.z = pan_cmd;
-
-    return true;
-}
-
-
-// -------------------------------------------------------------------------
-// Decode CAM angle for 2byte buffer
-// -------------------------------------------------------------------------
-float AP_Q30::get_cam_angle_16(uint16_t* buffer) const
-{
-    int16_t dummy = (int16_t)(((buffer[1] << 8) & 0xFF00) | (buffer[0] & 0x00FF));
-    float value = (float)dummy * 0.02197f;
-
-    return value;
-}
-
-
-// -------------------------------------------------------------------------
-// Decode CAM angle for 4byte buffer
-// -------------------------------------------------------------------------
-float AP_Q30::get_cam_angle_32(uint16_t* buffer) const
-{
-    int32_t dummy = (int32_t)(((buffer[3] << 24) & 0xFF000000) | ((buffer[2] << 16) & 0x00FF0000) | ((buffer[1] << 8) & 0x0000FF00) | (buffer[0] & 0x000000FF));
-    float value = (float)dummy * 0.02197f;
-
-    return value;
-}
-
-
-// -------------------------------------------------------------------------
-// Encode angle to lower byte
-// -------------------------------------------------------------------------
-//  Changed by JBS - 23.11.08
-//  int16_t angle : deg unit, just -180 ~ 180 deg 
-//  For new protocol, 1bit = 360/65536 deg, and 65536/360 = 182.04444...
-uint8_t AP_Q30::get_cam_angle_byte_l(int16_t angle)
-{
-    //angle = (int16_t)(angle / 0.02197F);
-    angle = (int16_t)(angle * 182.044F);
-    uint8_t byte = (uint8_t)(angle & 0x00FF) ;
-
-    return byte;
-}
-
-
-// -------------------------------------------------------------------------
-// Encode angle to upper byte
-// -------------------------------------------------------------------------
-//  Changed by JBS - 23.11.08
-uint8_t AP_Q30::get_cam_angle_byte_h(int16_t angle)
-{
-    //angle = (int16_t)(angle / 0.02197F);
-    angle = (int16_t)(angle * 182.044F);
-    uint8_t byte = (uint8_t)((angle >> 8) & 0x00FF);
-
-    return byte;
-}
-
-
-// -------------------------------------------------------------------------
-// Encode speed to lower byte
-// -------------------------------------------------------------------------
-//  Changed by JBS - 23.11.08
-uint8_t AP_Q30::get_cam_speed_byte_l(int16_t speed)
-{
-    //speed = (int16_t)(speed / 0.122F);
-    speed = speed * 100;    //For new protocol, 1bit = 0.01 deg/s
-    uint8_t byte = (uint8_t)(speed & 0x00FF) ;
-
-    return byte;
-}
-
-
-// -------------------------------------------------------------------------
-// Encode speed to upper byte
-// -------------------------------------------------------------------------
-//  Changed by JBS - 23.11.08
-uint8_t AP_Q30::get_cam_speed_byte_h(int16_t speed)
-{
-    //speed = (int16_t)(speed / 0.122F);
-    speed = speed * 100;    //For new protocol, 1bit = 0.01 deg/s
-    uint8_t byte = (uint8_t)((speed >> 8) & 0x00FF);
-
-    return byte;
-}
-
-
-// -------------------------------------------------------------------------
-// Calculate pan angle cmd -2pi~2pi (KAL)
-// -------------------------------------------------------------------------
-float AP_Q30::pan_angle_calc(float pan_angle, bool new_loc)
-{
-    float sign = 1.0f;
-    float pan_res = 0.0f;
-
-    if(new_loc)
-    {
-        pan_res         = pan_angle;
-        Pan_CMD_Prev    = pan_res;
-        new_loc         = false;
-        return pan_res;
-    }
-
-    if(((pan_angle * Pan_CMD_Prev)<0.0f) && (fabsf(pan_angle - Pan_CMD_Prev) > radians(270.0f)))
-    {
-        if(pan_angle < 0.0f)
-        {
-            sign = 1.0f;
-        } else {
-            sign = -1.0f;
+        if (_primary_EOIR_source == 1) {    //This case will lead to zoom EO
+            switch (cam_cmd.Tracking_CMD) 
+            {
+                case 21:    //Zoom x1
+                    mount->set_zoom(0, ZoomType::PCT, 1.0);
+                break;
+                case 22:    //Zoom x2
+                    mount->set_zoom(0, ZoomType::PCT, 2.0);
+                break;
+                case 23:    //Zoom x3
+                    mount->set_zoom(0, ZoomType::PCT, 15.0);
+                break;
+                case 24:    //Zoom x4
+                    mount->set_zoom(0, ZoomType::PCT, _Max_zoom_EO);
+                break;
+                default:
+                break;
+            }
+        } else if (_primary_EOIR_source == 2) { //This case will lead to zoom IR
+            switch (cam_cmd.Tracking_CMD) 
+            {
+                case 21:    //Zoom x1
+                    mount->set_zoom(0, ZoomType::PCT, 1.0);
+                break;
+                case 22:    //Zoom x2
+                    mount->set_zoom(0, ZoomType::PCT, 2.0);
+                break;
+                case 23:    //Zoom x3
+                    mount->set_zoom(0, ZoomType::PCT, 3.0);
+                break;
+                case 24:    //Zoom x4
+                    mount->set_zoom(0, ZoomType::PCT, _Max_zoom_IR);
+                break;
+                default:
+                break;
+            }
         }
-        pan_res = radians(360.0f)*sign + pan_angle;
-    } else{
-        pan_res = pan_angle;
     }
-
-    Pan_CMD_Prev = pan_res;
-
-    return pan_res;
+    
 }
 
 // -------------------------------------------------------------------------
-// Limit pan angle cmd accroding to gimbal spec (KAL)
+// Removed : Receive Data from CAM
 // -------------------------------------------------------------------------
-float AP_Q30::pan_angle_limit(float pan_angle, float pan_original, float pan_limit)
-{
-    if(fabsf(pan_angle)<pan_limit)
-    {
-        return pan_angle;
-    } else {
-        return pan_original;
-    }
-}
+// int32_t AP_Q30::receive_cam_uart_data(uint16_t* buffer) const
 
+// -------------------------------------------------------------------------
+// Removed : Calculate Checksum - Legacy method for old packets
+// -------------------------------------------------------------------------
+// uint8_t AP_Q30::get_cam_checksum(uint8_t* buffer, int pos, int size) const
+
+// -------------------------------------------------------------------------
+// Removed : Calculate Checksum for new Viewpro protocol v3.4.9 - JBS 23.11.08
+// -------------------------------------------------------------------------
+// uint8_t AP_Q30::get_cam_checksumX(uint8_t* buffer, int pos, int size) const
+
+ // -------------------------------------------------------------------------
+ // Removed : Parse the "angle" Data from CAM
+ // -------------------------------------------------------------------------
+// void AP_Q30::parse_cam_angle(uint16_t* buffer) const
+
+// -------------------------------------------------------------------------
+// Removed : Parse the "zoom" Data from CAM
+// -------------------------------------------------------------------------
+// void AP_Q30::parse_zoom_position(uint16_t* buffer) const
+
+// -------------------------------------------------------------------------
+// Removed : calculates the earth-frame roll, tilt and pan angles (and radians) to point at the given target
+// -------------------------------------------------------------------------
+// bool AP_Q30::calc_angle_to_location(Vector3f& angles_to_target_rad)
+
+// -------------------------------------------------------------------------
+// Removed : Decode CAM angle for 2byte buffer
+// -------------------------------------------------------------------------
+// float AP_Q30::get_cam_angle_16(uint16_t* buffer) const
+
+// -------------------------------------------------------------------------
+// Removed : Decode CAM angle for 4byte buffer
+// -------------------------------------------------------------------------
+// float AP_Q30::get_cam_angle_32(uint16_t* buffer) const
+
+// -------------------------------------------------------------------------
+// Removed :Encode angle to lower byte
+// -------------------------------------------------------------------------
+// uint8_t AP_Q30::get_cam_angle_byte_l(int16_t angle)
+
+// -------------------------------------------------------------------------
+// Removed :Encode angle to upper byte
+// -------------------------------------------------------------------------
+//  Changed by JBS - 23.11.08
+// uint8_t AP_Q30::get_cam_angle_byte_h(int16_t angle)
+
+// -------------------------------------------------------------------------
+// Removed :Encode speed to lower byte
+// -------------------------------------------------------------------------
+// uint8_t AP_Q30::get_cam_speed_byte_l(int16_t speed)
+
+// -------------------------------------------------------------------------
+// Removed : Encode speed to upper byte
+// -------------------------------------------------------------------------
+// uint8_t AP_Q30::get_cam_speed_byte_h(int16_t speed)
+
+// -------------------------------------------------------------------------
+// Removed : Calculate pan angle cmd -2pi~2pi (KAL)
+// -------------------------------------------------------------------------
+// float AP_Q30::pan_angle_calc(float pan_angle, bool new_loc)
+
+// -------------------------------------------------------------------------
+// Removed : Limit pan angle cmd accroding to gimbal spec (KAL)
+// -------------------------------------------------------------------------
+// float AP_Q30::pan_angle_limit(float pan_angle, float pan_original, float pan_limit)
 namespace AP {
 
 AP_Q30 *Q30()
