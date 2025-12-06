@@ -1,5 +1,6 @@
 # Work Note for KAL FLCC version-up from 4.6.2
 
+ - V4.0.5.  Release of the FIRMWARE_VERSION as 4.0.5
  - V4.0.05. Camera control has changed to work with legacy code of Ardupilot for communication with Viewpro camera  
     - Disabled message id="285" name="GIMBAL_DEVICE_ATTITUDE_STATUS" due to error in KGCS  
     - Have to set SERIAL4_PROTOCOL = 8 (Gimbal), SERIAL4_BAUD = 115, MNT1_TYPE = 11 (Viewpro), CAM1_TYPE = 4 (Mount)  
@@ -10,7 +11,7 @@
  - V4.0.02. Applying basic library folder structure. Updated Mavlink definition(common.xml)  
  - V4.0.01. Starting version-up process from 4.3.6 to 4.6.2  
 
-# ArduPilot Project
+# ArduPilot Projecte
 
 <a href="https://ardupilot.org/discord"><img src="https://img.shields.io/discord/674039678562861068.svg" alt="Discord">
 
