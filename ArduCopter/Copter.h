@@ -126,6 +126,7 @@
 #endif
 
 #include <AP_Mount/AP_Mount.h>
+#include <AP_Q30/AP_Q30.h>
 
 #include <AP_Camera/AP_Camera.h>
 
@@ -506,6 +507,9 @@ private:
 #if HAL_MOUNT_ENABLED
     AP_Mount camera_mount;
 #endif
+
+    // Q30 Camera control interface (KAL)
+    AP_Q30 q30;
 
 #if AP_AVOIDANCE_ENABLED
     AC_Avoid avoid;

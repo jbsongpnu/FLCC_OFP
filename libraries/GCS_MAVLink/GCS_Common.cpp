@@ -7654,6 +7654,9 @@ void GCS_MAVLINK::handle_gcs_flcc_cam_cmd(const mavlink_message_t &msg)
     mavlink_msg_sys_icd_gcs_flcc_cam_cmd_decode(&msg, &cam_cmd);
 
     AP_Q30 *Q30 = AP::Q30();
+    if (Q30 == nullptr) {
+        return;
+    }
 
     // Initialize Variables
     debug_cam_gimbal_cmd    = 0U;
@@ -7699,7 +7702,7 @@ void GCS_MAVLINK::handle_gcs_flcc_cam_cmd(const mavlink_message_t &msg)
             Q30->send_cmd_angle(cam_cmd);
             debug_cam_gimbal_cmd = 2U;
 
-            gcs().send_text(MAV_SEVERITY_ERROR,"Ang P %d Y %d", cam_cmd.Pitch_Angle_CMD, cam_cmd.Yaw_Angle_CMD);//JBS 23.11.08
+            //gcs().send_text(MAV_SEVERITY_ERROR,"Ang P %d Y %d", cam_cmd.Pitch_Angle_CMD, cam_cmd.Yaw_Angle_CMD);//JBS 23.11.08
             
             //To Do : check previous code again after acquiring gimbal state is finished - JBS 23.11.08
             /*if((abs(cam_cmd.Roll_Angle_CMD*10  - CAM_ATTITUDE_STATUS.Roll_REL_ANG)  > 10)

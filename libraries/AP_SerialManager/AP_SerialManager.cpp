@@ -240,9 +240,9 @@ const AP_Param::GroupInfo AP_SerialManager::var_info[] = {
 
 // ==================================================================================
 // KAL OFP Firmware version : OFP_Orange v1.99.1
-// Data  : 21/04/30 
+// Data  : 21/04/30
 // ==================================================================================
-	AP_GROUPINFO("4_PROTOCOL",  7, AP_SerialManager, state[4].protocol, SerialProtocol_Q30),       // Configure the Serial 4 Protocol of for CAM Interface (KAL)
+	AP_GROUPINFO("4_PROTOCOL",  7, AP_SerialManager, state[4].protocol, SerialProtocol_Gimbal),       // Configure the Serial 4 Protocol for CAM Interface (KAL)
 	AP_GROUPINFO("4_BAUD",      8, AP_SerialManager, state[4].baud, AP_SERIALMANAGER_CONSOLE_BAUD/1000), // Configure the Serial 4 baudrate of for CAM Interface (KAL)
 #endif
 
@@ -571,12 +571,6 @@ void AP_SerialManager::init()
                     // Note init is handled by AP_MSP
                     break;
 #endif
-                    case SerialProtocol_Q30: // KAL
-                    state[i].baud.set_default(AP_SERIALMANAGER_Q30_BAUD/1000);
-                    uart->begin(state[i].baudrate(),
-                                         AP_SERIALMANAGER_Q30_BUFSIZE_RX,
-                                         AP_SERIALMANAGER_Q30_BUFSIZE_TX);
-                    break;
 
 #if AP_SERIALMANAGER_IMUOUT_ENABLED
                 case SerialProtocol_IMUOUT:

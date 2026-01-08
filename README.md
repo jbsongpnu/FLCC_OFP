@@ -1,6 +1,10 @@
 # Work Note for KAL FLCC version-up from 4.6.2
 
- - V4.0.5.  Release of the FIRMWARE_VERSION as 4.0.5
+ - V4.0.6. Release of the FIRMWARE_VERSION as 4.0.6
+    - Disabled unwanted GCS message, unnecessary log of PMU debug message.  
+    - Limit PMU's allowed  RX session to 1 ms and 20 RX frames.  
+    - Added null point detection for gimbal class in handle_gcs_flcc_cam_cmd() of GCS_Common.cpp
+ - V4.0.5.  Release of the FIRMWARE_VERSION as 4.0.5  
  - V4.0.05. Camera control has changed to work with legacy code of Ardupilot for communication with Viewpro camera  
     - Disabled message id="285" name="GIMBAL_DEVICE_ATTITUDE_STATUS" due to error in KGCS  
     - Have to set SERIAL4_PROTOCOL = 8 (Gimbal), SERIAL4_BAUD = 115, MNT1_TYPE = 11 (Viewpro), CAM1_TYPE = 4 (Mount)  
