@@ -107,7 +107,7 @@ void Copter::userhook_init()
     cxdata().Swash.Lat = 0.0;
     cxdata().Swash.Lon = 0.0;
     cxdata().Swash.Rud = 0.0;
-    cxdata().Swash_CMD.Col = 1.0;   //Start with minimum : Minimum Collective set to 1 deg 2025.09.09
+    cxdata().Swash_CMD.Col = 0.0;   //Start with minimum : Minimum Collective set to 0 deg 2026.01.19
     cxdata().Swash_CMD.Lat = 0.0;
     cxdata().Swash_CMD.Lon = 0.0;
     cxdata().Swash_CMD.Rud = 0.0;
@@ -301,14 +301,14 @@ void Copter::userhook_MediumLoop()
         gcs().send_message(MSG_CCB_STATE);
     } else if (Count1Hz%10 == 4) {
         MAV_GCSTX_CXSV_POS.Servo_State = cxdata().SVinitialized;
-        //=== If sending feedback position
+        // //=== If sending feedback position
         // MAV_GCSTX_CXSV_POS.SV1_POS_RAW = cxdata().SV_Pos[0].raw;
         // MAV_GCSTX_CXSV_POS.SV2_POS_RAW = cxdata().SV_Pos[1].raw;
         // MAV_GCSTX_CXSV_POS.SV3_POS_RAW = cxdata().SV_Pos[2].raw;
         // MAV_GCSTX_CXSV_POS.SV4_POS_RAW = cxdata().SV_Pos[3].raw;
         // MAV_GCSTX_CXSV_POS.SV5_POS_RAW = cxdata().SV_Pos[4].raw;
         // MAV_GCSTX_CXSV_POS.SV6_POS_RAW = cxdata().SV_Pos[5].raw;
-        //=== If sending commanded position
+        // // === If sending commanded position
         // MAV_GCSTX_CXSV_POS.SV1_POS_RAW = cxdata().SV_TX[0].SV_pos;
         // MAV_GCSTX_CXSV_POS.SV2_POS_RAW = cxdata().SV_TX[1].SV_pos;
         // MAV_GCSTX_CXSV_POS.SV3_POS_RAW = cxdata().SV_TX[2].SV_pos;
@@ -322,7 +322,7 @@ void Copter::userhook_MediumLoop()
         MAV_GCSTX_CXSV_POS.SV4_POS_RAW = cxdata().SV_Pos[0].raw;
         MAV_GCSTX_CXSV_POS.SV5_POS_RAW = cxdata().SV_Pos[1].raw;
         MAV_GCSTX_CXSV_POS.SV6_POS_RAW = cxdata().SV_Pos[2].raw;
-        //=== If comparing Lower rotor TX and RX
+        // //=== If comparing Lower rotor TX and RX
         // MAV_GCSTX_CXSV_POS.SV1_POS_RAW = cxdata().SV_TX[3].SV_pos;
         // MAV_GCSTX_CXSV_POS.SV2_POS_RAW = cxdata().SV_TX[4].SV_pos;
         // MAV_GCSTX_CXSV_POS.SV3_POS_RAW = cxdata().SV_TX[5].SV_pos;

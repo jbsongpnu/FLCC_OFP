@@ -63,35 +63,35 @@
 // #define PARAM_POS_START         455
 // #define PARAM_POS_END           1593
 // #define PARAM_POS_NEUTRAL       1024
-#define PARAM_SV1_POS_START     381
+#define PARAM_SV1_POS_START     381     //Upper rotor L
 #define PARAM_SV1_POS_NEUTRAL   950
 #define PARAM_SV1_POS_END       1519
-#define PARAM_SV1_POS_ZERO      793     //Zero-degree collective achieved at this position
+#define PARAM_SV1_POS_ZERO      1141     //Zero-degree collective achieved at this position
 
-#define PARAM_SV2_POS_START     455
+#define PARAM_SV2_POS_START     455     //Upper rotor R
 #define PARAM_SV2_POS_NEUTRAL   1042
 #define PARAM_SV2_POS_END       1593
-#define PARAM_SV2_POS_ZERO      894     //Zero-degree collective achieved at this position
+#define PARAM_SV2_POS_ZERO      1239     //Zero-degree collective achieved at this position
 
-#define PARAM_SV3_POS_START     381
+#define PARAM_SV3_POS_START     381     //Upper rotor B
 #define PARAM_SV3_POS_NEUTRAL   950
 #define PARAM_SV3_POS_END       1519
-#define PARAM_SV3_POS_ZERO      791     //Zero-degree collective achieved at this position
+#define PARAM_SV3_POS_ZERO      1112     //Zero-degree collective achieved at this position
 
-#define PARAM_SV4_POS_START     381
+#define PARAM_SV4_POS_START     381     //Lower rotor L
 #define PARAM_SV4_POS_NEUTRAL   924     //950
 #define PARAM_SV4_POS_END       1519
-#define PARAM_SV4_POS_ZERO      1197     //Zero-degree collective achieved at this position
+#define PARAM_SV4_POS_ZERO      1157     //Zero-degree collective achieved at this position
 
-#define PARAM_SV5_POS_START     455     
+#define PARAM_SV5_POS_START     455     //Lower rotor R
 #define PARAM_SV5_POS_NEUTRAL   1032    //1024    
 #define PARAM_SV5_POS_END       1593    
-#define PARAM_SV5_POS_ZERO      1314    //Zero-degree collective achieved at this position
+#define PARAM_SV5_POS_ZERO      1293    //Zero-degree collective achieved at this position
 
-#define PARAM_SV6_POS_START     321
+#define PARAM_SV6_POS_START     321     //Lower rotor B
 #define PARAM_SV6_POS_NEUTRAL   932     //890
 #define PARAM_SV6_POS_END       1459
-#define PARAM_SV6_POS_ZERO      1220    //Zero-degree collective achieved at this position
+#define PARAM_SV6_POS_ZERO      1169    //Zero-degree collective achieved at this position
 // #define PARAM_SV1_POS_START     760     //381
 // #define PARAM_SV1_POS_NEUTRAL   800     //950
 // #define PARAM_SV1_POS_END       1150    //1519
@@ -506,29 +506,29 @@ public:
     failsafe Failsafe;
 
     //====Collective Table for Lower Rotor (SV4 ~ SV6) => 2025.09.08
-    const float ColTable_LOW[11][4]  =  {{0.0,    1229.0, 1344.0, 1249.0  },
-                                         {2.0,    1164.0, 1284.0, 1190.0  },
-                                         {4.0,    1109.0, 1226.0, 1132.0  },
-                                         {6.0,    1061.0, 1171.0, 1077.0  },
-                                         {8.0,    1005.0, 1114.0, 1019.0  },
-                                         {10.0,   951.0,  1060.0, 961.0   },
-                                         {12.0,   899.0,  1008.0, 909.0   },
-                                         {14.0,   845.0,  954.0,  855.0   },
-                                         {16.0,   785.0,  894.0,  795.0   },
-                                         {18.0,   727.0,  838.0,  742.0   },
-                                         {20.0,   670.0,  781.0,  685.0   } };
+    const float ColTable_LOW[11][4]  =  {{0.0,    1157.0, 1293.0, 1169.0  },
+                                         {2.0,    1105.0, 1238.0, 1112.0  },
+                                         {4.0,    1055.0, 1185.0, 1058.0  },
+                                         {6.0,    1002.0, 1131.0, 1002.0  },
+                                         {8.0,    949.0,  1078.0, 949.0   },
+                                         {10.0,   899.0,  1026.0, 897.0   },
+                                         {12.0,   844.0,  971.0,  842.0   },
+                                         {14.0,   790.0,  920.0,  791.0   },
+                                         {16.0,   733.0,  863.0,  736.0   },
+                                         {18.0,   675.0,  808.0,  679.0   },
+                                         {20.0,   617.0,  750.0,  622.0   }};
     //====Collective Table for Upper Rotor (SV1 ~ SV3)    
-    const float ColTable_UP[11][4]  =  { {0.0,    768.0,	875.0,	768.0   },
-                                         {2.0,    818.0,	913.0,	813.0   },
-                                         {4.1,    858.0,	953.0,	853.0   },
-                                         {6.0,    895.0,	990.0,	890.0   },
-                                         {8.0,    935.0,	1030.0,	930.0   },
-                                         {10.1,   977.0,	1072.0,	972.0   },
-                                         {12.0,   1013.0,	1108.0,	1008.0  },
-                                         {13.9,   1050.0,	1148.0,	1048.0  },
-                                         {15.9,   1092.0,	1190.0,	1090.0  },
-                                         {18.0,   1134.0,	1232.0,	1132.0  },
-                                         {19.9,   1176.0,	1274.0,	1174.0  }};
+    const float ColTable_UP[11][4]  =   {{0.0,    1141.0, 1239.0, 1112.0  },
+                                         {2.0,    1096.0, 1193.0, 1065.0  },
+                                         {4.0,    1051.0, 1146.0, 1018.0  },
+                                         {6.0,    1006.0, 1104.0, 973.0   },
+                                         {8.0,    962.0,  1061.0, 929.0   },
+                                         {10.0,   923.0,  1014.0, 886.0   },
+                                         {12.0,   879.0,  976.0,  842.0   },
+                                         {14.0,   836.0,  932.0,  797.0   },
+                                         {16.0,   795.0,  890.0,  753.0   },
+                                         {18.0,   751.0,  847.0,  709.0   },
+                                         {20.0,   707.0,  800.0,  662.0   }};
 
 private:
     CoaxData();

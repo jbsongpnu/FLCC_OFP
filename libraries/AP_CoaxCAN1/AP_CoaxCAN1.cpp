@@ -2635,27 +2635,31 @@ void AP_COAXCAN1::SV_Waiting_StateLoop(void) {
     // cxdata().SV_state[5].SW_Reversed = 1;
     if(IndexLoop < 6) {
         if(IndexLoop == 0) {
-            //Step 1 Test : servo to collective pitch formulae 
-            // tempint16 = (int16_t)(cxdata().Swash_CMD.Col * 100);
-            // tempint16 = constrain_int16(tempint16, -PARAM_TRAVEL_ONEWAY, PARAM_TRAVEL_ONEWAY);
-            //=====Rigging Code Part 1 : Lower Rotor SV4~SV6
-            // cxdata().SV_TX[0].SV_pos = constrain_int16((PARAM_SV1_POS_NEUTRAL + tempint16), cxdata().SV_state[0].Config_Pos_Start, cxdata().SV_state[0].Config_Pos_End);
-            // cxdata().SV_TX[1].SV_pos = constrain_int16((PARAM_SV2_POS_NEUTRAL + tempint16), cxdata().SV_state[1].Config_Pos_Start, cxdata().SV_state[1].Config_Pos_End);
-            // cxdata().SV_TX[2].SV_pos = constrain_int16((PARAM_SV3_POS_NEUTRAL + tempint16), cxdata().SV_state[2].Config_Pos_Start, cxdata().SV_state[2].Config_Pos_End);
-            // cxdata().SV_TX[3].SV_pos = constrain_int16((PARAM_SV4_POS_NEUTRAL - tempint16 + (int16_t)(cxdata().Swash_CMD.Lon * 100)), cxdata().SV_state[3].Config_Pos_Start, cxdata().SV_state[3].Config_Pos_End);
-            // cxdata().SV_TX[4].SV_pos = constrain_int16((PARAM_SV5_POS_NEUTRAL - tempint16 + (int16_t)(cxdata().Swash_CMD.Lat * 100)), cxdata().SV_state[4].Config_Pos_Start, cxdata().SV_state[4].Config_Pos_End);
-            // cxdata().SV_TX[5].SV_pos = constrain_int16((PARAM_SV6_POS_NEUTRAL - tempint16 + (int16_t)(cxdata().Swash_CMD.Rud * 100)), cxdata().SV_state[5].Config_Pos_Start, cxdata().SV_state[5].Config_Pos_End);
+            // //Step 1 Test : Rigging
+            // //=====Rigging Code Part 1 : Lower Rotor SV4~SV6
+            // collective_deg = constrain_float( cxdata().Swash_CMD.Col, 0.0, 20.0);
+            // ColTableUpper_LerpToI16(collective_deg, &SV1, &SV2, &SV3);
+            // ColTableLOW_LerpToI16(collective_deg, &SV4, &SV5, &SV6);
+            // // cxdata().SV_TX[0].SV_pos = constrain_int16(SV1, cxdata().SV_state[0].Config_Pos_Start, cxdata().SV_state[0].Config_Pos_End);
+            // // cxdata().SV_TX[1].SV_pos = constrain_int16(SV2, cxdata().SV_state[1].Config_Pos_Start, cxdata().SV_state[1].Config_Pos_End);
+            // // cxdata().SV_TX[2].SV_pos = constrain_int16(SV3, cxdata().SV_state[2].Config_Pos_Start, cxdata().SV_state[2].Config_Pos_End);
+            // cxdata().SV_TX[3].SV_pos = constrain_int16(SV4, cxdata().SV_state[3].Config_Pos_Start, cxdata().SV_state[3].Config_Pos_End) + (int16_t)(cxdata().Swash_CMD.Lon * 100);
+            // cxdata().SV_TX[4].SV_pos = constrain_int16(SV5, cxdata().SV_state[4].Config_Pos_Start, cxdata().SV_state[4].Config_Pos_End) + (int16_t)(cxdata().Swash_CMD.Lat * 100);
+            // cxdata().SV_TX[5].SV_pos = constrain_int16(SV6, cxdata().SV_state[5].Config_Pos_Start, cxdata().SV_state[5].Config_Pos_End) + (int16_t)(cxdata().Swash_CMD.Rud * 100);
             
-            //=====Rigging Code Part 2 : Lower Rotor SV1~SV3
-            // cxdata().SV_TX[0].SV_pos = constrain_int16((PARAM_SV1_POS_NEUTRAL + tempint16 + (int16_t)(cxdata().Swash_CMD.Lon * 100)), cxdata().SV_state[0].Config_Pos_Start, cxdata().SV_state[0].Config_Pos_End);
-            // cxdata().SV_TX[1].SV_pos = constrain_int16((PARAM_SV2_POS_NEUTRAL + tempint16 + (int16_t)(cxdata().Swash_CMD.Lat * 100)), cxdata().SV_state[1].Config_Pos_Start, cxdata().SV_state[1].Config_Pos_End);
-            // cxdata().SV_TX[2].SV_pos = constrain_int16((PARAM_SV3_POS_NEUTRAL + tempint16 + (int16_t)(cxdata().Swash_CMD.Rud * 100)), cxdata().SV_state[2].Config_Pos_Start, cxdata().SV_state[2].Config_Pos_End);
-            // cxdata().SV_TX[3].SV_pos = constrain_int16((PARAM_SV4_POS_NEUTRAL - tempint16), cxdata().SV_state[3].Config_Pos_Start, cxdata().SV_state[3].Config_Pos_End);
-            // cxdata().SV_TX[4].SV_pos = constrain_int16((PARAM_SV5_POS_NEUTRAL - tempint16), cxdata().SV_state[4].Config_Pos_Start, cxdata().SV_state[4].Config_Pos_End);
-            // cxdata().SV_TX[5].SV_pos = constrain_int16((PARAM_SV6_POS_NEUTRAL - tempint16), cxdata().SV_state[5].Config_Pos_Start, cxdata().SV_state[5].Config_Pos_End);
+            // //=====Rigging Code Part 2 : Upper Rotor SV1~SV3
+            // collective_deg = constrain_float( cxdata().Swash_CMD.Col, 0.0, 20.0);
+            // ColTableUpper_LerpToI16(collective_deg, &SV1, &SV2, &SV3);
+            // ColTableLOW_LerpToI16(collective_deg, &SV4, &SV5, &SV6);
+            // cxdata().SV_TX[0].SV_pos = constrain_int16(SV1, cxdata().SV_state[0].Config_Pos_Start, cxdata().SV_state[0].Config_Pos_End) + (int16_t)(cxdata().Swash_CMD.Lon * 100);
+            // cxdata().SV_TX[1].SV_pos = constrain_int16(SV2, cxdata().SV_state[1].Config_Pos_Start, cxdata().SV_state[1].Config_Pos_End) + (int16_t)(cxdata().Swash_CMD.Lat * 100);
+            // cxdata().SV_TX[2].SV_pos = constrain_int16(SV3, cxdata().SV_state[2].Config_Pos_Start, cxdata().SV_state[2].Config_Pos_End) + (int16_t)(cxdata().Swash_CMD.Rud * 100);
+            // cxdata().SV_TX[3].SV_pos = constrain_int16(SV4, cxdata().SV_state[3].Config_Pos_Start, cxdata().SV_state[3].Config_Pos_End);
+            // cxdata().SV_TX[4].SV_pos = constrain_int16(SV5, cxdata().SV_state[4].Config_Pos_Start, cxdata().SV_state[4].Config_Pos_End);
+            // cxdata().SV_TX[5].SV_pos = constrain_int16(SV6, cxdata().SV_state[5].Config_Pos_Start, cxdata().SV_state[5].Config_Pos_End);
 
-            //Step 2 Test : Table Look-up code
-            collective_deg = constrain_float( cxdata().Swash_CMD.Col, 1.0, 19.0);
+            //Step 2 Apply : Table Look-up code
+            collective_deg = constrain_float( cxdata().Swash_CMD.Col, 0.0, 20.0);
             ColTableUpper_LerpToI16(collective_deg, &SV1, &SV2, &SV3);
             ColTableLOW_LerpToI16(collective_deg, &SV4, &SV5, &SV6);
             cxdata().SV_TX[0].SV_pos = constrain_int16(SV1, cxdata().SV_state[0].Config_Pos_Start, cxdata().SV_state[0].Config_Pos_End);

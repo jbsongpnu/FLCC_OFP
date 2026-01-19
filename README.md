@@ -5,7 +5,8 @@
 ***
 
 ## Version History
-- V0.01.41 Grount test version updates 
+- V0.01.41b Minor change in Table look-up
+- V0.01.41 Grount test version updates  
 + GCS failsafe event will stop motor by resetting RPM command of the inverter to zero value.  
 + Enabled inverter control parameter change from GCS
 + Enabled data logging. Changed CCB loging terms. Added servo motor logging terms.  
