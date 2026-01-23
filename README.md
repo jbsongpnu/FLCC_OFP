@@ -5,7 +5,11 @@
 ***
 
 ## Version History
-- V0.01.41b Minor change in Table look-up
+- V0.01.42 Grount test version updates with pedal control
++ Upper rotor table has changed to reflect aero-elastic deformation 
++ Added code to find torque-trim with differential pitch on lower-rotor only
++ Added code to apply automatic pedal trim with collective to pedal table
+- V0.01.41b Minor change in Table look-up  
 - V0.01.41 Grount test version updates  
 + GCS failsafe event will stop motor by resetting RPM command of the inverter to zero value.  
 + Enabled inverter control parameter change from GCS

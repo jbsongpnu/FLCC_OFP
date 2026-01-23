@@ -1520,6 +1520,46 @@ int AP_COAXCAN1::ColTableUpper_LerpToI16(float x, int16_t* sv1, int16_t* sv2, in
     return 0; // Normal output
 }
 
+// Pedal_from_Collective() : find the trim pedal value from collective to pedal schedule table
+int AP_COAXCAN1::Pedal_from_Collective(float col, float* pedal)
+{
+    const int N = 21;
+    const float xmin = cxdata().PedalTable[0][0];
+    const float xmax = cxdata().PedalTable[N-1][0];
+    // Clamping min/max
+    if(col <= xmin) {
+        *pedal = cxdata().PedalTable[0][1];
+        return 1; //Min Clamp
+    }
+    if(col >= xmax) {
+        *pedal = cxdata().PedalTable[N-1][1];
+        return 2; //Max Clamp
+    }
+    // Lower-bound index i : cxdata().PedalTable[i][0] <= col <= cxdata().PedalTable[i+1][0]
+    int i = 0;
+    for (; i < N-1; ++i) {
+        if (cxdata().PedalTable[i][0] <= col && col <= cxdata().PedalTable[i+1][0]) {
+            break;
+        }
+    }
+
+    // Linear Interpolation
+    const float x0 = cxdata().PedalTable[i][0];
+    const float x1 = cxdata().PedalTable[i+1][0];
+    const float t  = (col - x0) / (x1 - x0);
+    const float _pedal = cxdata().PedalTable[i][1]   + t * (cxdata().PedalTable[i+1][1] - cxdata().PedalTable[i][1]);
+
+    if (_pedal <= 0.1)
+    {   
+        *pedal = 0;
+    } else {
+        *pedal = _pedal;
+    }
+    
+    return 0; // Normal output
+
+}
+
 // Excecuted during CoaxState::CXSTATE_0_INIT to check all config parameters are correct, or to change parameters if needed
 void AP_COAXCAN1::SV_Config_Test(void) {
     uint8_t NewServoMessages = _num_SVmsg;
@@ -2658,10 +2698,40 @@ void AP_COAXCAN1::SV_Waiting_StateLoop(void) {
             // cxdata().SV_TX[4].SV_pos = constrain_int16(SV5, cxdata().SV_state[4].Config_Pos_Start, cxdata().SV_state[4].Config_Pos_End);
             // cxdata().SV_TX[5].SV_pos = constrain_int16(SV6, cxdata().SV_state[5].Config_Pos_Start, cxdata().SV_state[5].Config_Pos_End);
 
-            //Step 2 Apply : Table Look-up code
-            collective_deg = constrain_float( cxdata().Swash_CMD.Col, 0.0, 20.0);
-            ColTableUpper_LerpToI16(collective_deg, &SV1, &SV2, &SV3);
-            ColTableLOW_LerpToI16(collective_deg, &SV4, &SV5, &SV6);
+            // //Step 2 Apply : Table Look-up code
+            // collective_deg = constrain_float( cxdata().Swash_CMD.Col, 0.0, 20.0);
+            // ColTableUpper_LerpToI16(collective_deg, &SV1, &SV2, &SV3);
+            // ColTableLOW_LerpToI16(collective_deg, &SV4, &SV5, &SV6);
+            // cxdata().SV_TX[0].SV_pos = constrain_int16(SV1, cxdata().SV_state[0].Config_Pos_Start, cxdata().SV_state[0].Config_Pos_End);
+            // cxdata().SV_TX[1].SV_pos = constrain_int16(SV2, cxdata().SV_state[1].Config_Pos_Start, cxdata().SV_state[1].Config_Pos_End);
+            // cxdata().SV_TX[2].SV_pos = constrain_int16(SV3, cxdata().SV_state[2].Config_Pos_Start, cxdata().SV_state[2].Config_Pos_End);
+            // cxdata().SV_TX[3].SV_pos = constrain_int16(SV4, cxdata().SV_state[3].Config_Pos_Start, cxdata().SV_state[3].Config_Pos_End);
+            // cxdata().SV_TX[4].SV_pos = constrain_int16(SV5, cxdata().SV_state[4].Config_Pos_Start, cxdata().SV_state[4].Config_Pos_End);
+            // cxdata().SV_TX[5].SV_pos = constrain_int16(SV6, cxdata().SV_state[5].Config_Pos_Start, cxdata().SV_state[5].Config_Pos_End);
+
+            // //Step 3 Apply : Finding torque-trim with differential pitch on lower-rotor only
+            // collective_deg = constrain_float( cxdata().Swash_CMD.Col, 0.0, 20.0);
+            // ColTableUpper_LerpToI16(collective_deg, &SV1, &SV2, &SV3);
+            // ColTableLOW_LerpToI16((collective_deg + cxdata().Swash_CMD.Rud), &SV4, &SV5, &SV6);
+            // cxdata().SV_TX[0].SV_pos = constrain_int16(SV1, cxdata().SV_state[0].Config_Pos_Start, cxdata().SV_state[0].Config_Pos_End);
+            // cxdata().SV_TX[1].SV_pos = constrain_int16(SV2, cxdata().SV_state[1].Config_Pos_Start, cxdata().SV_state[1].Config_Pos_End);
+            // cxdata().SV_TX[2].SV_pos = constrain_int16(SV3, cxdata().SV_state[2].Config_Pos_Start, cxdata().SV_state[2].Config_Pos_End);
+            // cxdata().SV_TX[3].SV_pos = constrain_int16(SV4, cxdata().SV_state[3].Config_Pos_Start, cxdata().SV_state[3].Config_Pos_End);
+            // cxdata().SV_TX[4].SV_pos = constrain_int16(SV5, cxdata().SV_state[4].Config_Pos_Start, cxdata().SV_state[4].Config_Pos_End);
+            // cxdata().SV_TX[5].SV_pos = constrain_int16(SV6, cxdata().SV_state[5].Config_Pos_Start, cxdata().SV_state[5].Config_Pos_End);
+
+            //Step 4 Apply pedal control with scheduling
+            collective_deg = constrain_float( cxdata().Swash_CMD.Col, 1.0, 19.0);
+            float Pedal_trim, collective_lower_deg, collective_upper_deg;
+
+            Pedal_from_Collective(collective_deg, &Pedal_trim); //get pedal trim
+            cxdata().Swash.Pedal_trim = Pedal_trim;             //push to global
+            collective_upper_deg = collective_deg - (Pedal_trim + cxdata().Swash_CMD.Rud) / 2;  //calculate upper rotor collective with pedal
+            collective_upper_deg = constrain_float(collective_upper_deg, 0.0, 20.0);
+            collective_lower_deg = collective_deg + (Pedal_trim + cxdata().Swash_CMD.Rud) / 2;  //calculate lower rotor collective with pedal
+            collective_lower_deg = constrain_float(collective_lower_deg, 0.0, 20.0);
+            ColTableUpper_LerpToI16(collective_upper_deg, &SV1, &SV2, &SV3);
+            ColTableLOW_LerpToI16(collective_lower_deg, &SV4, &SV5, &SV6);
             cxdata().SV_TX[0].SV_pos = constrain_int16(SV1, cxdata().SV_state[0].Config_Pos_Start, cxdata().SV_state[0].Config_Pos_End);
             cxdata().SV_TX[1].SV_pos = constrain_int16(SV2, cxdata().SV_state[1].Config_Pos_Start, cxdata().SV_state[1].Config_Pos_End);
             cxdata().SV_TX[2].SV_pos = constrain_int16(SV3, cxdata().SV_state[2].Config_Pos_Start, cxdata().SV_state[2].Config_Pos_End);
