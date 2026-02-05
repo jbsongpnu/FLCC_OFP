@@ -15,6 +15,7 @@
 Note : Explanation about a coaxial rotor setup is described at https://ardupilot.org/copter/docs/dual-helicopter.html
 
 ----Parameter Settings:----
+https://ardupilot.org/copter/docs/dual-helicopter.html
 
 !! FRAME_CLASS to 11 (Heli_Dual)
 !! H_DUAL_MODE - Set to 2 for the intermeshing configuration

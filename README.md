@@ -5,10 +5,15 @@
 ***
 
 ## Version History
-- V0.01.42 Grount test version updates with pedal control
-+ Upper rotor table has changed to reflect aero-elastic deformation 
-+ Added code to find torque-trim with differential pitch on lower-rotor only
-+ Added code to apply automatic pedal trim with collective to pedal table
+- V0.01.43a Pedal control, servo torque monitoring, preparation of servo control for coaxial rotor
++ AP_MotorsHeli::init() initializes _servo_mode to SERVO_CONTROL_MODE_MANUAL_PASSTHROUGH for ground tests   
++ Servo test mode to check servo torque for upper or lower rotor has added
++ Addtional logging items : servo torques (also, fixed some bug)
++ Bug fixed with pedal control algorithm with collective to pedal table-lookup  
+- V0.01.42 Grount test version updates with pedal control  
++ Upper rotor table has changed to reflect aero-elastic deformation  
++ Added code to find torque-trim with differential pitch on lower-rotor only  
++ Added code to apply automatic pedal trim with collective to pedal table  
 - V0.01.41b Minor change in Table look-up  
 - V0.01.41 Grount test version updates  
 + GCS failsafe event will stop motor by resetting RPM command of the inverter to zero value.  
@@ -231,7 +236,8 @@
       ==> If _servo_mode is in auto mode, process pre-compensation factors : related to H_YAW_REV_EXPO   
       ==> **Calculate collective for upper and lower swash from yaw_out as differential pitch**   
       ==> **Calculate _servo_out for CH_1 ~ CH_6 from swashplate matrix**   
-  - 7-7-4) If disarmed : run [AP_MotorsHeli::output_disarmed()] => supports test mode, but simillarlly call move_actuators() in the end
+  - 7-7-4) If disarmed : run [AP_MotorsHeli::output_disarmed()] => supports test mode, but simillarlly call move_actuators() in the end  
+      ==> Use this for ground test
   - 7-7-5) [AP_MotorsHeli_Dual::output_to_motors()] : execute final pwm calculations
     - 7-7-5-1) [AP_MotorsHeli::rc_write_swash] : convert input in -1 to +1 range to pwm output for swashplate servo.   
       ==> Servo range is fixed to 1000, trim as 1500 : 1000 ~ 2000 range

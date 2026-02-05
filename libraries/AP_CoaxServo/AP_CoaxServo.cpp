@@ -261,7 +261,7 @@ void AP_CoaxServo::interprete_msg(uint8_t sv_id, uint8_t msg_id, uint8_t data_lo
             tempUint16 = data_low;
             tempInt16 = (int16_t)(tempUint16 | ((uint16_t)data_high << 8)); //Int
             isSignedInt = 1;
-            cxdata().SV_state[SV_index].Status_Velocity = tempInt16;
+            cxdata().SV_state[SV_index].Status_Torque = tempInt16;//this is for old servo function, but fixing error here anyway...
             break;
         case REG_VOLTAGE :
             tempUint16 = data_low;

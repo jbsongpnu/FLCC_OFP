@@ -337,7 +337,7 @@ void Copter::userhook_MediumLoop()
         MAV_GCSTX_CXSV_SWASH.Collective = cxdata().Swash.Col;
         MAV_GCSTX_CXSV_SWASH.Cyclic_Lon = cxdata().Swash.Lon;
         MAV_GCSTX_CXSV_SWASH.Cyclic_Lat = cxdata().Swash.Lat;
-        MAV_GCSTX_CXSV_SWASH.Pedal      = cxdata().Swash.Pedal_trim + cxdata().Swash.Rud;   //Show pedal with input and trim
+        MAV_GCSTX_CXSV_SWASH.Pedal      = cxdata().Swash.Rud;   //Rud is added with pedal trim within servo control code
         MAV_GCSTX_CXSV_SWASH.CMD_Collective = cxdata().Swash_CMD.Col;
         MAV_GCSTX_CXSV_SWASH.CMD_Cyclic_Lon = cxdata().Swash_CMD.Lon;
         MAV_GCSTX_CXSV_SWASH.CMD_Cyclic_Lat = cxdata().Swash_CMD.Lat;
@@ -355,8 +355,8 @@ void Copter::userhook_MediumLoop()
         MAV_GCSTX_DMI_data.PMS_MAX_TempX10 = (uint16_t)(cxdata().DMI_PMS_data.PMS_Max_Temp * 10.0);
 
         gcs().send_message(MSG_DMI_DATA);
-    //} else if (Count1Hz%10 == 7) {
-    //    gcs().send_text(MAV_SEVERITY_INFO, "SVID %u Step %u", cxdata().SVTestState.ServoTestingID, cxdata().SVTestState.ServoTestStep);
+    // } else if (Count1Hz%10 == 7) {
+    //    gcs().send_text(MAV_SEVERITY_INFO, "DEBUG : ped %1.1f ", cxdata().Swash.Pedal_trim);
     } else if (Count1Hz%10 == 0) {
         MAV_GCSTX_HDM_data.Ifcu_PpCurLimX100 = (uint16_t)(cxdata().IFCU_data.PpCurLim * 100.0);
         MAV_GCSTX_HDM_data.Ifcu_PpH2SofX2 = (uint16_t)(cxdata().IFCU_data.PpH2Sof * 2);
@@ -910,6 +910,7 @@ void Copter::userhook_MediumLoop()
 
     Count1Hz++;
 
+//----For 10Hz Logging
 #if COAXCAN_LOGGING == 1
     AP::logger().Write("INV1", "TimeUS,ONOFF,RPM,RPMCMD,IA,IB,IC", "QBfffff",
         AP_HAL::micros64(),                             //Q     TimeUS
@@ -982,6 +983,16 @@ void Copter::userhook_MediumLoop()
         cxdata().SV_Pos[3].raw,                         //h     TX_SV4
         cxdata().SV_Pos[4].raw,                         //h     TX_SV5
         cxdata().SV_Pos[5].raw                          //h     TX_SV6
+    );
+    //Addiitional logging items
+    AP::logger().Write("CSV4", "TimeUS,RXTQ1,RXTQ2,RXTQ3,RXTQ4,RXTQ5,RXTQ6", "Qhhhhhh",
+    AP_HAL::micros64(),                             //Q     TimeUS
+    cxdata().SV_state[0].Status_Torque,             //h     RX_TorQue1
+    cxdata().SV_state[1].Status_Torque,             //h     RX_TorQue2
+    cxdata().SV_state[2].Status_Torque,             //h     RX_TorQue3
+    cxdata().SV_state[3].Status_Torque,             //h     RX_TorQue4
+    cxdata().SV_state[4].Status_Torque,             //h     RX_TorQue5
+    cxdata().SV_state[5].Status_Torque              //h     RX_TorQue6
     );
 #endif
     /*

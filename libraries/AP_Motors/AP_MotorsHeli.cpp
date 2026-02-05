@@ -17,6 +17,7 @@
 #include <AP_HAL/AP_HAL.h>
 #include "AP_MotorsHeli.h"
 #include <GCS_MAVLink/GCS.h>
+#include <AP_CoaxCAN2/Coaxial_data.h>
 
 extern const AP_HAL::HAL& hal;
 
@@ -167,7 +168,8 @@ void AP_MotorsHeli::init(motor_frame_class frame_class, motor_frame_type frame_t
     _servo_test_cycle_counter = _servo_test;
 
     // ensure inputs are not passed through to servos on start-up
-    _servo_mode.set(SERVO_CONTROL_MODE_AUTOMATED);
+    // _servo_mode.set(SERVO_CONTROL_MODE_AUTOMATED);   //Normal initialization
+    _servo_mode.set(SERVO_CONTROL_MODE_MANUAL_PASSTHROUGH);      //temporary setup for ground test
 
     // initialise radio passthrough for collective to middle
     _throttle_radio_passthrough = 0.5f;
@@ -272,8 +274,13 @@ void AP_MotorsHeli::output_disarmed()
         switch (_servo_mode) {
             case SERVO_CONTROL_MODE_MANUAL_PASSTHROUGH:
                 // pass pilot commands straight through to swash
-                _roll_in = _roll_radio_passthrough;
-                _pitch_in = _pitch_radio_passthrough;
+                // _roll_in = _roll_radio_passthrough;
+                // _pitch_in = _pitch_radio_passthrough;
+                // _throttle_filter.reset(_throttle_radio_passthrough);
+                // _yaw_in = _yaw_radio_passthrough;
+                //J.B.Song cyclic input ratio is based on 45deg max
+                _roll_in = cxdata().Swash_CMD.Lat / 45.0; //same as (cxdata().Swash_CMD.Lat * 100) / 4500.0;
+                _pitch_in = cxdata().Swash_CMD.Lat / 45.0;
                 _throttle_filter.reset(_throttle_radio_passthrough);
                 _yaw_in = _yaw_radio_passthrough;
                 break;
