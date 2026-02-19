@@ -570,6 +570,7 @@ void AP_MotorsHeli_Dual::move_actuators(float roll_out, float pitch_out, float c
             limit.pitch = true;
         }
     }
+    //strangely, roll_out is not limited for AP_MOTORS_HELI_DUAL_MODE_INTERMESHING or tendem rotor
     if (_dual_mode != AP_MOTORS_HELI_DUAL_MODE_TRANSVERSE) { //Bug fixed : V1.01.33 latest AP update is applied in this line
         if (roll_out < -_cyclic_max/4500.0f) {
             roll_out = -_cyclic_max/4500.0f;
@@ -584,7 +585,7 @@ void AP_MotorsHeli_Dual::move_actuators(float roll_out, float pitch_out, float c
 
     if (_heliflags.inverted_flight) {
         collective_in = 1 - collective_in;
-    }
+    }   //We will never use inverted flight anyway....
 
     // constrain collective input
     float collective_out = collective_in;
@@ -661,7 +662,7 @@ void AP_MotorsHeli_Dual::move_actuators(float roll_out, float pitch_out, float c
 
     // feed power estimate into main rotor controller
     // ToDo: add main rotor cyclic power?
-    _main_rotor.set_collective(fabsf(collective_out));
+    _main_rotor.set_collective(fabsf(collective_out));//=> sets private valriable _collective_in to collective_out
 
     // compute swashplate tilt
     float swash1_pitch = get_swashplate(1, AP_MOTORS_HELI_DUAL_SWASH_AXIS_PITCH, pitch_out, roll_out, yaw_out, collective_out_scaled);

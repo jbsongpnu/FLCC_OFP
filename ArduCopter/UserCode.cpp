@@ -956,13 +956,17 @@ void Copter::userhook_MediumLoop()
         cxdata().DMI_PMS_data.HDC_InputCurrent          //f     HCIN
     );
 
-    AP::logger().Write("CSV1", "TimeUS,SVSTAT,TXCOL,TXLAT,TXLON,TXRUD", "QBffff", 
+    AP::logger().Write("CSV1", "TimeUS,SVSTAT,TXCOL,TXLAT,TXLON,TXRUD,COL,LAT,LON,RUD", "QBffffffff", 
         AP_HAL::micros64(),                             //Q     TimeUS
         ((uint8_t)cxdata().CX_State),                   //B     Coax Servo State
-        cxdata().Swash_CMD.Col,                         //f     collective 
-        cxdata().Swash_CMD.Lat,                         //f     lateral cyclic
-        cxdata().Swash_CMD.Lon,                         //f     longitudinal cyclic
-        cxdata().Swash_CMD.Rud                          //f     pedal = rudder
+        cxdata().Swash_CMD.Col,                         //f     collective command
+        cxdata().Swash_CMD.Lat,                         //f     lateral cyclic command
+        cxdata().Swash_CMD.Lon,                         //f     longitudinal cyclic command
+        cxdata().Swash_CMD.Rud,                         //f     command pedal = rudder
+        cxdata().Swash.Col,                             //f     current collective 
+        cxdata().Swash.Lat,                             //f     current lateral cyclic
+        cxdata().Swash.Lon,                             //f     current longitudinal cyclic
+        cxdata().Swash.Rud                             //f     current pedal = rudder
     );
 
     AP::logger().Write("CSV2", "TimeUS,TXSV1,TXSV2,TXSV3,TXSV4,TXSV5,TXSV6", "Qhhhhhh",

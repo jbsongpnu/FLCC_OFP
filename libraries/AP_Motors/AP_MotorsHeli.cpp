@@ -280,9 +280,9 @@ void AP_MotorsHeli::output_disarmed()
                 // _yaw_in = _yaw_radio_passthrough;
                 //J.B.Song cyclic input ratio is based on 45deg max
                 _roll_in = cxdata().Swash_CMD.Lat / 45.0; //same as (cxdata().Swash_CMD.Lat * 100) / 4500.0;
-                _pitch_in = cxdata().Swash_CMD.Lat / 45.0;
-                _throttle_filter.reset(_throttle_radio_passthrough);
-                _yaw_in = _yaw_radio_passthrough;
+                _pitch_in = cxdata().Swash_CMD.Lat / 45.0; //temprarily set as max 4500 cyclic centi-degree
+                _throttle_filter.reset(0.5);    //temporarily set as 10.0 deg col out of 20.0deg max
+                _yaw_in = cxdata().Swash_CMD.Rud / 2.0;//temporarity pedal max 2.0 deg
                 break;
             case SERVO_CONTROL_MODE_MANUAL_CENTER:
                 // fixate mid collective

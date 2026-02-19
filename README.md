@@ -5,27 +5,33 @@
 ***
 
 ## Version History
-- V0.01.43a Pedal control, servo torque monitoring, preparation of servo control for coaxial rotor
-+ AP_MotorsHeli::init() initializes _servo_mode to SERVO_CONTROL_MODE_MANUAL_PASSTHROUGH for ground tests   
-+ Servo test mode to check servo torque for upper or lower rotor has added
-+ Addtional logging items : servo torques (also, fixed some bug)
-+ Bug fixed with pedal control algorithm with collective to pedal table-lookup  
+- V0.01.43b More changes  
+  + New upper rotor table fitted to newest data  
+  + New Pedal Trim Table in Coaxial_data.h found from the test  
+  + GCS command to start/stop SD logging - but it doesn't work properly yet!!!!! See handle_command_LOGGING_START()  
+  + New logging items : current state of swash plate col, lat, lon, rud  
+  + From SV_Waiting_StateLoop(), Step 4 code applies physical direction of rudder which reverses rudder from step 3  
+  + Some remarks and testing items in AP_MotorsHeli.cpp and AP_MotorsHeli_Dual.cpp  
+- V0.01.43a Pedal control, servo torque monitoring, preparation of servo control for coaxial rotor  
+  + AP_MotorsHeli::init() initializes _servo_mode to SERVO_CONTROL_MODE_MANUAL_PASSTHROUGH for ground tests   
+  + Servo test mode to check servo torque for upper or lower rotor has added  
+  + Addtional logging items : servo torques (also, fixed some bug)  
+  + Bug fixed with pedal control algorithm with collective to pedal table-lookup  
 - V0.01.42 Grount test version updates with pedal control  
-+ Upper rotor table has changed to reflect aero-elastic deformation  
-+ Added code to find torque-trim with differential pitch on lower-rotor only  
-+ Added code to apply automatic pedal trim with collective to pedal table  
+  + Upper rotor table has changed to reflect aero-elastic deformation  
+  + Added code to find torque-trim with differential pitch on lower-rotor only  
+  + Added code to apply automatic pedal trim with collective to pedal table  
 - V0.01.41b Minor change in Table look-up  
 - V0.01.41 Grount test version updates  
-+ GCS failsafe event will stop motor by resetting RPM command of the inverter to zero value.  
-+ Enabled inverter control parameter change from GCS
-+ Enabled data logging. Changed CCB loging terms. Added servo motor logging terms.  
-+ Collective pitch control is using table look-up method. Servo reverse is modified with software reverse  
-+ Properly shows Motor_Aligned flag of the inverter  
-+ Servo motor(HiTech) control is modifed by reducing velocity value and maximizing position slope to increase torque  
-+ Temporarily disabling all HiTech state feedback except position.
-
-- V0.01.40 Improving CoaxCAN1 loop. Added SV_Waiting_StateLoop() to get GCS command for collective. 
-- V0.01.39 CoaxCAN1 loop changed from 200Hz to 400Hz to realize maximum servo control rate. Inverter has changed from 10Hz to 5Hz, CCB remains 1Hz
+  + GCS failsafe event will stop motor by resetting RPM command of the inverter to zero value.  
+  + Enabled inverter control parameter change from GCS  
+  + Enabled data logging. Changed CCB loging terms. Added servo motor logging terms.  
+  + Collective pitch control is using table look-up method. Servo reverse is modified with software reverse  
+  + Properly shows Motor_Aligned flag of the inverter  
+  + Servo motor(HiTech) control is modifed by reducing velocity value and maximizing position slope to increase torque  
+  + Temporarily disabling all HiTech state feedback except position.  
+- V0.01.40 Improving CoaxCAN1 loop. Added SV_Waiting_StateLoop() to get GCS command for collective.  
+- V0.01.39 CoaxCAN1 loop changed from 200Hz to 400Hz to realize maximum servo control rate. Inverter has changed from 10Hz to 5Hz, CCB remains 1Hz  
 - V0.01.38 Communicating with HiTech servos with CAN protocol through CCB board. CCB board will relay CAN frames to RS-485 to servos. Also some Mavlink messages are changed.
 - V0.01.37 Substituting Pegsus Actuator to HiTech servo : Basic Functions and debug codes with configuration check with UART => This version is not working properly due to TX delay from ChibiOS
 - V0.01.36 Updating CoaxCAN1 and CoaxCAN2 : bug fixes for CCB, Inverter and IFCU

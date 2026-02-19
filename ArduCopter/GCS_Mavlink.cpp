@@ -1046,6 +1046,12 @@ MAV_RESULT GCS_MAVLINK_Copter::handle_command_long_packet(const mavlink_command_
     case MAV_CMD_CCB_CONTROL : {
         return handle_command_CCB_CONTROL(packet);
     }
+    case MAV_CMD_LOGGING_START : {
+        return handle_command_LOGGING_START(packet);
+    }
+    case MAV_CMD_LOGGING_STOP : {
+        return handle_command_LOGGING_STOP(packet);
+    }
     default:
         return GCS_MAVLINK::handle_command_long_packet(packet);
     }
@@ -1243,6 +1249,51 @@ MAV_RESULT GCS_MAVLINK_Copter::handle_command_CCB_CONTROL(const mavlink_command_
         default :
             break;
     }
+    return MAV_RESULT_ACCEPTED;
+}
+
+// -------------------------------------------------------------------------
+// Handle Command 2510 MAV_CMD_LOGGING_START
+// Start logging to SD card when commanded from external GCS
+// param1: Format (0 = ULog, currently ignored - ArduPilot uses its own format)
+// -------------------------------------------------------------------------
+MAV_RESULT GCS_MAVLINK_Copter::handle_command_LOGGING_START(const mavlink_command_long_t &msg)
+{
+    // Check if logging is already started
+    if (AP::logger().logging_started()) {
+        gcs().send_text(MAV_SEVERITY_INFO, "Logging already started");
+        return MAV_RESULT_ACCEPTED;
+    }
+
+    // Start logging by calling PrepForArming which triggers log file creation
+    AP::logger().PrepForArming();
+
+    // Verify logging started successfully
+    if (AP::logger().logging_started()) {
+        gcs().send_text(MAV_SEVERITY_INFO, "Logging started");
+        return MAV_RESULT_ACCEPTED;
+    } else {
+        gcs().send_text(MAV_SEVERITY_WARNING, "Failed to start logging");
+        return MAV_RESULT_FAILED;
+    }
+}
+
+// -------------------------------------------------------------------------
+// Handle Command 2511 MAV_CMD_LOGGING_STOP
+// Stop logging to SD card when commanded from external GCS
+// -------------------------------------------------------------------------
+MAV_RESULT GCS_MAVLINK_Copter::handle_command_LOGGING_STOP(const mavlink_command_long_t &msg)
+{
+    // Check if logging is currently active
+    if (!AP::logger().logging_started()) {
+        gcs().send_text(MAV_SEVERITY_INFO, "Logging not active");
+        return MAV_RESULT_ACCEPTED;
+    }
+
+    // Stop logging
+    AP::logger().StopLogging();
+
+    gcs().send_text(MAV_SEVERITY_INFO, "Logging stopped");
     return MAV_RESULT_ACCEPTED;
 }
 
