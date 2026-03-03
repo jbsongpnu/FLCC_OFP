@@ -622,6 +622,7 @@ protected:
     // Declare Functions for Handling Mavlink Message
     void handle_gcs_flcc_cam_cmd(const mavlink_message_t &msg);                 // Handle Message of 'gcs_flcc_cam_cmd' (KAL)
     void handle_gcs_flcc_pmu_ctrl(const mavlink_message_t &msg);                // Handle Message of 'gcs_flcc_pmu_cmd' (KAL)
+    void handle_gcs_flcc_object_avoidance_cmd(const mavlink_message_t &msg);    // Handle Message of 'GCS_FLCC_OBJECT_AVOIDANCE_CMD' (PNU & KAL)
     uint16_t iteration_cnt=0;
 
     /*
@@ -1056,6 +1057,10 @@ private:
     void send_message_gcs_flcc_cam_status() const;                                      // Send CAM Status to GCS with Mavlink Message (KAL)
     void send_message_gcs_flcc_pmu_status() const;                                      // Send PMU Status to GCS with Mavlink Message (KAL)
     void send_message_gcs_flcc_pmu_ctrl_echo() const;                                   // Send PMU Command(Echo) to GCS with Mavlink Message (KAL)
+
+    // -------------------------------------------------------------------------
+    // Declare extra additional functions
+    void send_message_flcc_gcs_object_avoidance_status() const;		//Send object avoidance status to GCS with Mavlink Message (PNU & KAL)
 };
 
 /// @class GCS
@@ -1149,6 +1154,9 @@ public:
 // ==================================================================================
     mavlink_sys_icd_gcs_flcc_pmu_ctrl_t    PMU_Ctrl;                                        // MAVLINK Message for PMU Command (KAL)
     uint8_t PMU_Ctrl_Seq;                                                                   // Sequence Number of PMU Control Command (KAL)
+    mavlink_sys_icd_gcs_flcc_object_avoidance_cmd_t		GCS_Ctrl_OA_Mode;					// MAVLINK Message for Object Avoidance Level Control (PNU & KAL)
+    mavlink_sys_icd_flcc_gcs_object_avoidance_status_t	OA_Status;							// MAVLINK Message sent to GCS for Object Avoidance Status (PNU & KAL)
+    uint8_t prev_Ctrl_OA_Mode = 0;
 
     void update_send();
     void update_receive();

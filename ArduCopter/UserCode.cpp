@@ -5,6 +5,9 @@ void Copter::userhook_init()
 {
     // put your initialisation code here
     // this will be called once at start-up
+    gcs().OA_Status.Object_Avoidance_Mode = 0;
+	gcs().GCS_Ctrl_OA_Mode.OA_Mode = 0;
+    copter.avoid.proximity_avoidance_enable(false);
     if (1 == CAM_UART->is_initialized()) // byungwchoi
     {
         CAM_UART->end();
@@ -33,8 +36,22 @@ void Copter::userhook_50Hz()
 #ifdef USERHOOK_MEDIUMLOOP
 void Copter::userhook_MediumLoop()
 {
+    static uint16_t counter = 0;
     // put your 10Hz code here
-    gcs().send_message(MSG_CAM_STATUS); // KAL : Send CAM Status with Mavlink
+    //Object_Avoidance_Mode is mainly determined by proximity_avoidance_enabled flag
+	//because proximity_avoidance_enabled_flag can be turned off from automatic algorithm and emergency controller
+	if(copter.avoid.proximity_avoidance_enabled()){
+		gcs().OA_Status.Object_Avoidance_Mode = 1;//forece to 1 or gcs().GCS_Ctrl_OA_Mode.OA_Mode; 
+        if(counter>2) {
+            gcs().send_message(MSG_DISTANCE_SENSOR);
+            counter=0;
+        }
+        counter++;
+	}else{
+		gcs().OA_Status.Object_Avoidance_Mode = 0;
+	}
+    gcs().send_message(MSG_CAM_STATUS); // KAL : Send CAM Status with Mavlink 
+    gcs().send_message(MSG_OBJECT_AVOIDANCE_STATUS); // Send object avoidance status to GCS with Mavlink Message (PNU & KAL)
 }
 #endif
 

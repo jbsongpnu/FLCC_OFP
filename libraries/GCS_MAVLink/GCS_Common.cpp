@@ -65,6 +65,7 @@
 // KAL OFP Firmware version : UNCLASSIFIED
 // ==================================================================================
 #include <AP_Q30/AP_Q30.h> // THIS
+#include <AC_Avoidance/AC_Avoid.h> 
 
 #include <stdio.h>
 
@@ -417,15 +418,6 @@ void GCS_MAVLINK::send_distance_sensor(const AP_RangeFinder_Backend *sensor, con
         return;
     }
 
-    uint8_t quality_pct = 0;
-    uint8_t quality;
-    if (sensor->get_signal_quality_pct(quality_pct)) {
-        // mavlink defines this field as 0 is unknown, 1 is invalid, 100 is perfect
-        quality = MAX(quality_pct, 1);
-    } else {
-        quality = 0;
-    }
-
     mavlink_msg_distance_sensor_send(
         chan,
         AP_HAL::millis(),                        // time since system boot TODO: take time of measurement
@@ -435,11 +427,7 @@ void GCS_MAVLINK::send_distance_sensor(const AP_RangeFinder_Backend *sensor, con
         sensor->get_mav_distance_sensor_type(),  // type from MAV_DISTANCE_SENSOR enum
         instance,                                // onboard ID of the sensor == instance
         sensor->orientation(),                   // direction the sensor faces from MAV_SENSOR_ORIENTATION enum
-        0,                                       // Measurement covariance in centimeters, 0 for unknown / invalid readings
-        0,                                       // horizontal FOV
-        0,                                       // vertical FOV
-        (const float *)nullptr,                  // quaternion of sensor orientation for MAV_SENSOR_ROTATION_CUSTOM
-        quality);                                // Signal quality of the sensor. 0 = unknown/unset signal quality, 1 = invalid signal, 100 = perfect signal.
+        0);                                       // Measurement covariance in centimeters, 0 for unknown / invalid readings
 }
 // send any and all distance_sensor messages.  This starts by sending
 // any distance sensors not used by a Proximity sensor, then sends the
@@ -539,30 +527,29 @@ void GCS_MAVLINK::send_proximity()
                         MAV_DISTANCE_SENSOR_LASER,                      // type from MAV_DISTANCE_SENSOR enum
                         PROXIMITY_SENSOR_ID_START + i,                  // onboard ID of the sensor
                         dist_array.orientation[i],                      // direction the sensor faces from MAV_SENSOR_ORIENTATION enum
-                        0,                                              // Measurement covariance in centimeters, 0 for unknown / invalid readings
-                        0, 0, nullptr, 0);
+                        0);                                              // Measurement covariance in centimeters, 0 for unknown / invalid readings
             }
         }
     }
 
-    // send upward distance
-    float dist_up;
-    if (proximity->get_upward_distance(dist_up)) {
-        if (!HAVE_PAYLOAD_SPACE(chan, DISTANCE_SENSOR)) {
-            return;
-        }
-        mavlink_msg_distance_sensor_send(
-                chan,
-                AP_HAL::millis(),                                         // time since system boot
-                dist_min,                                                 // minimum distance the sensor can measure in centimeters
-                dist_max,                                                 // maximum distance the sensor can measure in centimeters
-                (uint16_t)(dist_up * 100.0f),                             // current distance reading
-                MAV_DISTANCE_SENSOR_LASER,                                // type from MAV_DISTANCE_SENSOR enum
-                PROXIMITY_SENSOR_ID_START + PROXIMITY_MAX_DIRECTION + 1,  // onboard ID of the sensor
-                MAV_SENSOR_ROTATION_PITCH_90,                             // direction upwards
-                0,                                                        // Measurement covariance in centimeters, 0 for unknown / invalid readings
-                0, 0, nullptr, 0);
-    }
+    // send upward distance => No upward sensor - J.B. 2024.01.22
+    // float dist_up;
+    // if (proximity->get_upward_distance(dist_up)) {
+    //     if (!HAVE_PAYLOAD_SPACE(chan, DISTANCE_SENSOR)) {
+    //         return;
+    //     }
+    //     mavlink_msg_distance_sensor_send(
+    //             chan,
+    //             AP_HAL::millis(),                                         // time since system boot
+    //             dist_min,                                                 // minimum distance the sensor can measure in centimeters
+    //             dist_max,                                                 // maximum distance the sensor can measure in centimeters
+    //             (uint16_t)(dist_up * 100.0f),                             // current distance reading
+    //             MAV_DISTANCE_SENSOR_LASER,                                // type from MAV_DISTANCE_SENSOR enum
+    //             PROXIMITY_SENSOR_ID_START + PROXIMITY_MAX_DIRECTION + 1,  // onboard ID of the sensor
+    //             MAV_SENSOR_ROTATION_PITCH_90,                             // direction upwards
+    //             0,                                                        // Measurement covariance in centimeters, 0 for unknown / invalid readings
+    //             0, 0, nullptr, 0);
+    // }
 }
 #endif // HAL_PROXIMITY_ENABLED
 
@@ -3941,6 +3928,10 @@ void GCS_MAVLINK::handle_common_message(const mavlink_message_t &msg)
         handle_gcs_flcc_cam_cmd(msg);
         break;
 
+    case MAVLINK_MSG_ID_SYS_ICD_GCS_FLCC_OBJECT_AVOIDANCE_CMD:	// Receive Command to select Object avoidance level (PNU & KAL)
+    	handle_gcs_flcc_object_avoidance_cmd(msg);
+    	break;
+
     }
 
 }
@@ -5773,6 +5764,10 @@ bool GCS_MAVLINK::try_send_message(const enum ap_message id)
         send_message_gcs_flcc_pmu_ctrl_echo();
         break;
 
+    case MSG_OBJECT_AVOIDANCE_STATUS:
+    	CHECK_PAYLOAD_SIZE(SYS_ICD_FLCC_GCS_OBJECT_AVOIDANCE_STATUS);
+    	send_message_flcc_gcs_object_avoidance_status();
+    	break;
 
     case MSG_WATER_DEPTH:
 #if APM_BUILD_TYPE(APM_BUILD_Rover)
@@ -6699,6 +6694,82 @@ void GCS_MAVLINK::handle_gcs_flcc_pmu_ctrl(const mavlink_message_t &msg)
 
 }
 
+// -------------------------------------------------------------------------
+// Send object avoidance status to GCS with Mavlink Message (PNU & KAL)
+// -------------------------------------------------------------------------
+void GCS_MAVLINK::send_message_flcc_gcs_object_avoidance_status() const
+{
+	AP_Proximity *proximity = AP_Proximity::get_singleton();
+	Proximity_Distance_Array dist_array;
+	uint8_t Obj_Exists;		//object existence for 0~7 sectors using bit0~bit7
+	uint8_t warning_level;	//0:none, 1:warning, 2:alert
+	uint16_t temp_distance = 0;	//distance in centimeters
+
+		// get min/max distances => ex) Tera Tower Evo has 0.5m and 60m encrypted at AP_Proximity/AP_Proximity_TeraRangerTowerEvo.h
+	const uint16_t dist_min = (uint16_t)(proximity->distance_min() * 100.0f); // minimum distance the sensor can measure in centimeters
+	const uint16_t dist_max = (uint16_t)(proximity->distance_max() * 100.0f); // maximum distance the sensor can measure in centimeters
+
+	proximity->get_horizontal_distances(dist_array);
+
+	if (proximity == nullptr) {
+		return;
+	}
+    Obj_Exists = 0;
+    warning_level = 0;
+	for (uint8_t i=0; i < 8; i++){
+		temp_distance = (uint16_t)(dist_array.distance[i] * 100.0);
+		if((temp_distance >= dist_min) && (temp_distance < dist_max)){
+			Obj_Exists |= (1<<i);
+			if(temp_distance <= 1000){
+				warning_level |= 2;
+			}else if(temp_distance <= 1500){
+				warning_level |= 1;
+			}
+		}
+	}
+
+	if(warning_level>2)warning_level=2;
+	gcs().OA_Status.Object_Avoidance_Status = warning_level;
+	gcs().OA_Status.Object_Existence = Obj_Exists;
+    if (gcs().OA_Status.Object_Avoidance_Mode > 0){
+        mavlink_msg_sys_icd_flcc_gcs_object_avoidance_status_send(
+            chan,
+            gcs().OA_Status.Object_Avoidance_Status,
+            gcs().OA_Status.Object_Avoidance_Mode,
+            gcs().OA_Status.Object_Existence);
+    }else{
+        mavlink_msg_sys_icd_flcc_gcs_object_avoidance_status_send(
+            chan,
+            0,
+            gcs().OA_Status.Object_Avoidance_Mode,
+            0);
+    }
+}
+
+// -------------------------------------------------------------------------
+// Receive Object Avoidance Level Control Command from GCS with Mavlink Message
+// -------------------------------------------------------------------------
+void GCS_MAVLINK::handle_gcs_flcc_object_avoidance_cmd(const mavlink_message_t &msg)
+{
+	AC_Avoid *avoid = AP::ac_avoid();
+	mavlink_msg_sys_icd_gcs_flcc_object_avoidance_cmd_decode(&msg, &gcs().GCS_Ctrl_OA_Mode);	//save OA_Mode to 'GCS_Ctrl_OA_Mode'
+
+	if(gcs().prev_Ctrl_OA_Mode != gcs().GCS_Ctrl_OA_Mode.OA_Mode){
+		//Currently, KGCS is keep sending this, so detect change of mode
+		if(gcs().GCS_Ctrl_OA_Mode.OA_Mode){
+			//For OA level 1 or 2, turn on OA
+			gcs().OA_Status.Object_Avoidance_Mode = 1; //force to 1 or gcs().GCS_Ctrl_OA_Mode.OA_Mode;
+			avoid->proximity_avoidance_enable(true);	//force on - no need to check current state
+			gcs().send_text(MAV_SEVERITY_CRITICAL, "GCS command Avoidance ON Level 1");//force to 1 or %d", gcs().GCS_Ctrl_OA_Mode.OA_Mode);
+		}else{
+			//For OA zero, turn off OA
+			gcs().OA_Status.Object_Avoidance_Mode = 0;
+			avoid->proximity_avoidance_enable(false);
+			gcs().send_text(MAV_SEVERITY_CRITICAL, "GCS command Avoidance OFF");
+		}
+		gcs().prev_Ctrl_OA_Mode = gcs().GCS_Ctrl_OA_Mode.OA_Mode;
+	}
+}
 
 /*
   send HIGH_LATENCY2 message

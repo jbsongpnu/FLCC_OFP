@@ -18,6 +18,9 @@
   - GPRMC is temporarily disabled, and GPGGA also sends Drone ID number
   - Set serial protocol to  20(serial4_protocol=20) to take effect
   - If geo-tagging requires NMEA data to Viewpro camera, use POSITION_INT with mavlink1 option instead : So, NMEA output is not needed in usual cases
+6. PNU 24.01.18 - Adding Proximity Sensor Messages for KGCS
+  - Mavlink common.xml file has changed for additional messages : copty from "Forced Submoudle File" to mavlink module
+  - Proximity Sensor functions are being added
 # ArduPilot Project
 
 <a href="https://ardupilot.org/discord"><img src="https://img.shields.io/discord/674039678562861068.svg" alt="Discord">

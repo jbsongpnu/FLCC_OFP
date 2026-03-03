@@ -86,6 +86,7 @@ void ModeLoiter::run()
     float target_roll, target_pitch;
     float target_yaw_rate = 0.0f;
     float target_climb_rate = 0.0f;
+     AC_Avoid *avoid = AP::ac_avoid();
 
     // set vertical speed and acceleration limits
     pos_control->set_max_speed_accel_z(-get_pilot_speed_dn(), g.pilot_speed_up, g.pilot_accel_z);
@@ -144,7 +145,7 @@ void ModeLoiter::run()
         takeoff.do_pilot_takeoff(target_climb_rate);
 
         // run loiter controller
-        loiter_nav->update();
+        loiter_nav->update(avoid->proximity_avoidance_enabled());//explicitly pass avoid-enable flag - JBSong2021.11.15
 
         // call attitude controller
         attitude_control->input_thrust_vector_rate_heading(loiter_nav->get_thrust_vector(), target_yaw_rate, false);
@@ -179,10 +180,10 @@ void ModeLoiter::run()
         }
         // run loiter controller if we are not doing prec loiter
         if (!_precision_loiter_active) {
-            loiter_nav->update();
+            loiter_nav->update(avoid->proximity_avoidance_enabled());//explicitly pass avoid-enable flag - JBSong2021.11.15
         }
 #else
-        loiter_nav->update();
+        loiter_nav->update(avoid->proximity_avoidance_enabled());//explicitly pass avoid-enable flag - JBSong2021.11.15
 #endif
 
         // call attitude controller

@@ -48,7 +48,7 @@ public:
     float get_angle_max_cd() const;
 
     /// run the loiter controller
-    void update(bool avoidance_on = true);
+    void update(bool avoidance_on = false);//default value of avoidance_on has changed to false - JBSong 2021.11.15
 
     /// get desired roll, pitch which should be fed into stabilize controllers
     float get_roll() const { return _pos_control.get_roll_cd(); }
@@ -64,8 +64,8 @@ protected:
 
     /// updates desired velocity (i.e. feed forward) with pilot requested acceleration and fake wind resistance
     ///		updated velocity sent directly to position controller
-    void calc_desired_velocity(bool avoidance_on = true);
-
+    void calc_desired_velocity(bool avoidance_on = false);//default value of avoidance_on has changed to false - JBSong 2021.11.15
+    
     // references and pointers to external libraries
     const AP_InertialNav&   _inav;
     const AP_AHRS_View&     _ahrs;

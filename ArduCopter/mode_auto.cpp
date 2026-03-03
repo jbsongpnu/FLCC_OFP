@@ -1006,6 +1006,13 @@ void ModeAuto::land_run()
     // set motors to full range
     motors->set_desired_spool_state(AP_Motors::DesiredSpoolState::THROTTLE_UNLIMITED);
 
+    //disable proximity avoidance at any time during land mode
+	AC_Avoid *avoid = AP::ac_avoid();
+	//Turn off proximity avoidance
+	if(avoid->proximity_avoidance_enabled()) {
+		avoid->proximity_avoidance_enable(false);
+		gcs().send_text(MAV_SEVERITY_INFO, "Avoid OFF for Landing");
+	}
     // run normal landing or precision landing (if enabled)
     land_run_normal_or_precland();
 }

@@ -59,6 +59,7 @@ ModeRTL::RTLAltType ModeRTL::get_alt_type() const
 // should be called at 100hz or more
 void ModeRTL::run(bool disarm_on_land)
 {
+    AC_Avoid *avoid = AP::ac_avoid();
     if (!motors->armed()) {
         return;
     }
@@ -77,6 +78,11 @@ void ModeRTL::run(bool disarm_on_land)
             loiterathome_start();
             break;
         case SubMode::LOITER_AT_HOME:
+            //Turn off proximity avoidance before descending or landing
+        	if(avoid->proximity_avoidance_enabled()) {
+        		avoid->proximity_avoidance_enable(false);
+        		gcs().send_text(MAV_SEVERITY_INFO, "Avoid OFF for Landing");
+        	}
             if (rtl_path.land || copter.failsafe.radio) {
                 land_start();
             } else {

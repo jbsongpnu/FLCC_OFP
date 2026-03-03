@@ -718,7 +718,6 @@ void RC_Channel::do_aux_function_avoid_adsb(const AuxSwitchPos ch_flag)
 
 void RC_Channel::do_aux_function_avoid_proximity(const AuxSwitchPos ch_flag)
 {
-#if !APM_BUILD_TYPE(APM_BUILD_ArduPlane)
     AC_Avoid *avoid = AP::ac_avoid();
     if (avoid == nullptr) {
         return;
@@ -727,15 +726,16 @@ void RC_Channel::do_aux_function_avoid_proximity(const AuxSwitchPos ch_flag)
     switch (ch_flag) {
     case AuxSwitchPos::HIGH:
         avoid->proximity_avoidance_enable(true);
+        gcs().send_text(MAV_SEVERITY_CRITICAL, "Avoidance Switch ON");
         break;
     case AuxSwitchPos::MIDDLE:
         // nothing
         break;
     case AuxSwitchPos::LOW:
         avoid->proximity_avoidance_enable(false);
+        gcs().send_text(MAV_SEVERITY_CRITICAL, "Avoidance Switch OFF");
         break;
     }
-#endif // !APM_BUILD_ArduPlane
 }
 
 void RC_Channel::do_aux_function_camera_trigger(const AuxSwitchPos ch_flag)

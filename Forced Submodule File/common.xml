@@ -4998,11 +4998,6 @@
       <field type="uint8_t" name="id" instance="true">Onboard ID of the sensor</field>
       <field type="uint8_t" name="orientation" enum="MAV_SENSOR_ORIENTATION">Direction the sensor faces. downward-facing: ROTATION_PITCH_270, upward-facing: ROTATION_PITCH_90, backward-facing: ROTATION_PITCH_180, forward-facing: ROTATION_NONE, left-facing: ROTATION_YAW_90, right-facing: ROTATION_YAW_270</field>
       <field type="uint8_t" name="covariance" units="cm^2">Measurement variance. Max standard deviation is 6cm. 255 if unknown.</field>
-      <extensions/>
-      <field type="float" name="horizontal_fov" units="rad">Horizontal Field of View (angle) where the distance measurement is valid and the field of view is known. Otherwise this is set to 0.</field>
-      <field type="float" name="vertical_fov" units="rad">Vertical Field of View (angle) where the distance measurement is valid and the field of view is known. Otherwise this is set to 0.</field>
-      <field type="float[4]" name="quaternion">Quaternion of the sensor orientation in vehicle body frame (w, x, y, z order, zero-rotation is 1, 0, 0, 0). Zero-rotation is along the vehicle body x-axis. This field is required if the orientation is set to MAV_SENSOR_ROTATION_CUSTOM. Set it to 0 if invalid."</field>
-      <field type="uint8_t" name="signal_quality" units="%">Signal quality of the sensor. Specific to each sensor type, representing the relation of the signal strength with the target reflectivity, distance, size or aspect, but normalised as a percentage. 0 = unknown/unset signal quality, 1 = invalid signal, 100 = perfect signal.</field>
     </message>
     <message id="133" name="TERRAIN_REQUEST">
       <description>Request for terrain data and terrain status. See terrain protocol docs: https://mavlink.io/en/services/terrain.html</description>
@@ -6097,6 +6092,11 @@
       <field type="uint8_t" name="Tracking_CMD" units="N/A">Tracking_CMD[SF:N/A, MIN:N/A, MAX:N/A]</field>
     </message>
 
+    <message id="50004" name="SYS_ICD_GCS_FLCC_OBJECT_AVOIDANCE_CMD">
+    <description>TC4 (OA).</description>
+      <field type="uint8_t" name="OA_Mode" units="N/A">0: Normal, 1: OA Level1, 2: OA Level2[SF:N/A, MIN:0, MAX:2]</field>
+    </message>
+
    <!-- TM -->
     <message id="51001" name="SYS_ICD_FLCC_GCS_PMU_STATUS">
     <description>TM1 (PMU).</description>
@@ -6148,6 +6148,13 @@
       <field type="uint8_t" name="Componet_ID" units="N/A">Componet[SF:N/A, MIN:0, MAX:255]</field>
       <field type="uint8_t" name="PMUCAN_Fail" units="N/A">PMUCAN_Fail[SF:N/A, MIN:0, MAX:5]</field>
       <field type="uint32_t" name="Reserved" units="N/A">Reserved[SF:TBD, MIN:TBD, MAX:TBD]</field>
+    </message>
+
+    <message id="51005" name="SYS_ICD_FLCC_GCS_OBJECT_AVOIDANCE_STATUS">
+    <description>TM5 (OA) Object avoidance status.</description>
+      <field type="uint8_t" name="Object_Avoidance_Status" units="N/A">0:Normal, 1:Warning, 2:Alert[SF:1, MIN:0, MAX:2]</field>
+      <field type="uint8_t" name="Object_Avoidance_Mode" units="N/A">0: Normal, 1: OA Level1, 2: OA Level2[SF:1, MIN:0, MAX:2]</field>
+      <field type="uint8_t" name="Object_Existence" units="N/A">Bit0~Bit7 to Sectors 0~7, 0:none, 1:object exists[SF:N/A, MIN:0, MAX:255]</field>
     </message>
     <!-- KAL -->
 

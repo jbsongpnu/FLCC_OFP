@@ -120,6 +120,12 @@ void Mode::_TakeOff::do_pilot_takeoff(float& pilot_climb_rate_cm)
 // auto_takeoff_complete set to true when target altitude is within 10% of the take off altitude and less than 50% max climb rate
 void Mode::auto_takeoff_run()
 {
+    AC_Avoid *avoid = AP::ac_avoid();
+	//Turn off proximity avoidance during takeoff
+	if(avoid->proximity_avoidance_enabled()) {
+		avoid->proximity_avoidance_enable(false);
+		gcs().send_text(MAV_SEVERITY_INFO, "Avoid OFF for Takeoff");
+	}
     // if not armed set throttle to zero and exit immediately
     if (!motors->armed() || !copter.ap.auto_armed) {
         // do not spool down tradheli when on the ground with motor interlock enabled
