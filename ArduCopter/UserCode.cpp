@@ -75,7 +75,7 @@ void Copter::userhook_init()
     MAV_GCSTX_CXSV_SWASH.Cyclic_Lon = 0;
     MAV_GCSTX_CXSV_SWASH.Cyclic_Lat = 0;
     MAV_GCSTX_CXSV_SWASH.Pedal = 0;
-    MAV_GCSTX_CXSV_SWASH.CMD_Collective = 0; 
+    MAV_GCSTX_CXSV_SWASH.CMD_Collective = 4; 
     MAV_GCSTX_CXSV_SWASH.CMD_Cyclic_Lon = 0;
     MAV_GCSTX_CXSV_SWASH.CMD_Cyclic_Lat = 0;
     MAV_GCSTX_CXSV_SWASH.CMD_Pedal = 0;
@@ -103,12 +103,12 @@ void Copter::userhook_init()
 
     cxdata().SVinitialized = 0;
     cxdata().CX_State = CoaxState::CXSTATE_0_INIT;
-    cxdata().Swash.Col = 0.0;
+    cxdata().Swash.Col = 4.0;
     cxdata().Swash.Lat = 0.0;
     cxdata().Swash.Lon = 0.0;
     cxdata().Swash.Rud = 0.0;
     cxdata().Swash.Pedal_trim = 0.0;
-    cxdata().Swash_CMD.Col = 0.0;   //Start with minimum : Minimum Collective set to 0 deg 2026.01.19
+    cxdata().Swash_CMD.Col = 4.0;   //Start with minimum : Minimum Collective set to 0 deg 2026.01.19
     cxdata().Swash_CMD.Lat = 0.0;
     cxdata().Swash_CMD.Lon = 0.0;
     cxdata().Swash_CMD.Rud = 0.0;
@@ -997,6 +997,15 @@ void Copter::userhook_MediumLoop()
     cxdata().SV_state[3].Status_Torque,             //h     RX_TorQue4
     cxdata().SV_state[4].Status_Torque,             //h     RX_TorQue5
     cxdata().SV_state[5].Status_Torque              //h     RX_TorQue6
+    );
+    AP::logger().Write("CSV5", "TimeUS,CSV1,CSV2,CSV3,CSV4,CSV5,CSV6", "Qffffff",
+    AP_HAL::micros64(),
+    cxdata().SV_Pos[0].CtrlOut,
+    cxdata().SV_Pos[1].CtrlOut,
+    cxdata().SV_Pos[2].CtrlOut,
+    cxdata().SV_Pos[3].CtrlOut,
+    cxdata().SV_Pos[4].CtrlOut,
+    cxdata().SV_Pos[5].CtrlOut
     );
 #endif
     /*

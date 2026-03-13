@@ -198,7 +198,8 @@ float AP_MotorsHeli_Swash::get_servo_out(int8_t ch_num, float pitch, float roll,
         collective = 1 - collective;
     }
 
-    float servo = ((_rollFactor[ch_num] * roll) + (_pitchFactor[ch_num] * pitch))*0.45f + _collectiveFactor[ch_num] * collective;
+    // float servo = ((_rollFactor[ch_num] * roll) + (_pitchFactor[ch_num] * pitch))*0.45f + _collectiveFactor[ch_num] * collective;
+    float servo = ((_rollFactor[ch_num] * roll) + (_pitchFactor[ch_num] * pitch)) + _collectiveFactor[ch_num] * collective; //making same lateral and lontitudinal movement
     if (_swash_type == SWASHPLATE_TYPE_H1 && (ch_num == CH_1 || ch_num == CH_2)) {
         servo += 0.5f;
     }

@@ -823,7 +823,7 @@ void AP_COAXCAN2::TX_FCC1_MSG(void)
     _FCC_Ready = cxdata().fcrdy;
 #endif
     //_FCC_AlivCnt : looping 0~15
-    _FCC_CmdFcRunStop = 0;
+    _FCC_CmdFcRunStop = cxdata().HDC_OnOff;
     _FCC_CmdPmsBatCut = 0;//Unsure if this will be uesd
     _FCC_Reserved1 = 0;
 

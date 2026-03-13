@@ -1069,14 +1069,34 @@ MAV_RESULT GCS_MAVLINK_Copter::handle_command_COAX_FCC_READY(const mavlink_comma
     } else {
         cxdata().fcrdy = 0;
     }
-    gcs().send_text(MAV_SEVERITY_INFO, "Got FCC Ready %u", cxdata().fcrdy);
     switch(param1) {
         case 0 : 
+            cxdata().fcrdy = 0;
+            gcs().send_text(MAV_SEVERITY_INFO, "Got FCC Ready OFF");
             return MAV_RESULT_ACCEPTED;
         break;
         case 1 :
+            cxdata().fcrdy = 1;
+            gcs().send_text(MAV_SEVERITY_INFO, "Got FCC Ready ON");
             return MAV_RESULT_ACCEPTED;
         break;
+        case 2 :
+            if(cxdata().fcrdy) cxdata().fcrdy = 0;
+            else cxdata().fcrdy = 1;
+            gcs().send_text(MAV_SEVERITY_INFO, "Got FCC Ready Toggle %u", cxdata().fcrdy);
+            return MAV_RESULT_ACCEPTED;
+        break;
+        case 3 :
+            cxdata().HDC_OnOff = 1;
+            gcs().send_text(MAV_SEVERITY_INFO, "Got HDC ON");
+            return MAV_RESULT_ACCEPTED;
+        break;
+        case 4 :
+            cxdata().HDC_OnOff = 0;
+            gcs().send_text(MAV_SEVERITY_INFO, "Got HDC OFF");
+            return MAV_RESULT_ACCEPTED;
+        break;
+        
         default :
             //Should not reach here...
             return MAV_RESULT_ACCEPTED;

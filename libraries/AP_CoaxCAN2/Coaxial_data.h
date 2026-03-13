@@ -66,32 +66,32 @@
 #define PARAM_SV1_POS_START     381     //Upper rotor L
 #define PARAM_SV1_POS_NEUTRAL   950
 #define PARAM_SV1_POS_END       1519
-#define PARAM_SV1_POS_ZERO      1141     //Zero-degree collective achieved at this position
+#define PARAM_SV1_POS_ZERO      1120 //1141     //Zero-degree collective achieved at this position
 
 #define PARAM_SV2_POS_START     455     //Upper rotor R
 #define PARAM_SV2_POS_NEUTRAL   1042
 #define PARAM_SV2_POS_END       1593
-#define PARAM_SV2_POS_ZERO      1239     //Zero-degree collective achieved at this position
+#define PARAM_SV2_POS_ZERO      1219 //1239     //Zero-degree collective achieved at this position
 
 #define PARAM_SV3_POS_START     381     //Upper rotor B
 #define PARAM_SV3_POS_NEUTRAL   950
 #define PARAM_SV3_POS_END       1519
-#define PARAM_SV3_POS_ZERO      1112     //Zero-degree collective achieved at this position
+#define PARAM_SV3_POS_ZERO      1090 //1112     //Zero-degree collective achieved at this position
 
 #define PARAM_SV4_POS_START     381     //Lower rotor L
 #define PARAM_SV4_POS_NEUTRAL   924     //950
 #define PARAM_SV4_POS_END       1519
-#define PARAM_SV4_POS_ZERO      1157     //Zero-degree collective achieved at this position
+#define PARAM_SV4_POS_ZERO      1055 //1157     //Zero-degree collective achieved at this position
 
 #define PARAM_SV5_POS_START     455     //Lower rotor R
 #define PARAM_SV5_POS_NEUTRAL   1032    //1024    
 #define PARAM_SV5_POS_END       1593    
-#define PARAM_SV5_POS_ZERO      1293    //Zero-degree collective achieved at this position
+#define PARAM_SV5_POS_ZERO      1185 //1293    //Zero-degree collective achieved at this position
 
 #define PARAM_SV6_POS_START     321     //Lower rotor B
 #define PARAM_SV6_POS_NEUTRAL   932     //890
 #define PARAM_SV6_POS_END       1459
-#define PARAM_SV6_POS_ZERO      1169    //Zero-degree collective achieved at this position
+#define PARAM_SV6_POS_ZERO      1058 //1169    //Zero-degree collective achieved at this position
 // #define PARAM_SV1_POS_START     760     //381
 // #define PARAM_SV1_POS_NEUTRAL   800     //950
 // #define PARAM_SV1_POS_END       1150    //1519
@@ -477,6 +477,7 @@ public:
 
     //====IFCU and PMU====
     uint8_t fcrdy = 0;
+    uint8_t HDC_OnOff = 0;
     datadef_PMS_data DMI_PMS_data;
     datadef_IFCU_data IFCU_data;
     //End of IFCU and PMU

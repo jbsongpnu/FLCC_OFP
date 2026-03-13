@@ -2658,12 +2658,18 @@ void AP_COAXCAN1::SV_Waiting_StateLoop(void) {
     static uint8_t StateLoop = 0;   //0 ~5 loop
     static uint8_t CheckSV_ID = 1;  //1~6 loop
     float collective_deg;
-    int16_t SV1, SV2, SV3, SV4, SV5, SV6;
+    //int16_t SV1, SV2, SV3, SV4, SV5, SV6;
     //int16_t tempint16;
     //int16_t tmp_neutral, tmp_start, tmp_end;
     //uint8_t tempSVID_0to5; //ID for array codes of servos which starts from 0
     //uint8_t tempSVID_1to6; //ID for physical servos which starts from 1
-        
+    
+    float Pedal_trim;
+    collective_deg = constrain_float( cxdata().Swash_CMD.Col, 4.0, 13.0);
+    cxdata().Swash.Col = collective_deg;
+    Pedal_from_Collective(collective_deg, &Pedal_trim); //get pedal trim
+    cxdata().Swash.Pedal_trim = Pedal_trim;             //push to global
+
 #if TEST_SET == 2
     int16_t tmp_outRT;
 #endif
@@ -2730,81 +2736,41 @@ void AP_COAXCAN1::SV_Waiting_StateLoop(void) {
             // End of Step 3 */
 
             // Step 4 Apply pedal control with scheduling
-            collective_deg = constrain_float( cxdata().Swash_CMD.Col, 1.0, 13.0);
-            float Pedal_trim, collective_lower_deg, collective_upper_deg;
-            cxdata().Swash.Col = collective_deg;
-            Pedal_from_Collective(collective_deg, &Pedal_trim); //get pedal trim
-            cxdata().Swash.Pedal_trim = Pedal_trim;             //push to global
-            cxdata().Swash.Rud = -Pedal_trim + constrain_float( cxdata().Swash_CMD.Rud, -1.5, 1.5); //Current state of differential pitch
+            // collective_deg = constrain_float( cxdata().Swash_CMD.Col, 1.0, 13.0);
+            // float Pedal_trim, collective_lower_deg, collective_upper_deg;
+            // cxdata().Swash.Col = collective_deg;
+            // Pedal_from_Collective(collective_deg, &Pedal_trim); //get pedal trim
+            // cxdata().Swash.Pedal_trim = Pedal_trim;             //push to global
+            // cxdata().Swash.Rud = -Pedal_trim + constrain_float( cxdata().Swash_CMD.Rud, -1.5, 1.5); //Current state of differential pitch
             //Pedal trim : + to lower, - to upper => this will apply the result from step 3 test
             //Rudder : - to lower, + to upper => this should create right turn moment from "+rudder"
-            collective_upper_deg = collective_deg - (Pedal_trim - cxdata().Swash_CMD.Rud) / 2;  //calculate upper rotor collective with pedal
-            collective_upper_deg = constrain_float(collective_upper_deg, 0.0, 13.5);
-            collective_lower_deg = collective_deg + (Pedal_trim - cxdata().Swash_CMD.Rud) / 2;  //calculate lower rotor collective with pedal
-            collective_lower_deg = constrain_float(collective_lower_deg, 0.0, 13.5);
-            ColTableUpper_LerpToI16(collective_upper_deg, &SV1, &SV2, &SV3);
-            ColTableLOW_LerpToI16(collective_lower_deg, &SV4, &SV5, &SV6);
-            cxdata().SV_TX[0].SV_pos = constrain_int16(SV1, cxdata().SV_state[0].Config_Pos_Start, cxdata().SV_state[0].Config_Pos_End);
-            cxdata().SV_TX[1].SV_pos = constrain_int16(SV2, cxdata().SV_state[1].Config_Pos_Start, cxdata().SV_state[1].Config_Pos_End);
-            cxdata().SV_TX[2].SV_pos = constrain_int16(SV3, cxdata().SV_state[2].Config_Pos_Start, cxdata().SV_state[2].Config_Pos_End);
-            cxdata().SV_TX[3].SV_pos = constrain_int16(SV4, cxdata().SV_state[3].Config_Pos_Start, cxdata().SV_state[3].Config_Pos_End);
-            cxdata().SV_TX[4].SV_pos = constrain_int16(SV5, cxdata().SV_state[4].Config_Pos_Start, cxdata().SV_state[4].Config_Pos_End);
-            cxdata().SV_TX[5].SV_pos = constrain_int16(SV6, cxdata().SV_state[5].Config_Pos_Start, cxdata().SV_state[5].Config_Pos_End);
+            // collective_upper_deg = collective_deg - (Pedal_trim - cxdata().Swash_CMD.Rud) / 2;  //calculate upper rotor collective with pedal
+            // collective_upper_deg = constrain_float(collective_upper_deg, 0.0, 13.5);
+            // collective_lower_deg = collective_deg + (Pedal_trim - cxdata().Swash_CMD.Rud) / 2;  //calculate lower rotor collective with pedal
+            // collective_lower_deg = constrain_float(collective_lower_deg, 0.0, 13.5);
+            // ColTableUpper_LerpToI16(collective_upper_deg, &SV1, &SV2, &SV3);
+            // ColTableLOW_LerpToI16(collective_lower_deg, &SV4, &SV5, &SV6);
+            // cxdata().SV_TX[0].SV_pos = constrain_int16(SV1, cxdata().SV_state[0].Config_Pos_Start, cxdata().SV_state[0].Config_Pos_End);
+            // cxdata().SV_TX[1].SV_pos = constrain_int16(SV2, cxdata().SV_state[1].Config_Pos_Start, cxdata().SV_state[1].Config_Pos_End);
+            // cxdata().SV_TX[2].SV_pos = constrain_int16(SV3, cxdata().SV_state[2].Config_Pos_Start, cxdata().SV_state[2].Config_Pos_End);
+            // cxdata().SV_TX[3].SV_pos = constrain_int16(SV4, cxdata().SV_state[3].Config_Pos_Start, cxdata().SV_state[3].Config_Pos_End);
+            // cxdata().SV_TX[4].SV_pos = constrain_int16(SV5, cxdata().SV_state[4].Config_Pos_Start, cxdata().SV_state[4].Config_Pos_End);
+            // cxdata().SV_TX[5].SV_pos = constrain_int16(SV6, cxdata().SV_state[5].Config_Pos_Start, cxdata().SV_state[5].Config_Pos_End);
             // End of Step 4 
+
+            // Step 5 Manual Passthrough from AP_MotorHeli_Dual swash plate
+            // other calculations are done from AP_MotorsHeli::output_disarmed(), AP_MotorsHeli_Dual::move_actuators()
+            // Servo 1, 2, 3 shifted to 3, 1, 2
+            cxdata().SV_TX[0].SV_pos = constrain_int16( (int16_t)(-335.0f * cxdata().SV_Pos[2].CtrlOut + 1187.22f  ),cxdata().SV_state[2].Config_Pos_Start, cxdata().SV_state[2].Config_Pos_End);
+            cxdata().SV_TX[1].SV_pos = constrain_int16( (int16_t)(-341.333f * cxdata().SV_Pos[0].CtrlOut + 1286.8f ),cxdata().SV_state[0].Config_Pos_Start, cxdata().SV_state[0].Config_Pos_End);
+            cxdata().SV_TX[2].SV_pos = constrain_int16( (int16_t)(-345.0f * cxdata().SV_Pos[1].CtrlOut + 1159.22f  ),cxdata().SV_state[1].Config_Pos_Start, cxdata().SV_state[1].Config_Pos_End);
+            // Servo 4, 5, 6 shifted to 5, 6, 4
+            cxdata().SV_TX[3].SV_pos = constrain_int16( (int16_t)(-537.727f * cxdata().SV_Pos[4].CtrlOut + 1164.14f),cxdata().SV_state[4].Config_Pos_Start, cxdata().SV_state[4].Config_Pos_End);
+            cxdata().SV_TX[4].SV_pos = constrain_int16( (int16_t)(-539.091f * cxdata().SV_Pos[5].CtrlOut + 1293.45f),cxdata().SV_state[5].Config_Pos_Start, cxdata().SV_state[5].Config_Pos_End);
+            cxdata().SV_TX[5].SV_pos = constrain_int16( (int16_t)(-542.0f * cxdata().SV_Pos[3].CtrlOut + 1167.091f ),cxdata().SV_state[3].Config_Pos_Start, cxdata().SV_state[3].Config_Pos_End);
+            // End of Step 5
         }
     
-    //=====Tested but not applied : 2nd order formulae
-    // if(IndexLoop < 6) {
-    //     tempSVID_0to5 = IndexLoop;
-    //     tempSVID_1to6 = tempSVID_0to5 + 1;
-    //     tmp_neutral = cxdata().SV_state[tempSVID_0to5].Position_Zero;   //Position_Zero or Config_Pos_Neutral
-    //     tmp_start = cxdata().SV_state[tempSVID_0to5].Config_Pos_Start;
-    //     tmp_end = cxdata().SV_state[tempSVID_0to5].Config_Pos_End;
-    //     if(tempSVID_1to6 < 4) {
-    //         tempint16 = (int16_t)(-0.278 * cxdata().Swash_CMD.Col * cxdata().Swash_CMD.Col + 19.944 * cxdata().Swash_CMD.Col);
-    //     } else {
-    //         tempint16 = (int16_t)(0.3333 * cxdata().Swash_CMD.Col * cxdata().Swash_CMD.Col - 34.333 * cxdata().Swash_CMD.Col);
-    //     }
-    //     //SW reverser is not applied if we use direct formulae of collective to servo pos
-    //     cxdata().SV_TX[tempSVID_0to5].SV_pos = constrain_int16((tmp_neutral + tempint16), tmp_start, tmp_end);
-        
-
-#if TEST_SET == 1
-
-#endif
-        // if(IndexLoop == 0) {
-// #if TEST_SET == 1   //Step 1 Test : servo to collective pitch formulae 
-//             tempint16 = (int16_t)(cxdata().Swash_CMD.Col * 100);
-            
-//             for (int i = 0; i < 6 ; i++) {
-//                 tmp_neutral = cxdata().SV_state[i].Position_Zero;   //Position_Zero or Config_Pos_Neutral
-//                 tmp_start = cxdata().SV_state[i].Config_Pos_Start;
-//                 tmp_end = cxdata().SV_state[i].Config_Pos_End;
-//                 if(cxdata().SV_state[i].SW_Reversed) {
-//                     cxdata().SV_TX[i].SV_pos = constrain_int16((tmp_neutral - tempint16), tmp_start, tmp_end);
-//                 } else {
-//                     cxdata().SV_TX[i].SV_pos = constrain_int16((tmp_neutral + tempint16), tmp_start, tmp_end);
-//                 }
-//             }
-// #endif
-            // Step 2 Test : Get control output from AP_MotorsHeli_Dual::move_actuators()
-            //cxdata().SV_Pos[x].CtrlOut is set with _servo_out[CH_x] for CH_1 ~ CH_6
-            // for (int i = 0; i < 6; i++){
-            //     tmp_outRT = cxdata().SV_Pos[i].CtrlOut;
-                // tmp_neutral = cxdata().SV_state[i].Config_Pos_Neutral;
-                // tmp_start = cxdata().SV_state[i].Config_Pos_Start;
-                // tmp_end = cxdata().SV_state[i].Config_Pos_End;
-            //     if( ( tmp_outRT < 1.0) && (tmp_outRT > -1.0)) {
-            //         
-            //         if(cxdata().SV_state[i].SW_Reversed) {
-            //             cxdata().SV_TX[i].SV_pos = tmp_neutral - 0.5 * (tmp_end - tmp_start) * tmp_outRT;
-            //         } else {
-            //             cxdata().SV_TX[i].SV_pos = 0.5 * (tmp_end - tmp_start) * tmp_outRT + tmp_neutral;
-            //         }
-            //     }
-            // }
-            
-        // }
 #if TEST_SET != 2
         CMD_SET_POSITION((IndexLoop+1),cxdata().SV_TX[IndexLoop].SV_pos);
 #endif
@@ -2845,23 +2811,7 @@ void AP_COAXCAN1::SV_Waiting_StateLoop(void) {
         //     StateLoop = (StateLoop + 1) % 6;
         // }
         // //----Normal Test Case End-----
-        //----Lower-Rotor Test Case-----
-            case 0 :
-                Request_SVData(CheckSV_ID, REG_POSITION);
-            break;
-            case 1 :
-                Request_SVData(CheckSV_ID, REG_TORQUE);
-            break;
-            default :
-            break;
-        }
-        CheckSV_ID++;
-        if(CheckSV_ID > 6) {
-            CheckSV_ID = 4; //go back to 4 to check lower-rotor only
-            StateLoop = (StateLoop + 1) % 2;// 0 or 1
-        }
-        //----Lower-Rotor Test Case End-----
-        // //----Upper-Rotor Test Case-----
+        // //----Lower-Rotor Test Case-----
         //     case 0 :
         //         Request_SVData(CheckSV_ID, REG_POSITION);
         //     break;
@@ -2872,11 +2822,27 @@ void AP_COAXCAN1::SV_Waiting_StateLoop(void) {
         //     break;
         // }
         // CheckSV_ID++;
-        // if(CheckSV_ID > 3) {
-        //     CheckSV_ID = 1; //go back to 4 to check lower-rotor only
+        // if(CheckSV_ID > 6) {
+        //     CheckSV_ID = 4; //go back to 4 to check lower-rotor only
         //     StateLoop = (StateLoop + 1) % 2;// 0 or 1
         // }
-        // //----Upper-Rotor Test Case End-----
+        // //----Lower-Rotor Test Case End-----
+        //----Upper-Rotor Test Case-----
+            case 0 :
+                Request_SVData(CheckSV_ID, REG_POSITION);
+            break;
+            case 1 :
+                Request_SVData(CheckSV_ID, REG_TORQUE);
+            break;
+            default :
+            break;
+        }
+        CheckSV_ID++;
+        if(CheckSV_ID > 3) {
+            CheckSV_ID = 1; //go back to 4 to check lower-rotor only
+            StateLoop = (StateLoop + 1) % 2;// 0 or 1
+        }
+        //----Upper-Rotor Test Case End-----
     }
 
 

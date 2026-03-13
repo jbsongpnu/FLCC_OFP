@@ -19,6 +19,9 @@
 #include <GCS_MAVLink/GCS.h>
 #include <AP_CoaxCAN2/Coaxial_data.h>
 
+#define Max_Cyc_Deg 2.0f
+#define Max_Rudder_Deg 2.0f
+
 extern const AP_HAL::HAL& hal;
 
 const AP_Param::GroupInfo AP_MotorsHeli::var_info[] = {
@@ -270,6 +273,14 @@ void AP_MotorsHeli::output_disarmed()
     } else {
         // set servo_test flag
         _heliflags.servo_test_running = false;
+        //Alwasys constrain collective command 
+        if(cxdata().Swash_CMD.Col < 4.0) {
+            cxdata().Swash_CMD.Col = 4.0;
+        } else if (cxdata().Swash_CMD.Col > 13.0) {
+            cxdata().Swash_CMD.Col = 13.0;
+        }
+        //Set Rudder trim
+        cxdata().Swash.Rud = cxdata().Swash_CMD.Rud - cxdata().Swash.Pedal_trim ;
         // manual override (i.e. when setting up swash)
         switch (_servo_mode) {
             case SERVO_CONTROL_MODE_MANUAL_PASSTHROUGH:
@@ -278,11 +289,13 @@ void AP_MotorsHeli::output_disarmed()
                 // _pitch_in = _pitch_radio_passthrough;
                 // _throttle_filter.reset(_throttle_radio_passthrough);
                 // _yaw_in = _yaw_radio_passthrough;
-                //J.B.Song cyclic input ratio is based on 45deg max
-                _roll_in = cxdata().Swash_CMD.Lat / 45.0; //same as (cxdata().Swash_CMD.Lat * 100) / 4500.0;
-                _pitch_in = cxdata().Swash_CMD.Lat / 45.0; //temprarily set as max 4500 cyclic centi-degree
-                _throttle_filter.reset(0.5);    //temporarily set as 10.0 deg col out of 20.0deg max
-                _yaw_in = cxdata().Swash_CMD.Rud / 2.0;//temporarity pedal max 2.0 deg
+                
+                // #define Max_Cyc_Deg 2.0f => on top of this file
+                // #define Max_Rudder_Deg 2.0f
+                _roll_in = ( cxdata().Swash_CMD.Lat / Max_Cyc_Deg ) * ((float) _cyclic_max / 4500.0); 
+                _pitch_in = ( cxdata().Swash_CMD.Lon / Max_Cyc_Deg ) * ((float) _cyclic_max / 4500.0); 
+                _throttle_filter.reset( (cxdata().Swash_CMD.Col - _collective_min_deg) / (_collective_max_deg - _collective_min_deg) ); 
+                _yaw_in = cxdata().Swash.Rud / Max_Rudder_Deg * 0.055556; // 0.055556 = (1/18.0); 
                 break;
             case SERVO_CONTROL_MODE_MANUAL_CENTER:
                 // fixate mid collective

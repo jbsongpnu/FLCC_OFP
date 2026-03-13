@@ -473,9 +473,11 @@ float AP_MotorsHeli_Dual::get_swashplate (int8_t swash_num, int8_t swash_axis, f
         } else if (swash_axis == AP_MOTORS_HELI_DUAL_SWASH_AXIS_COLL) {
         // collective
             if (swash_num == 1) {
-                swash_tilt = 0.45f * _dcp_scaler * yaw_input + coll_input;
+                // swash_tilt = 0.45f * _dcp_scaler * yaw_input + coll_input;
+                swash_tilt = 0.9f * _dcp_scaler * yaw_input + coll_input;
             } else if (swash_num == 2) {
-                swash_tilt = -0.45f * _dcp_scaler * yaw_input + coll_input;
+                // swash_tilt = -0.45f * _dcp_scaler * yaw_input + coll_input;
+                swash_tilt = -0.9f * _dcp_scaler * yaw_input + coll_input;
             }
         }
     } else { // AP_MOTORS_HELI_DUAL_MODE_TANDEM
@@ -687,13 +689,14 @@ void AP_MotorsHeli_Dual::move_actuators(float roll_out, float pitch_out, float c
     if (_swashplate2.get_swash_type() == SWASHPLATE_TYPE_H4_90 || _swashplate2.get_swash_type() == SWASHPLATE_TYPE_H4_45) {
         _servo_out[CH_8] = _swashplate2.get_servo_out(CH_4,swash2_pitch,swash2_roll,swash2_coll);
     }
- //transfer to cxdata. _servo_out[x] is in range of -1 to 1
-    cxdata().SV_Pos[0].CtrlOut = _servo_out[CH_1];
-    cxdata().SV_Pos[1].CtrlOut = _servo_out[CH_2];
-    cxdata().SV_Pos[2].CtrlOut = _servo_out[CH_3];
-    cxdata().SV_Pos[3].CtrlOut = _servo_out[CH_4];
-    cxdata().SV_Pos[4].CtrlOut = _servo_out[CH_5];
-    cxdata().SV_Pos[5].CtrlOut = _servo_out[CH_6];
+ //transfer to cxdata. cxdata().SV_Pos[X].CtrlOut is now using 0 to 1 range instead of -1 to 1 range
+ //roll back from Y = 2.0f * X - 1.0f to X = (Y+1)/2
+    cxdata().SV_Pos[0].CtrlOut = (_servo_out[CH_1] + 1.0f) / 2.0f;
+    cxdata().SV_Pos[1].CtrlOut = (_servo_out[CH_2] + 1.0f) / 2.0f;
+    cxdata().SV_Pos[2].CtrlOut = (_servo_out[CH_3] + 1.0f) / 2.0f;
+    cxdata().SV_Pos[3].CtrlOut = (_servo_out[CH_4] + 1.0f) / 2.0f;
+    cxdata().SV_Pos[4].CtrlOut = (_servo_out[CH_5] + 1.0f) / 2.0f;
+    cxdata().SV_Pos[5].CtrlOut = (_servo_out[CH_6] + 1.0f) / 2.0f;
 }
 
 void AP_MotorsHeli_Dual::output_to_motors()
@@ -786,7 +789,7 @@ void AP_MotorsHeli_Dual::servo_test()
 bool AP_MotorsHeli_Dual::parameter_check(bool display_msg) const
 {
     // returns false if Phase Angle is outside of range for H3 swashplate 1
-    if (_swashplate1.get_swash_type() == SWASHPLATE_TYPE_H3 && (_swashplate1.get_phase_angle() > 30 || _swashplate1.get_phase_angle() < -30)){
+    if (_swashplate1.get_swash_type() == SWASHPLATE_TYPE_H3 && (_swashplate1.get_phase_angle() > 60 || _swashplate1.get_phase_angle() < -60)){
         if (display_msg) {
             gcs().send_text(MAV_SEVERITY_CRITICAL, "PreArm: H_SW1_H3_PHANG out of range");
         }
@@ -794,7 +797,7 @@ bool AP_MotorsHeli_Dual::parameter_check(bool display_msg) const
     }
 
     // returns false if Phase Angle is outside of range for H3 swashplate 2
-    if (_swashplate2.get_swash_type() == SWASHPLATE_TYPE_H3 && (_swashplate2.get_phase_angle() > 30 || _swashplate2.get_phase_angle() < -30)){
+    if (_swashplate2.get_swash_type() == SWASHPLATE_TYPE_H3 && (_swashplate2.get_phase_angle() > 60 || _swashplate2.get_phase_angle() < -60)){
         if (display_msg) {
             gcs().send_text(MAV_SEVERITY_CRITICAL, "PreArm: H_SW2_H3_PHANG out of range");
         }

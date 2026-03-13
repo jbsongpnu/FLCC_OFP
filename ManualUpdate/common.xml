@@ -1985,7 +1985,7 @@
       </entry>
       <entry value="61000" name="MAV_CMD_COAX_FCC_READY" hasLocation="false" isDestination="false">
         <description>Coaxial Project - Custom command to change FCC-Ready State.</description>
-        <param index="1" label="Set or toggle FCC-Ready" minValue="0" maxValue="3" increment="1">FCC-Ready change. 0 : Off. 1 : On. 2 : Toggle.</param>
+        <param index="1" label="Set or toggle FCC-Ready" minValue="0" maxValue="4" increment="1">FCC-Ready change. 0 : Off. 1 : On. 2 : Toggle. 3: HDC-ON. 4: HDC-OFF</param>
         <param index="2">Reserved (set to 0)</param>
         <param index="3">Reserved (set to 0)</param>
         <param index="4">Reserved (set to 0)</param>

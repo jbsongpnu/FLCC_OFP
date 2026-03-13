@@ -4,7 +4,17 @@
 @ Sub Code Branch : LoadCell_4p2p2, LoadCell_4p6p2
 ***
 
-## Version History
+## Version History  
+- V0.01.44 Continue developing code  
+  + @UserCode.cpp & AP_CoaxCAN1.cpp, initial collective and its minimum has changed to 4 deg  
+  + @SV_Waiting_StateLoop, As Step 5 testing process, it only limits current collective degree from CM_Col, and the rest is done from outside  
+  + @common.xml of Mavlink, _FCC_CmdFcRunStop and cxdata().CXHDC_OnOff, added a new GCS command button protocol to control HDC converter.  
+  + @AP_MotorsHeli_Dual::get_swashplate, differential collective pitch formulae has chagnged from 0.45f * _dcp_scaler to 0.9f * _dcp_scaler for real value  
+  + @AP_MotorsHeli_Dual::move_actuators, cxdata().SV_Pos[X].CtrlOut is now using 0 to 1 range instead of -1 to 1 range  
+  + @AP_MotorsHeli_Dual::parameter_check, phase angle limit has increased from 30 deg to 60 deg to allow full range phase angle for 120deg-CCPM swashplate  
+  + @AP_MotorsHeli_Swash::get_servo_out, roll and pitch is now symetrically controlled. It was decreasing pitch command by 55% before.  
+  + @AP_MotorsHeli_Swash.cpp, Maximum cyclic deg is defined as Max_Cyc_Deg 2.0f, the max rudder as Max_Rudder_Deg 2.0f  
+  + @AP_MotorsHeli::output_disarmed, this code is modified to accomodate ground test mode from GCS command  
 - V0.01.43b More changes  
   + New upper rotor table fitted to newest data  
   + New Pedal Trim Table in Coaxial_data.h found from the test  
