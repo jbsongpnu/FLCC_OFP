@@ -3,6 +3,7 @@
 ***
 
 ## Version History
+- V1.00.00 Version-1 Loadcell Indicator Released
 - V0.01.01 Starting a basic structure for the Load-cell Indicator
 
 ***
@@ -11,13 +12,13 @@
 SERIAL0_BAUD :      115     (115,200bps)
 SERIAL0_PROTOCOL :  2       (MAVLink2 - USB)
 SERIAL1_BAUD :      57      (57,600bps)
-SERIAL1_PROTOCOL :  2       (MAVLink2 - Telemetry1 - SI400-1)
+SERIAL1_PROTOCOL :  47      (LCIND - Telemetry1 - SI400-1)
 SERIAL2_BAUD :      57      (57,600bps)
-SERIAL2_PROTOCOL :  46      (LCIND - Telemetry2 - SI400-2)
+SERIAL2_PROTOCOL :  47      (LCIND - Telemetry2 - SI400-2)
 SERIAL4_BAUD :      57      (57,600bps)
-SERIAL4_PROTOCOL :  46      (LCIND - GPS2 - SI400-4)
+SERIAL4_PROTOCOL :  47      (LCIND - GPS2 - SI400-4)
 SERIAL5_BAUD :      57      (57,600bps)     
-SERIAL5_PROTOCOL :  46      (LCIND - Telemetry3 - SI400-3)
+SERIAL5_PROTOCOL :  47      (LCIND - Telemetry3 - SI400-3)
 (Only communicate with USB port)
 ***
 # ArduPilot Project

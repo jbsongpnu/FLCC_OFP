@@ -1145,6 +1145,8 @@ private:
     // someone's doing SERIAL_CONTROL over mavlink)
     bool _locked;
 
+    void send_message_loadcell_indicators() const;
+
     // Handling of AVAILABLE_MODES
     struct {
         bool should_send;

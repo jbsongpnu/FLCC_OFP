@@ -126,6 +126,8 @@ uint8_t GCS_MAVLINK::mavlink_private = 0;
 
 GCS *GCS::_singleton = nullptr;
 
+mavlink_loadcell_indicators_t MAV_GCSTX_LCID;
+
 GCS_MAVLINK_InProgress GCS_MAVLINK_InProgress::in_progress_tasks[1];
 uint32_t GCS_MAVLINK_InProgress::last_check_ms;
 
@@ -6763,6 +6765,11 @@ bool GCS_MAVLINK::try_send_message(const enum ap_message id)
         // ADSB should be moved down into here
     case MSG_ADSB_VEHICLE:
         break;
+    
+    case MSG_LCID:
+        CHECK_PAYLOAD_SIZE(LOADCELL_INDICATORS);
+        send_message_loadcell_indicators();
+        break;
 
     default:
         // try_send_message must always at some stage return true for
@@ -6778,6 +6785,19 @@ bool GCS_MAVLINK::try_send_message(const enum ap_message id)
     }
 
     return ret;
+}
+
+void GCS_MAVLINK::send_message_loadcell_indicators() const
+{
+    mavlink_msg_loadcell_indicators_send(chan,
+        MAV_GCSTX_LCID.Total_weight,
+        MAV_GCSTX_LCID.LC1,
+        MAV_GCSTX_LCID.LC2,
+        MAV_GCSTX_LCID.LC3,
+        MAV_GCSTX_LCID.LC4,
+        MAV_GCSTX_LCID.Qx,
+        MAV_GCSTX_LCID.Qy
+    );
 }
 
 uint16_t GCS_MAVLINK::get_interval_for_stream(GCS_MAVLINK::streams id) const

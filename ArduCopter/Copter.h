@@ -76,6 +76,8 @@
 // Configuration
 #include "defines.h"
 #include "config.h"
+// Custom code
+#include "LCIND.h"
 
 #if FRAME_CONFIG == HELI_FRAME
  #define MOTOR_CLASS AP_MotorsHeli
@@ -565,6 +567,9 @@ private:
     // Top-level logic
     // setup the var_info table
     AP_Param param_loader;
+
+    //LCIND initial class constructor for singleton
+    LCIND_class cLCIND;
 
 #if FRAME_CONFIG == HELI_FRAME
     // Tradheli flags
