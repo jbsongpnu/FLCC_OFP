@@ -85,7 +85,7 @@ private:
     static constexpr unsigned RX_ID_PMS1  = 0x000006F0;
     static constexpr unsigned RX_ID_PMS2  = 0x000006F1;
     static constexpr unsigned RX_ID_PMS3  = 0x000006F2;
-    static constexpr unsigned RX_ID_PMS4  = 0x000006F4;
+    static constexpr unsigned RX_ID_PMS4  = 0x000006F3;
     static constexpr unsigned RX_ID_FDC1  = 0x00000300;
     static constexpr unsigned RX_ID_FDC2  = 0x00000301;
     static constexpr unsigned RX_ID_VCUF1 = 0x00000400;

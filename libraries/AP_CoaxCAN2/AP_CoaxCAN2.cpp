@@ -727,10 +727,11 @@ void AP_COAXCAN2::Check_ALL_data(void)
         cxdata().DMI_PMS_data.PMS_LDC_Out_Volt = (float)_PMS4.PMS_LDC_Out_Volt_raw * 0.1;
         cxdata().DMI_PMS_data.PMS_Max_Temp = (float)_PMS4.PMS_Max_Temp_raw  - 40.0;
         _DMI_has_Initialized |= 0x02;
+
 #if DEBUG_PMS == 1
-        gcs().send_text(MAV_SEVERITY_INFO, "PMS3-i : %.1f, %.1f, %.1f, %.1f",
-            cxdata().DMI_PMS_data.Batt_Output_Current, cxdata().DMI_PMS_data.LDC_Output_Current, 
-            cxdata().DMI_PMS_data.Mv_Output_Current, cxdata().DMI_PMS_data.Mv_Battery_Voltage);
+        gcs().send_text(MAV_SEVERITY_INFO, "PMS4-i : %.1f, %.1f, %.1f, %.1f",
+            cxdata().DMI_PMS_data.PMS_Out_Power, cxdata().DMI_PMS_data.PMS_In_Power, 
+            cxdata().DMI_PMS_data.PMS_LDC_Out_Volt, cxdata().DMI_PMS_data.PMS_Max_Temp);
 #endif
     }
     //FDC1
@@ -746,8 +747,12 @@ void AP_COAXCAN2::Check_ALL_data(void)
             cxdata().DMI_PMS_data.FDC_Aux_Volt, cxdata().DMI_PMS_data.FDC_Max_Temp);
 #endif
     }
-    //FDC2 => not really used, just initialize it
+    //FDC2 => Added for logging
     if(_NewDMI_msg & 0x10) {
+        cxdata().DMI_PMS_data.FDC_OutputVoltage = (float)_FDC2.OutputVoltage_raw * 0.1;
+        cxdata().DMI_PMS_data.FDC_OutputCurrent = (float)_FDC2.OutputCurrent_raw * 0.1 - 350.0;
+        cxdata().DMI_PMS_data.FDC_InputVoltage  = (float)_FDC2.InputVoltage_raw * 0.1;
+        cxdata().DMI_PMS_data.FDC_InputCurrent  = (float)_FDC2.InputCurrent_raw * 0.1 - 350.0;
         _DMI_has_Initialized |= 0x10;
     }
     //VCUF1 => not really used, just initialize it
@@ -811,17 +816,9 @@ void AP_COAXCAN2::TX_FCC1_MSG(void)
 {
     uint8_t temp_data[8] = {0,0,0,0,0,0,0,0} ;
     uint8_t tempjoin = 0;
-#if DEBUG_CANTX == 1
-    static uint16_t temp_debug_count = 0;
-#endif
-#if DEBUG_CANTX == 1
-    if(temp_debug_count > 50) {
-        _FCC_Ready = (_FCC_Ready + 1) % 2;
-    }
-    temp_debug_count++;
-#else 
+    
     _FCC_Ready = cxdata().fcrdy;
-#endif
+
     //_FCC_AlivCnt : looping 0~15
     _FCC_CmdFcRunStop = cxdata().HDC_OnOff;
     _FCC_CmdPmsBatCut = 0;//Unsure if this will be uesd

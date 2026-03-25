@@ -7,6 +7,7 @@
 #include <AP_CANManager/AP_CANManager.h>
 #include <AP_Math/AP_Math.h>
 #include <AP_CoaxCAN2/Coaxial_data.h>
+#include <AP_Motors/AP_Motors_Class.h>
 
 extern const AP_HAL::HAL& hal;
 
@@ -15,8 +16,8 @@ extern const AP_HAL::HAL& hal;
 #define TEMP_EXP 0		//Initial value
 #define DEBUG_INVERTER 0
 #define DEBUG_CCB 0
-#define DEBUG_GCSCMD 1
-#define DEBUG_COAXSERVO 1
+#define DEBUG_GCSCMD 0
+// #define DEBUG_COAXSERVO 1
 
 #define P_CURRENT_SERVO_VEL     819     //changed from 4095 to 819
 // Table of user settable CAN bus parameters
@@ -69,7 +70,7 @@ AP_COAXCAN1 *AP_COAXCAN1::get_coaxcan1(uint8_t driver_index)
 }
 
 // -------------------------------------------------------------------------
-//
+// add_interface for CAN interface
 // -------------------------------------------------------------------------
 bool AP_COAXCAN1::add_interface(AP_HAL::CANIface* can_iface) {
 
@@ -159,26 +160,40 @@ void AP_COAXCAN1::run(void)
     Check_INV_data();
     Check_CCB_data();
 
-    //failsafe code
+    //Check the armed state from AP_Motors
+    const AP_Motors *_motors = AP_Motors::get_singleton();
+    _armed = (_motors != nullptr) ? _motors->armed() : false;
+
+    if((_armed) && (!_armed_prev)) {
+        //detect arming
+        gcs().send_text(MAV_SEVERITY_INFO, "Arming detected from COAXCAN function");
+    } else if ((!_armed) && (_armed_prev)) {
+        //detect disarm
+        gcs().send_text(MAV_SEVERITY_INFO, "Disarming detected from COAXCAN function");
+    }
+    
+    //COM-failsafe code to stop inverter during ground test
     if((cxdata().Failsafe.GCS_lost) && (!cxdata().Failsafe.GCS_lost_prev)) { //Detect Rising : GCS fail-safe first detected
-        //Testing code only applicable to Ground test mode
-        if(cxdata().INV_data.Rdy2useINV == 1) {
-            cxdata().Failsafe.GCS_FC_action_step = 0; //Step to 0
-            // cxdata().CX_State = CoaxState::CXSTATE_F2_GCS_FAIL_ON_GNDTEST; // Move servo to gcs-failsafe-at-ground-test mode
-            
-            //===Invoked Command
-            cxdata().Command_Received.NewCMD.bits.Motor_RPM = 1;
-            cxdata().Command_Received.Target_INV_RPM = 0;
+        if (!_armed) {
+            //failsafe code only works during Ground test mode
+            if(cxdata().INV_data.Rdy2useINV == 1) {
+                cxdata().Failsafe.GCS_FC_action_step = 0; //Step to 0
+                // cxdata().CX_State = CoaxState::CXSTATE_F2_GCS_FAIL_ON_GNDTEST; // Move servo to gcs-failsafe-at-ground-test mode
+
+                //===Invoked Command
+                cxdata().Command_Received.NewCMD.bits.Motor_RPM = 1;
+                cxdata().Command_Received.Target_INV_RPM = 0;
+            }
         }
     } else if ((cxdata().Failsafe.GCS_lost) && (cxdata().Failsafe.GCS_lost_prev)) { //Continued GCS failsafe state
-        if((cxdata().INV_data.Rdy2useINV == 1) && (INV_GET_CMD.Ref1_RAW != 0)) { //
-            //===Invoked Command
-            cxdata().Command_Received.NewCMD.bits.Motor_RPM = 1;
-            cxdata().Command_Received.Target_INV_RPM = 0;
+        if (!_armed) {
+            if((cxdata().INV_data.Rdy2useINV == 1) && (INV_GET_CMD.Ref1_RAW != 0)) { //
+                //===Invoked Command
+                cxdata().Command_Received.NewCMD.bits.Motor_RPM = 1;
+                cxdata().Command_Received.Target_INV_RPM = 0;
+            }
         }
     }
-    // else if((!cxdata().Failsafe.GCS_lost) && (cxdata().Failsafe.GCS_lost_prev)) { //Detect Falling : GCS fail-safe first detected
-    // }
     cxdata().Failsafe.GCS_lost_prev = cxdata().Failsafe.GCS_lost;
 
     //from %8, loops 0~6 for servo, 7 for CCB and Inverter
@@ -191,6 +206,8 @@ void AP_COAXCAN1::run(void)
     }
     //Coax Servo loop and Inverter/CCB loops are designed to never overlap
     
+    //save armed state
+    _armed_prev = _armed;
 }
 
 //Coax Servo loop at 200Hz
@@ -251,9 +268,9 @@ void AP_COAXCAN1::CoaxServoRun(void)
         case CoaxState::CXSTATE_2_WAIT :
             SV_Waiting_StateLoop(); //Enable this line for normal test
             //SV_Waiting_State_TESTLoop(); //Enable this line for temporary test
-            if(_AP_COAXCAN1_loop_cnt%8000 == 0) {
-                gcs().send_text(MAV_SEVERITY_INFO, "Servo Motor at Wait State");
-            }
+            // if(_AP_COAXCAN1_loop_cnt%8000 == 0) {
+            //     gcs().send_text(MAV_SEVERITY_INFO, "Servo Motor at Wait State");
+            // }
         break;
         case CoaxState::CXSTATE_F1_SERVOFAIL :
             if(_AP_COAXCAN1_loop_cnt%4000 == 0) {
@@ -1275,13 +1292,6 @@ void AP_COAXCAN1::interprete_msg(uint8_t sv_id, uint8_t msg_id, uint8_t data_low
             tempUint16 = tempUint16 | ((uint16_t)data_high << 8);  //Uint
             break;
     }
-// #if DEBUG_COAXSERVO == 1
-//     if(isSignedInt) {
-//         gcs().send_text(MAV_SEVERITY_INFO, "HiTech SV %u, MSG %u, Value %d", sv_id, msg_id, tempInt16);
-//     } else {
-//         gcs().send_text(MAV_SEVERITY_INFO, "HiTech SV %u, MSG %u, Value %u", sv_id, msg_id, tempUint16);
-//     }
-// #endif
 }
 
 // ====== CMD_SET_POSITION
@@ -1415,9 +1425,6 @@ void AP_COAXCAN1::Request_SVData(uint8_t id, uint8_t addrs) {
 
     CAN_TX_Std(RS485_CAN_MSGID, buffer, 8);
 
-#if DEBUG_COAXSERVO == 1
-    //gcs().send_text(MAV_SEVERITY_INFO, "Req SVData to %u for %u", id, addrs);
-#endif
 }
 
 int16_t AP_COAXCAN1::round_to_i16(float v)

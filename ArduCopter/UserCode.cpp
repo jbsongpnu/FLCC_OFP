@@ -150,71 +150,6 @@ void Copter::userhook_init()
 //100Hz
 void Copter::userhook_FastLoop()
 {
-// #if COAXSERVO_TEST == 0 //disabled during servo test
-//     static uint8_t SV_num = 0;
-//     uint8_t  CSBuf[64] = {0};
-
-//     AP_CoaxServo *ServoUART = AP::HiTechSV();
-
-//     switch (cxdata().CX_State) {
-//         case CoaxState::CXSTATE_0_INIT: {
-//             //1)Check for buffered data first
-//             uint16_t rcv = (uint16_t)ServoUART->receive_CoaxServo_uart_data(CSBuf);
-//             if(ServoUART->Parse_Buffer(CSBuf, rcv)) {
-//                 uint8_t length = ServoUART->GET_RX_data_Length(0);
-//                 if (length <=5) {
-//                     ServoUART->interprete_msg(0, ID_CMD_PADATA_PING);//Only expecting one message of ping-response
-//                 }
-//             }
-//             //Expecting cxdata().SV_state[id].connected sets to 1 for all motors
-//             if ((cxdata().SV_state[0].connected) &&
-//                 (cxdata().SV_state[1].connected) &&
-//                 (cxdata().SV_state[2].connected) &&
-//                 (cxdata().SV_state[3].connected) &&
-//                 (cxdata().SV_state[4].connected) &&
-//                 (cxdata().SV_state[5].connected) ) {
-//                 cxdata().SVinitialized = 1;
-//             }
-            
-//             //2) Send Ping to a Servo motor 1~6
-//             SV_num++; //looping 1~6 instead of 0~5
-//             ServoUART->CMD_PADATA_PING(SV_num);
-            
-//             SV_num = (SV_num + 1) % 6;
-
-//             //3) Condition for next phase
-//             if(cxdata().SVinitialized) {
-//                 cxdata().CX_State = CoaxState::CXSTATE_1_CHECK;
-//             }
-//         }break;
-//         case CoaxState::CXSTATE_1_CHECK: {
-//             //1)Check for buffered data first
-//             uint16_t rcv = ServoUART->receive_CoaxServo_uart_data(CSBuf);
-//             uint16_t messages = ServoUART->Parse_Buffer(CSBuf, rcv);
-//             for (int i=0; i<messages; i++) {
-//                 uint8_t length = ServoUART->GET_RX_data_Length(i);
-//                 if (length <= 5) {
-//                     ServoUART->interprete_msg(i, ID_CMD_PADATA_PING);
-//                 } else {
-//                     ServoUART->interprete_msg(i, ID_CMD_PADATA_GET_PARAMETER);
-//                 }
-//             }
-//             //3) Condition for next phase
-//             if ((cxdata().SV_state[0].got_param) &&
-//                 (cxdata().SV_state[1].got_param) &&
-//                 (cxdata().SV_state[2].got_param) &&
-//                 (cxdata().SV_state[3].got_param) &&
-//                 (cxdata().SV_state[4].got_param) &&
-//                 (cxdata().SV_state[5].got_param)) {
-//                 cxdata().CX_State = CoaxState::CXSTATE_2_WAIT;
-//             }
-//         }break;
-//         //Frome CXSTATE_2, servos will be controlled from 400Hz loop
-//         default:
-            
-//         break;
-//     }
-// #endif
 }
 #endif
 
@@ -233,26 +168,6 @@ void Copter::userhook_MediumLoop()
 
     //static variables
     static uint16_t Count1Hz = 0;
-
-    //uint8_t NewServoMessages = 0;
-#if COAXSERVO_TEST == 1
-    static uint16_t ServoTestStep = 0;
-    static uint8_t ServoTestingID = 0;
-    static uint8_t SVDataRequested = 0;
-    static uint8_t SVConfigModified = 0;
-    static uint8_t ServoCheckFinished = 0;
-    static uint8_t temp_debug_retry = 0;
-#endif    
-
-    //uint16_t rcv = 0;
-    // HiTech Servo testing
-    //static uint16_t temp_HiTech_setting = 0;
-    //uint8_t  CSBuf[16] = {0};  //this should be reduced, but can only be usded for temporary servo test
-//    AP_CoaxServo *HiTech = AP::HiTechSV();
-
-    //static uint8_t ID_init = 0;
-    //static uint8_t ID_Cycle = 0;
-
 
     //Send to GCS at 1Hz Testing
     // MSG_INV_STATE,  // mavlink message to send Inverter state
@@ -352,7 +267,7 @@ void Copter::userhook_MediumLoop()
         MAV_GCSTX_DMI_data.PMS_LDC_Output_VoltageX10 = (uint16_t)(cxdata().DMI_PMS_data.PMS_LDC_Out_Volt * 10.0);
         MAV_GCSTX_DMI_data.PMS_Output_PowerX10 = (uint16_t)(cxdata().DMI_PMS_data.PMS_Out_Power * 10.0);
         MAV_GCSTX_DMI_data.PMS_Input_PowerX10 = (uint16_t)(cxdata().DMI_PMS_data.PMS_In_Power * 10.0);
-        MAV_GCSTX_DMI_data.PMS_MAX_TempX10 = (uint16_t)(cxdata().DMI_PMS_data.PMS_Max_Temp * 10.0);
+        MAV_GCSTX_DMI_data.PMS_MAX_TempX10 = (int16_t)(cxdata().DMI_PMS_data.PMS_Max_Temp * 10.0);
 
         gcs().send_message(MSG_DMI_DATA);
     // } else if (Count1Hz%10 == 7) {
@@ -375,538 +290,11 @@ void Copter::userhook_MediumLoop()
         }
 #endif
     }
-//#if COAXSERVO_TEST == 1
-    if((Count1Hz == 108) && (cxdata().SVTestState.ServoTestingID == 0)) { 
+
+    if((Count1Hz == 158) && (cxdata().SVTestState.ServoTestingID == 0)) { 
         cxdata().SVTestState.ServoTestingID = 1;
 
     }
-//#endif
-    //============Check HiTech Servo Configurations=======
-    //HiTech Servo ID starts from 1 to 6
-    //cxdata's servo array starts from 0 to 5
-    //NewServoMessages = HiTech->receive_CoaxServo_uart_data();
-#if COAXSERVO_TEST == 1
-    //gcs().send_text(MAV_SEVERITY_INFO, "%d New Servo MSGs at %u for %u", NewServoMessages, Count1Hz, ServoTestingID);
-
-    if((ServoTestingID > 0) && (ServoTestingID < 7)) {
-        switch (ServoTestStep) {
-            case 0 :    //Check ID
-                if(SVDataRequested == 0) {
-                    HiTech->Request_SVData(ServoTestingID, REG_SERVO_ID); 
-                    gcs().send_text(MAV_SEVERITY_INFO, "Requesting ID check to SV %u ", ServoTestingID);
-                    SVDataRequested = 1;
-                } else {
-                    if(NewServoMessages) {
-                        if(cxdata().SV_state[(ServoTestingID-1)].connected) {   
-                            gcs().send_text(MAV_SEVERITY_INFO, "Servo %u Connected and under check", ServoTestingID);
-                            ServoTestStep++;
-                            SVDataRequested = 0;
-                        } else {
-                            HiTech->Request_SVData(ServoTestingID, REG_SERVO_ID);//Retry
-                        }
-                    } 
-                    else {//temp test : TX not working
-                        temp_debug_retry++;
-                        // if(temp_debug_retry <= 4) {
-                            HiTech->Request_SVData(ServoTestingID, REG_SERVO_ID);//temp test : TX not working
-                        // }
-                    }
-                }
-            break;
-            case 1 :    //Check Return Delay
-                if(SVDataRequested == 0) {
-                    HiTech->Set_dummyTX();
-                    HiTech->Request_SVData(ServoTestingID, REG_NORMAL_RETURN_DELAY);
-                    gcs().send_text(MAV_SEVERITY_INFO, "Requesting REG_NORMAL_RETURN_DELAY %u ", ServoTestingID);
-                    SVDataRequested = 1;
-                } else {
-                    if(NewServoMessages) {
-                        if(cxdata().SV_state[(ServoTestingID-1)].Config_Delay == ServoTestingID) { 
-                            //servo 1 : 1ms, servo 2 : 2ms .... delay is same as servo number
-                            gcs().send_text(MAV_SEVERITY_INFO, "Servo %u Return delay OK", ServoTestingID);
-                            ServoTestStep++;
-                            SVDataRequested = 0;
-                        } else {
-                            HiTech->Set_UINT_Config(ServoTestingID, REG_NORMAL_RETURN_DELAY, (uint16_t)ServoTestingID);
-                            gcs().send_text(MAV_SEVERITY_INFO, "Reconfigure Return Delay : Servo %u Return delay=%u", ServoTestingID, ServoTestingID);
-                            SVDataRequested = 0;    //Reset SVDataRequested to check again
-                            SVConfigModified = 1;   //Notice configuration chagne
-                        }
-                    } else {
-                        HiTech->Request_SVData(ServoTestingID, REG_NORMAL_RETURN_DELAY);
-                    }
-                }
-            break;
-            case 2 :    //Check Power Config
-                if(SVDataRequested == 0) {
-                    HiTech->Request_SVData(ServoTestingID, REG_POWER_CONFIG);
-                    gcs().send_text(MAV_SEVERITY_INFO, "Requesting REG_POWER_CONFIG %u ", ServoTestingID);
-                    SVDataRequested = 1;
-                } else {
-                    if(NewServoMessages) {
-                        if(cxdata().SV_state[(ServoTestingID-1)].Config_Power_Config == PARAM_POWER_CONFIG) { 
-                            gcs().send_text(MAV_SEVERITY_INFO, "Servo %u Power Config OK", ServoTestingID);
-                            ServoTestStep++;
-                            SVDataRequested = 0;
-                        } else {
-                            HiTech->Set_UINT_Config(ServoTestingID, REG_POWER_CONFIG, PARAM_POWER_CONFIG);
-                            gcs().send_text(MAV_SEVERITY_INFO, "Reconfigure Power Config : Servo %u Config value=%u", ServoTestingID, PARAM_POWER_CONFIG);
-                            SVDataRequested = 0;    //Reset SVDataRequested to check again
-                            SVConfigModified = 1;   //Notice configuration chagne
-                        }
-                    } else {
-                        HiTech->Request_SVData(ServoTestingID, REG_POWER_CONFIG);
-                    }
-                }
-            break;
-            case 3 :    //Check Emergency Stop
-                if(SVDataRequested == 0) {
-                    HiTech->Request_SVData(ServoTestingID, REG_EMERGENCY_STOP);
-                    gcs().send_text(MAV_SEVERITY_INFO, "Requesting REG_EMERGENCY_STOP %u ", ServoTestingID);
-                    SVDataRequested = 1;
-                } else {
-                    if(NewServoMessages) {
-                        if(cxdata().SV_state[(ServoTestingID-1)].Config_Emergency_Stop == PARAM_EMERGENCY_STOP) { 
-                            gcs().send_text(MAV_SEVERITY_INFO, "Servo %u EM Stop failsafe OK", ServoTestingID);
-                            ServoTestStep++;
-                            SVDataRequested = 0;
-                        } else {
-                            HiTech->Set_UINT_Config(ServoTestingID, REG_EMERGENCY_STOP, PARAM_EMERGENCY_STOP);
-                            gcs().send_text(MAV_SEVERITY_INFO, "Reconfigure EM Stop failsafe : Servo %u  Config value=%u", ServoTestingID, PARAM_EMERGENCY_STOP);
-                            SVDataRequested = 0;    //Reset SVDataRequested to check again
-                            SVConfigModified = 1;   //Notice configuration chagne
-                        }
-                    } else {
-                        HiTech->Request_SVData(ServoTestingID, REG_EMERGENCY_STOP);
-                    }
-                }
-            break;
-            case 4 :    //Check Action Mode
-                if(SVDataRequested == 0) {
-                    HiTech->Request_SVData(ServoTestingID, REG_ACTION_MODE);
-                    gcs().send_text(MAV_SEVERITY_INFO, "Requesting REG_ACTION_MODE %u ", ServoTestingID);
-                    SVDataRequested = 1;
-                } else {
-                    if(NewServoMessages) {
-                        if(cxdata().SV_state[(ServoTestingID-1)].Config_Action_Mode == PARAM_ACTION_MODE) { 
-                            gcs().send_text(MAV_SEVERITY_INFO, "Servo %u Action Mode OK", ServoTestingID);
-                            ServoTestStep++;
-                            SVDataRequested = 0;
-                        } else {
-                            HiTech->Set_UINT_Config(ServoTestingID, REG_ACTION_MODE, PARAM_ACTION_MODE);
-                            gcs().send_text(MAV_SEVERITY_INFO, "Reconfigure Action Mode : Servo %u  Config value=%u", ServoTestingID, PARAM_ACTION_MODE);
-                            SVDataRequested = 0;    //Reset SVDataRequested to check again
-                            SVConfigModified = 1;   //Notice configuration chagne
-                        }
-                    } else {
-                        HiTech->Request_SVData(ServoTestingID, REG_ACTION_MODE);
-                    }
-                }
-            break;
-            case 5 :    //Check Position Slope
-                if(SVDataRequested == 0) {
-                    HiTech->Request_SVData(ServoTestingID, REG_POSITION_SLOPE);
-                    gcs().send_text(MAV_SEVERITY_INFO, "Requesting REG_POSITION_SLOPE %u ", ServoTestingID);
-                    SVDataRequested = 1;
-                } else {
-                    if(NewServoMessages) {
-                        if(cxdata().SV_state[(ServoTestingID-1)].Config_Pos_Slope == PARAM_POSITION_SLOPE) { 
-                            gcs().send_text(MAV_SEVERITY_INFO, "Servo %u Position Slope OK", ServoTestingID);
-                            ServoTestStep++;
-                            SVDataRequested = 0;
-                        } else {
-                            HiTech->Set_UINT_Config(ServoTestingID, REG_POSITION_SLOPE, PARAM_POSITION_SLOPE);
-                            gcs().send_text(MAV_SEVERITY_INFO, "Reconfigure Position Slope : Servo %u  Config value=%u", ServoTestingID, PARAM_POSITION_SLOPE);
-                            SVDataRequested = 0;    //Reset SVDataRequested to check again
-                            SVConfigModified = 1;   //Notice configuration chagne
-                        }
-                    } else {
-                        HiTech->Request_SVData(ServoTestingID, REG_POSITION_SLOPE);
-                    }
-                }
-            break;
-            case 6 :    //Check Dead Band
-                if(SVDataRequested == 0) {
-                    HiTech->Request_SVData(ServoTestingID, REG_DEAD_BAND);
-                    gcs().send_text(MAV_SEVERITY_INFO, "Requesting REG_DEAD_BAND %u ", ServoTestingID);
-                    SVDataRequested = 1;
-                } else {
-                    if(NewServoMessages) {
-                        if(cxdata().SV_state[(ServoTestingID-1)].Config_Dead_band == PARAM_DEAD_BAND) { 
-                            gcs().send_text(MAV_SEVERITY_INFO, "Servo %u Dead Band OK", ServoTestingID);
-                            ServoTestStep++;
-                            SVDataRequested = 0;
-                        } else {
-                            HiTech->Set_UINT_Config(ServoTestingID, REG_DEAD_BAND, PARAM_DEAD_BAND);
-                            gcs().send_text(MAV_SEVERITY_INFO, "Reconfigure Dead Band : Servo %u  Config value=%u", ServoTestingID, PARAM_DEAD_BAND);
-                            SVDataRequested = 0;    //Reset SVDataRequested to check again
-                            SVConfigModified = 1;   //Notice configuration chagne
-                        }
-                    } else {
-                        HiTech->Request_SVData(ServoTestingID, REG_DEAD_BAND);
-                    }
-                }
-            break;
-            case 7 :    //Check Velocity Max
-                if(SVDataRequested == 0) {
-                    HiTech->Request_SVData(ServoTestingID, REG_VELOCITY_MAX);
-                    gcs().send_text(MAV_SEVERITY_INFO, "Requesting REG_DEAD_BAND %u ", ServoTestingID);
-                    SVDataRequested = 1;
-                } else {
-                    if(NewServoMessages) {
-                        if(cxdata().SV_state[(ServoTestingID-1)].Config_Velocity_Max == PARAM_VELOCITY_MAX) { 
-                            gcs().send_text(MAV_SEVERITY_INFO, "Servo %u Velocity Max OK", ServoTestingID);
-                            ServoTestStep++;
-                            SVDataRequested = 0;
-                        } else {
-                            HiTech->Set_UINT_Config(ServoTestingID, REG_VELOCITY_MAX, PARAM_VELOCITY_MAX);
-                            gcs().send_text(MAV_SEVERITY_INFO, "Reconfigure Velocity Max : Servo %u  Config value=%u", ServoTestingID, PARAM_VELOCITY_MAX);
-                            SVDataRequested = 0;    //Reset SVDataRequested to check again
-                            SVConfigModified = 1;   //Notice configuration chagne
-                        }
-                    } else {
-                        HiTech->Request_SVData(ServoTestingID, REG_VELOCITY_MAX);
-                    }
-                }
-            break;
-            case 8 :    //Check Torque Max
-                if(SVDataRequested == 0) {
-                    HiTech->Request_SVData(ServoTestingID, REG_TORQUE_MAX);
-                    gcs().send_text(MAV_SEVERITY_INFO, "Requesting REG_DEAD_BAND %u ", ServoTestingID);
-                    SVDataRequested = 1;
-                } else {
-                    if(NewServoMessages) {
-                        if(cxdata().SV_state[(ServoTestingID-1)].Config_Torque_Max == PARAM_TORQUE_MAX) { 
-                            gcs().send_text(MAV_SEVERITY_INFO, "Servo %u Torque Max OK", ServoTestingID);
-                            ServoTestStep++;
-                            SVDataRequested = 0;
-                        } else {
-                            HiTech->Set_UINT_Config(ServoTestingID, REG_TORQUE_MAX, PARAM_TORQUE_MAX);
-                            gcs().send_text(MAV_SEVERITY_INFO, "Reconfigure Torque Max : Servo %u  Config value=%u", ServoTestingID, PARAM_TORQUE_MAX);
-                            SVDataRequested = 0;    //Reset SVDataRequested to check again
-                            SVConfigModified = 1;   //Notice configuration chagne
-                        }
-                    } else {
-                        HiTech->Request_SVData(ServoTestingID, REG_TORQUE_MAX);
-                    }
-                }
-            break;
-            case 9 :    //Check Voltage Max
-                if(SVDataRequested == 0) {
-                    HiTech->Request_SVData(ServoTestingID, REG_VOLTAGE_MAX);
-                    gcs().send_text(MAV_SEVERITY_INFO, "Requesting Voltage Max %u ", ServoTestingID);
-                    SVDataRequested = 1;
-                } else {
-                    if(NewServoMessages) {
-                        if(cxdata().SV_state[(ServoTestingID-1)].Config_Volt_Max == PARAM_VOLTAGE_MAX) { 
-                            gcs().send_text(MAV_SEVERITY_INFO, "Servo %u Voltage Max OK", ServoTestingID);
-                            ServoTestStep++;
-                            SVDataRequested = 0;
-                        } else {
-                            HiTech->Set_UINT_Config(ServoTestingID, REG_VOLTAGE_MAX, PARAM_VOLTAGE_MAX);
-                            gcs().send_text(MAV_SEVERITY_INFO, "Reconfigure Voltage Max : Servo %u  Config value=%u", ServoTestingID, PARAM_VOLTAGE_MAX);
-                            SVDataRequested = 0;    //Reset SVDataRequested to check again
-                            SVConfigModified = 1;   //Notice configuration chagne
-                        }
-                    } else {
-                        HiTech->Request_SVData(ServoTestingID, REG_VOLTAGE_MAX);
-                    }
-                }
-            break;
-            case 10 :    //Check Voltage Min
-                if(SVDataRequested == 0) {
-                    HiTech->Request_SVData(ServoTestingID, REG_VOLTAGE_MIN);
-                    gcs().send_text(MAV_SEVERITY_INFO, "Requesting Voltage Min %u ", ServoTestingID);
-                    SVDataRequested = 1;
-                } else {
-                    if(NewServoMessages) {
-                        if(cxdata().SV_state[(ServoTestingID-1)].Config_Volt_Min == PARAM_VOLTAGE_MIN) { 
-                            gcs().send_text(MAV_SEVERITY_INFO, "Servo %u Voltage Min OK", ServoTestingID);
-                            ServoTestStep++;
-                            SVDataRequested = 0;
-                        } else {
-                            HiTech->Set_UINT_Config(ServoTestingID, REG_VOLTAGE_MIN, PARAM_VOLTAGE_MIN);
-                            gcs().send_text(MAV_SEVERITY_INFO, "Reconfigure Voltage Min : Servo %u  Config value=%u", ServoTestingID, PARAM_VOLTAGE_MIN);
-                            SVDataRequested = 0;    //Reset SVDataRequested to check again
-                            SVConfigModified = 1;   //Notice configuration chagne
-                        }
-                    } else {
-                        HiTech->Request_SVData(ServoTestingID, REG_VOLTAGE_MIN);
-                    }
-                }
-            break;
-            case 11 :    //Check Temperature Max
-                if(SVDataRequested == 0) {
-                    HiTech->Request_SVData(ServoTestingID, REG_TEMP_MAX);
-                    gcs().send_text(MAV_SEVERITY_INFO, "Requesting Temperature Max %u ", ServoTestingID);
-                    SVDataRequested = 1;
-                } else {
-                    if(NewServoMessages) {
-                        if(cxdata().SV_state[(ServoTestingID-1)].Config_Temp_Max == PARAM_TEMP_MAX) { 
-                            gcs().send_text(MAV_SEVERITY_INFO, "Servo %u Temperature Max OK", ServoTestingID);
-                            ServoTestStep++;
-                            SVDataRequested = 0;
-                        } else {
-                            HiTech->Set_UINT_Config(ServoTestingID, REG_TEMP_MAX, PARAM_TEMP_MAX);
-                            gcs().send_text(MAV_SEVERITY_INFO, "Reconfigure Temperature Max : Servo %u  Config value=%u", ServoTestingID, PARAM_TEMP_MAX);
-                            SVDataRequested = 0;    //Reset SVDataRequested to check again
-                            SVConfigModified = 1;   //Notice configuration chagne
-                        }
-                    } else {
-                        HiTech->Request_SVData(ServoTestingID, REG_TEMP_MAX);
-                    }
-                }
-            break;
-            case 12 :    //Check Temperature Min
-                if(SVDataRequested == 0) {
-                    HiTech->Request_SVData(ServoTestingID, REG_TEMP_MIN);
-                    gcs().send_text(MAV_SEVERITY_INFO, "Requesting Temperature Min %u ", ServoTestingID);
-                    SVDataRequested = 1;
-                } else {
-                    if(NewServoMessages) {
-                        if(cxdata().SV_state[(ServoTestingID-1)].Config_Temp_Min == PARAM_TEMP_MIN) { 
-                            gcs().send_text(MAV_SEVERITY_INFO, "Servo %u Temperature Min OK", ServoTestingID);
-                            ServoTestStep++;
-                            SVDataRequested = 0;
-                        } else {
-                            HiTech->Set_UINT_Config(ServoTestingID, REG_TEMP_MIN, PARAM_TEMP_MIN);
-                            gcs().send_text(MAV_SEVERITY_INFO, "Reconfigure Temperature Min : Servo %u  Config value=%u", ServoTestingID, PARAM_TEMP_MIN);
-                            SVDataRequested = 0;    //Reset SVDataRequested to check again
-                            SVConfigModified = 1;   //Notice configuration chagne
-                        }
-                    } else {
-                        HiTech->Request_SVData(ServoTestingID, REG_TEMP_MIN);
-                    }
-                }
-            break;
-            case 13 :    //Check Position Start
-                if(SVDataRequested == 0) {
-                    HiTech->Request_SVData(ServoTestingID, REG_POS_START);
-                    gcs().send_text(MAV_SEVERITY_INFO, "Position Start %u ", ServoTestingID);
-                    SVDataRequested = 1;
-                } else {
-                    if(NewServoMessages) {
-                        if(cxdata().SV_state[(ServoTestingID-1)].Config_Pos_Start == PARAM_POS_START) { 
-                            gcs().send_text(MAV_SEVERITY_INFO, "Servo %u Position Start OK", ServoTestingID);
-                            ServoTestStep++;
-                            SVDataRequested = 0;
-                        } else {
-                            HiTech->Set_INT_Config(ServoTestingID, REG_POS_START, PARAM_POS_START);
-                            gcs().send_text(MAV_SEVERITY_INFO, "Reconfigure Position Start : Servo %u  Config value=%u", ServoTestingID, PARAM_POS_START);
-                            SVDataRequested = 0;    //Reset SVDataRequested to check again
-                            SVConfigModified = 1;   //Notice configuration chagne
-                        }
-                    } else {
-                        HiTech->Request_SVData(ServoTestingID, REG_POS_START);
-                    }
-                }
-            break;
-            case 14 :    //Check Position End
-                if(SVDataRequested == 0) {
-                    HiTech->Request_SVData(ServoTestingID, REG_POS_END);
-                    gcs().send_text(MAV_SEVERITY_INFO, "Requesting Position End %u ", ServoTestingID);
-                    SVDataRequested = 1;
-                } else {
-                    if(NewServoMessages) {
-                        if(cxdata().SV_state[(ServoTestingID-1)].Config_Pos_End == PARAM_POS_END) { 
-                            gcs().send_text(MAV_SEVERITY_INFO, "Servo %u Position End OK", ServoTestingID);
-                            ServoTestStep++;
-                            SVDataRequested = 0;
-                        } else {
-                            HiTech->Set_INT_Config(ServoTestingID, REG_POS_END, PARAM_POS_END);
-                            gcs().send_text(MAV_SEVERITY_INFO, "Reconfigure Position End : Servo %u  Config value=%u", ServoTestingID, PARAM_POS_END);
-                            SVDataRequested = 0;    //Reset SVDataRequested to check again
-                            SVConfigModified = 1;   //Notice configuration chagne
-                        }
-                    } else {
-                        HiTech->Request_SVData(ServoTestingID, REG_POS_END);
-                    }
-                }
-            break;
-            case 15 :    //Check Position Neutral
-                if(SVDataRequested == 0) {
-                    HiTech->Request_SVData(ServoTestingID, REG_POS_NEUTRAL);
-                    gcs().send_text(MAV_SEVERITY_INFO, "Requesting Position Neutral %u ", ServoTestingID);
-                    SVDataRequested = 1;
-                } else {
-                    if(NewServoMessages) {
-                        if(cxdata().SV_state[(ServoTestingID-1)].Config_Pos_Neutral == PARAM_POS_NEUTRAL) { 
-                            gcs().send_text(MAV_SEVERITY_INFO, "Servo %u Position Neutral OK", ServoTestingID);
-                            ServoTestStep++;
-                            SVDataRequested = 0;
-                        } else {
-                            HiTech->Set_INT_Config(ServoTestingID, REG_POS_NEUTRAL, PARAM_POS_NEUTRAL);
-                            gcs().send_text(MAV_SEVERITY_INFO, "Reconfigure Position Neutral : Servo %u  Config value=%u", ServoTestingID, PARAM_POS_NEUTRAL);
-                            SVDataRequested = 0;    //Reset SVDataRequested to check again
-                            SVConfigModified = 1;   //Notice configuration chagne
-                        }
-                    } else {
-                        HiTech->Request_SVData(ServoTestingID, REG_POS_NEUTRAL);
-                    }
-                }
-            break;
-            case 16 :    //Check Turn Direction
-            {   uint8_t isDirectionOK = 0;
-                if(SVDataRequested == 0) {
-                    HiTech->Request_SVData(ServoTestingID, REG_MOTOR_TURN_DIRECT);
-                    gcs().send_text(MAV_SEVERITY_INFO, "Requesting Turn Direction %u ", ServoTestingID);
-                    SVDataRequested = 1;
-                } else {
-                    if(NewServoMessages) {
-                        switch(ServoTestingID) {
-                            case 1 :
-                                if(cxdata().SV_state[(ServoTestingID-1)].Config_Direnction == PARAM_SV1_T_Direction) {
-                                    isDirectionOK = 1;
-                                } else {
-                                    HiTech->Set_UINT_Config(ServoTestingID, REG_MOTOR_TURN_DIRECT, PARAM_SV1_T_Direction);
-                                    isDirectionOK = 0;
-                                    gcs().send_text(MAV_SEVERITY_INFO, "Reconfigure Turn Direction : Servo %u  Config value=%u", ServoTestingID, PARAM_SV1_T_Direction);
-                                }
-                            break;
-                            case 2 :
-                                if(cxdata().SV_state[(ServoTestingID-1)].Config_Direnction == PARAM_SV2_T_Direction) {
-                                    isDirectionOK = 1;
-                                } else {
-                                    HiTech->Set_UINT_Config(ServoTestingID, REG_MOTOR_TURN_DIRECT, PARAM_SV2_T_Direction);
-                                    isDirectionOK = 0;
-                                    gcs().send_text(MAV_SEVERITY_INFO, "Reconfigure Turn Direction : Servo %u  Config value=%u", ServoTestingID, PARAM_SV2_T_Direction);
-                                }
-                            break;
-                            case 3 :
-                                if(cxdata().SV_state[(ServoTestingID-1)].Config_Direnction == PARAM_SV3_T_Direction) {
-                                    isDirectionOK = 1;
-                                } else {
-                                    HiTech->Set_UINT_Config(ServoTestingID, REG_MOTOR_TURN_DIRECT, PARAM_SV3_T_Direction);
-                                    isDirectionOK = 0;
-                                    gcs().send_text(MAV_SEVERITY_INFO, "Reconfigure Turn Direction : Servo %u  Config value=%u", ServoTestingID, PARAM_SV3_T_Direction);
-                                }
-                            break;
-                            case 4 :
-                                if(cxdata().SV_state[(ServoTestingID-1)].Config_Direnction == PARAM_SV4_T_Direction) {
-                                    isDirectionOK = 1;
-                                } else {
-                                    HiTech->Set_UINT_Config(ServoTestingID, REG_MOTOR_TURN_DIRECT, PARAM_SV4_T_Direction);
-                                    isDirectionOK = 0;
-                                    gcs().send_text(MAV_SEVERITY_INFO, "Reconfigure Turn Direction : Servo %u  Config value=%u", ServoTestingID, PARAM_SV4_T_Direction);
-                                }
-                            break;
-                            case 5 :
-                                if(cxdata().SV_state[(ServoTestingID-1)].Config_Direnction == PARAM_SV5_T_Direction) {
-                                    isDirectionOK = 1;
-                                } else {
-                                    HiTech->Set_UINT_Config(ServoTestingID, REG_MOTOR_TURN_DIRECT, PARAM_SV5_T_Direction);
-                                    isDirectionOK = 0;
-                                    gcs().send_text(MAV_SEVERITY_INFO, "Reconfigure Turn Direction : Servo %u  Config value=%u", ServoTestingID, PARAM_SV5_T_Direction);
-                                }
-                            break;
-                            case 6 :
-                                if(cxdata().SV_state[(ServoTestingID-1)].Config_Direnction == PARAM_SV6_T_Direction) {
-                                    isDirectionOK = 1;
-                                } else {
-                                    HiTech->Set_UINT_Config(ServoTestingID, REG_MOTOR_TURN_DIRECT, PARAM_SV6_T_Direction);
-                                    isDirectionOK = 0;
-                                    gcs().send_text(MAV_SEVERITY_INFO, "Reconfigure Turn Direction : Servo %u  Config value=%u", ServoTestingID, PARAM_SV6_T_Direction);
-                                }
-                            break;
-                            default :
-                            break;
-                        }
-                        if(isDirectionOK) { 
-                            gcs().send_text(MAV_SEVERITY_INFO, "Servo %u Turn Direction OK", ServoTestingID);
-                            ServoTestStep++;
-                            SVDataRequested = 0;
-                        } else {
-                            SVDataRequested = 0;    //Reset SVDataRequested to check again
-                            SVConfigModified = 1;   //Notice configuration chagne
-                        }
-                    }
-                     else {
-                        HiTech->Request_SVData(ServoTestingID, REG_MOTOR_TURN_DIRECT);
-                    }
-                }
-            }
-            break;
-            case 17 :
-                if(SVConfigModified) {
-                    HiTech->Set_UINT_Config(ServoTestingID, REG_CONFIG_SAVE, 0xFFFF);
-                    gcs().send_text(MAV_SEVERITY_CRITICAL, "Servo %u Needs Rebooting!!", ServoTestingID);
-                } 
-                ServoTestStep = 0;
-                SVDataRequested = 0;
-                SVConfigModified = 0;
-                if(ServoTestingID == 6) {
-                    gcs().send_text(MAV_SEVERITY_CRITICAL, "Servo Check Finished. Check messages and reboot if reuired");
-                    ServoCheckFinished = 1;
-                    Count1Hz = 0;
-                }
-                ServoTestingID++;
-            break;
-            default :
-            break;
-        }
-    }
-
-
-    if(ServoCheckFinished){
-        
-        if (Count1Hz%10 == 1) {
-            HiTech->Request_SVData(1,REG_POSITION);
-            HiTech->Request_SVData(2,REG_POSITION);
-            HiTech->Request_SVData(3,REG_POSITION);
-            HiTech->Request_SVData(4,REG_POSITION);
-            HiTech->Request_SVData(5,REG_POSITION);
-            HiTech->Request_SVData(6,REG_POSITION);
-        }else if (Count1Hz%10 == 2) {
-            HiTech->CMD_SET_VELOCITY(1,4095);HiTech->CMD_SET_VELOCITY(2,4095);HiTech->CMD_SET_VELOCITY(3,4095);
-            HiTech->CMD_SET_VELOCITY(4,4095);HiTech->CMD_SET_VELOCITY(5,4095);HiTech->CMD_SET_VELOCITY(6,4095);
-        }else if (Count1Hz%10 == 3) {
-            HiTech->CMD_SET_TORQUE(1,4095);HiTech->CMD_SET_TORQUE(2,4095);HiTech->CMD_SET_TORQUE(3,4095);
-            HiTech->CMD_SET_TORQUE(4,4095);HiTech->CMD_SET_TORQUE(5,4095);HiTech->CMD_SET_TORQUE(6,4095);
-        }else {
-            HiTech->CMD_SET_POSITION(1,cxdata().SV_TX[0].SV_pos);
-            HiTech->CMD_SET_POSITION(2,cxdata().SV_TX[1].SV_pos);
-            HiTech->CMD_SET_POSITION(3,cxdata().SV_TX[2].SV_pos);
-            HiTech->CMD_SET_POSITION(4,cxdata().SV_TX[3].SV_pos);
-            HiTech->CMD_SET_POSITION(5,cxdata().SV_TX[4].SV_pos);
-            HiTech->CMD_SET_POSITION(6,cxdata().SV_TX[5].SV_pos);
-        }
-    }
-#else
-    /*if (Count1Hz%10 == 1) {
-        HiTech->Request_SVData(1,REG_POSITION);
-        HiTech->Request_SVData(2,REG_POSITION);
-        HiTech->Request_SVData(3,REG_POSITION);
-        HiTech->Request_SVData(4,REG_POSITION);
-        HiTech->Request_SVData(5,REG_POSITION);
-        HiTech->Request_SVData(6,REG_POSITION);
-    }else if (Count1Hz%10 == 2) {
-        if(NewServoMessages == 0) {
-            HiTech->Request_SVData(1,REG_POSITION);
-            HiTech->Request_SVData(2,REG_POSITION);
-            HiTech->Request_SVData(3,REG_POSITION);
-            HiTech->Request_SVData(4,REG_POSITION);
-            HiTech->Request_SVData(5,REG_POSITION);
-            HiTech->Request_SVData(6,REG_POSITION);
-        }
-    }else if (Count1Hz%10 == 3) {
-        HiTech->CMD_SET_VELOCITY(1,4095);HiTech->CMD_SET_VELOCITY(2,4095);HiTech->CMD_SET_VELOCITY(3,4095);
-        HiTech->CMD_SET_VELOCITY(4,4095);HiTech->CMD_SET_VELOCITY(5,4095);HiTech->CMD_SET_VELOCITY(6,4095);
-    }else if (Count1Hz%10 == 4) {
-        HiTech->CMD_SET_TORQUE(1,4095);HiTech->CMD_SET_TORQUE(2,4095);HiTech->CMD_SET_TORQUE(3,4095);
-        HiTech->CMD_SET_TORQUE(4,4095);HiTech->CMD_SET_TORQUE(5,4095);HiTech->CMD_SET_TORQUE(6,4095);
-    }else if (Count1Hz%10 == 5) {
-        HiTech->CMD_SET_POSITION(1,cxdata().SV_TX[0].SV_pos);
-        HiTech->CMD_SET_POSITION(2,cxdata().SV_TX[1].SV_pos);
-        HiTech->CMD_SET_POSITION(3,cxdata().SV_TX[2].SV_pos);
-        HiTech->CMD_SET_POSITION(4,cxdata().SV_TX[3].SV_pos);
-        HiTech->CMD_SET_POSITION(5,cxdata().SV_TX[4].SV_pos);
-        HiTech->CMD_SET_POSITION(6,cxdata().SV_TX[5].SV_pos);
-    }*/
-#endif
-
-    //cxdata().SVinitialized = 1;
-      
-    //temp_HiTech_setting = (temp_HiTech_setting + 1) % 100;
 
     Count1Hz++;
 
@@ -946,14 +334,77 @@ void Copter::userhook_MediumLoop()
         cxdata().CCB_data.Brd_temp                  //B     BDTEMP
     );
 
-    AP::logger().Write("HBSYS", "TimeUS,ISTAT,PSTAT,HVOUT,HCOUT,HVIN,HCIN", "QBBffff",
+    //Hybrid system 1
+    AP::logger().Write("HBS1", "TimeUS,PSTAT,BOC,LOC,LOV,POV,POC,PIV,PIC", "QBfffffff",
         AP_HAL::micros64(),                             //Q     TimeUS
-        cxdata().IFCU_data.State,                       //B     ISTAT
         cxdata().DMI_PMS_data.PMS_State,                //B     PSTAT
-        cxdata().DMI_PMS_data.HDC_OutputVoltage,        //f     HVOUT
-        cxdata().DMI_PMS_data.HDC_OutputCurrent,        //f     HCOUT
-        cxdata().DMI_PMS_data.HDC_InputVoltage,         //f     HVIN
-        cxdata().DMI_PMS_data.HDC_InputCurrent          //f     HCIN
+        cxdata().DMI_PMS_data.Batt_Output_Current,      //f     BOC
+        cxdata().DMI_PMS_data.LDC_Output_Current,       //f     LOC
+        cxdata().DMI_PMS_data.PMS_LDC_Out_Volt,         //f     LOV
+        cxdata().DMI_PMS_data.HDC_OutputVoltage,        //f     POV
+        cxdata().DMI_PMS_data.HDC_OutputCurrent,        //f     POC
+        cxdata().DMI_PMS_data.HDC_InputVoltage,         //f     PIV
+        cxdata().DMI_PMS_data.HDC_InputCurrent          //f     PIC
+    );
+    //Hybrid system 2
+    AP::logger().Write("HBS2", "TimeUS,LSTAT,MOC,MBV,POP,PIP,PMT", "QBfffff",
+        AP_HAL::micros64(),                             //Q     TimeUS
+        cxdata().DMI_PMS_data.LDC_State,                //B     LSTAT
+        cxdata().DMI_PMS_data.Mv_Output_Current,        //f     MOC
+        cxdata().DMI_PMS_data.Mv_Battery_Voltage,       //f     MBV
+        cxdata().DMI_PMS_data.PMS_Out_Power,            //f     POP
+        cxdata().DMI_PMS_data.PMS_In_Power,             //f     PIP
+        cxdata().DMI_PMS_data.PMS_Max_Temp              //f     PMT
+    );
+    //Hybrid system 3
+    AP::logger().Write("HBS3", "TimeUS,PPVLT,PPCUR,CURLIM,H2SOF", "Qffff",
+        AP_HAL::micros64(),                             //Q     TimeUS
+        cxdata().IFCU_data.PpVlt,                       //f     PPVLT
+        cxdata().IFCU_data.PpCur,                       //f     PPCUR
+        cxdata().IFCU_data.PpCurLim,                    //f     CURLIM
+        cxdata().IFCU_data.PpH2Sof                      //f     H2SOF
+    );
+    //Hybrid system 4
+    AP::logger().Write("HBS4", "TimeUS,HSTAT,HFLT,DTC,H2LK,FCNV,FCNC", "QBBBBff",
+        AP_HAL::micros64(),                             //Q     TimeUS
+        cxdata().IFCU_data.State,                       //B     HSTAT    
+        cxdata().IFCU_data.FltSts,                      //B     HFLT
+        cxdata().IFCU_data.DTC,                         //B     DTC
+        cxdata().IFCU_data.H2LkLmp,                     //B     H2LK
+        cxdata().IFCU_data.FcNetVlt,                    //f     FCNV     
+        cxdata().IFCU_data.FcNetCur                     //f     FCNC
+    );
+    //Hybrid system 5
+    AP::logger().Write("HBS5", "TimeUS,CINT,AMBT,ROMT,HTP,HTT,HTFC,MAXC,NCCL,MIDP", "QbbbfhHffH",
+        AP_HAL::micros64(),                             //Q     TimeUS
+        cxdata().IFCU_data.FcInClntTmp,                 //b     CINT
+        cxdata().IFCU_data.AmbTemp,                     //b     AMBT
+        cxdata().IFCU_data.RoomTemp,                    //b     ROMT
+        cxdata().IFCU_data.H2TnkPrs,                    //f     HTP
+        cxdata().IFCU_data.H2TnkTmp,                    //h     HTT
+        cxdata().IFCU_data.H2TnkFillCnt,                //H     HTFC
+        cxdata().IFCU_data.FcMxCurLim,                  //f     MAXC
+        cxdata().IFCU_data.FcNetCustCurLim,             //f     NCCL
+        cxdata().IFCU_data.H2MidPrs                     //H     MIDP
+    );
+
+    //FDC-1 for DMI
+    AP::logger().Write("FDC1", "TimeUS,STAT,AUXV,MXT,FLG1,FLG2", "QBfhBB",
+        AP_HAL::micros64(),                             //Q     TimeUS
+        cxdata().DMI_PMS_data.FDC_State,
+        cxdata().DMI_PMS_data.FDC_Aux_Volt,
+        cxdata().DMI_PMS_data.FDC_Max_Temp,
+        cxdata().DMI_PMS_data.FDC_Flag1.ALL,
+        cxdata().DMI_PMS_data.FDC_Flag2.ALL
+    );
+
+    //FDC-2 for DMI
+    AP::logger().Write("FDC2", "TimeUS,FOV,FOC,FIV,FIC", "Qffff",
+        AP_HAL::micros64(),                             //Q     TimeUS
+        cxdata().DMI_PMS_data.FDC_OutputVoltage,
+        cxdata().DMI_PMS_data.FDC_OutputCurrent,
+        cxdata().DMI_PMS_data.FDC_InputVoltage,
+        cxdata().DMI_PMS_data.FDC_InputCurrent
     );
 
     AP::logger().Write("CSV1", "TimeUS,SVSTAT,TXCOL,TXLAT,TXLON,TXRUD,COL,LAT,LON,RUD", "QBffffffff", 

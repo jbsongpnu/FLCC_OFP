@@ -5,6 +5,14 @@
 ***
 
 ## Version History  
+- V0.01.45 Continue developing code  
+  + Fixed bug - GCS_MAVLINK_Copter::handle_command_COAX_FCC_READY(), FCC Ready bit setting
+  + Remove debugging codes that are already verified or no longer in use
+  + Reorganize userhook_MediumLoop() and remove userhook_FastLoop()
+  + Added some more logging fields
+  + Communication fail-safe algorithm has changed to work only when disamred
+  + FDC2 message of CoaxCAN2 is revitalized
+
 - V0.01.44 Continue developing code  
   + @UserCode.cpp & AP_CoaxCAN1.cpp, initial collective and its minimum has changed to 4 deg  
   + @SV_Waiting_StateLoop, As Step 5 testing process, it only limits current collective degree from CM_Col, and the rest is done from outside  
@@ -150,7 +158,7 @@
     - ==> Requires override or actual RC input   
     - ==> RC inputs are acquired through background thread with HAL   
 - 1-2) [rc().read_mode_switch()] : reads flight mode switch   
-  - 1-2-1) [RC_Channel_Copter::mode_switch_changed()] : chages flight mode class   
+  - 1-2-1) [RC_Channel_Copter::mode_switch_changed()] : changes flight mode class   
   ==> enum class Number for Mode is defined in mode.h (ex. STABILIZE = 0, ACRO = 1, ALT_HOLD = 2, AUTO = 3, GUIDED = 4, LOITER=5)
     - 1-2-1-1) [Copter::set_mode()] : check if new flight mode's requirements are met, clean previous flight mode   
     - 1-2-1-2) [flightmode = new_flightmode] Update the flightmode class pointer to new flight mode   

@@ -75,6 +75,8 @@ private:
     uint8_t _CCB_has_Initialized = 0;   //0 : not connected, each bit corresponds to _NewCC_msg
     char _thread_name[9];
     bool _initialized;
+    bool _armed = 0;
+    bool _armed_prev = 0;
     uint8_t _driver_index;                                          // JBSong
     AP_HAL::CANIface* _can_iface;                                   // JBSong => alternative handler to _iface
                                                                     // '_can_iface' is acquired from new add_interface() function

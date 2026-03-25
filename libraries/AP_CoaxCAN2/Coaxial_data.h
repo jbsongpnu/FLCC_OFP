@@ -326,7 +326,10 @@ struct datadef_PMS_data {
     gUni_FDC1_Flag1 FDC_Flag1;       //8 Flag bits : Byte4
     gUni_FDC1_Flag2 FDC_Flag2;       //8 Flag bits : Byte5
     //FDC2
-        //Not needed
+    float FDC_OutputVoltage;
+    float FDC_OutputCurrent;
+    float FDC_InputVoltage;
+    float FDC_InputCurrent;
     //VCUFDC1
         //Not needed
 };

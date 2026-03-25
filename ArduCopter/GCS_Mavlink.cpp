@@ -1063,12 +1063,7 @@ MAV_RESULT GCS_MAVLINK_Copter::handle_command_long_packet(const mavlink_command_
 MAV_RESULT GCS_MAVLINK_Copter::handle_command_COAX_FCC_READY(const mavlink_command_long_t &msg)
 {
     uint8_t param1 = (uint8_t)msg.param1;
-    //test code
-    if(param1 > 0) {
-        cxdata().fcrdy = 1;
-    } else {
-        cxdata().fcrdy = 0;
-    }
+
     switch(param1) {
         case 0 : 
             cxdata().fcrdy = 0;
@@ -1152,7 +1147,7 @@ MAV_RESULT GCS_MAVLINK_Copter::handle_command_CXSV_SET_PARAM(const mavlink_comma
 }
 MAV_RESULT GCS_MAVLINK_Copter::handle_command_CXSV_SWASH_OVERRIDE(const mavlink_command_long_t &msg)
 {
-    gcs().send_text(MAV_SEVERITY_INFO, "Swash Overriden");
+    //gcs().send_text(MAV_SEVERITY_INFO, "Swash Overriden");
     cxdata().Swash_CMD.Col = msg.param1;
     cxdata().Swash_CMD.Lon = msg.param2;
     cxdata().Swash_CMD.Lat = msg.param3;
@@ -1180,7 +1175,7 @@ MAV_RESULT GCS_MAVLINK_Copter::handle_command_COAX_SET_MOTOR(const mavlink_comma
             cxdata().Command_Received.Target_INV_RPM = 0;
             cxdata().Command_Received.Target_INV_ACC = 0;
             cxdata().INV_data.Rdy2useINV = 1;
-            gcs().send_text(MAV_SEVERITY_INFO, "Inverter is being notified with Ready-to-Use");
+            gcs().send_text(MAV_SEVERITY_INFO, "Inverter Ready!!");
         } else {
             cxdata().Command_Received.NewCMD.bits.Inverter_ONOFF = 1;
             cxdata().Command_Received.Inv_On_Off = param1;
@@ -1197,7 +1192,7 @@ MAV_RESULT GCS_MAVLINK_Copter::handle_command_COAX_SET_MOTOR(const mavlink_comma
     }
     //no setting-action for param > 2
 
-    gcs().send_text(MAV_SEVERITY_INFO, "Got Coax Set Motor %u %u %f %f", param1, param2, rpm, acc);
+    //gcs().send_text(MAV_SEVERITY_INFO, "Got Coax Set Motor %u %u %f %f", param1, param2, rpm, acc);
     
     return MAV_RESULT_ACCEPTED;
 
