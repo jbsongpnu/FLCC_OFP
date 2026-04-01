@@ -5,14 +5,16 @@
 ***
 
 ## Version History  
+- V0.01.46 Ground Cyclic Test Version
+  + RC Controller is linked to lateral and longitudinal cyclic (NO collective and rudder for safety) for cyclic test on a ground test bench
+  + In this version, USING_RC defines the use of RC controller, and GCS command is negelected for both cyclic commands if USING_RC = 1
 - V0.01.45 Continue developing code  
-  + Fixed bug - GCS_MAVLINK_Copter::handle_command_COAX_FCC_READY(), FCC Ready bit setting
-  + Remove debugging codes that are already verified or no longer in use
-  + Reorganize userhook_MediumLoop() and remove userhook_FastLoop()
-  + Added some more logging fields
-  + Communication fail-safe algorithm has changed to work only when disamred
-  + FDC2 message of CoaxCAN2 is revitalized
-
+  + Fixed bug - GCS_MAVLINK_Copter::handle_command_COAX_FCC_READY(), FCC Ready bit setting  
+  + Remove debugging codes that are already verified or no longer in use  
+  + Reorganize userhook_MediumLoop() and remove userhook_FastLoop()  
+  + Added some more logging fields  
+  + Communication fail-safe algorithm has changed to work only when disamred  
+  + FDC2 message of CoaxCAN2 is revitalized  
 - V0.01.44 Continue developing code  
   + @UserCode.cpp & AP_CoaxCAN1.cpp, initial collective and its minimum has changed to 4 deg  
   + @SV_Waiting_StateLoop, As Step 5 testing process, it only limits current collective degree from CM_Col, and the rest is done from outside  

@@ -262,6 +262,7 @@ void AP_MotorsHeli::output_armed_zero_throttle()
     move_actuators(_roll_in, _pitch_in, get_throttle(), _yaw_in);
 }
 
+#define USING_RC    1
 // output_disarmed - sends commands to the motors
 void AP_MotorsHeli::output_disarmed()
 {
@@ -273,7 +274,9 @@ void AP_MotorsHeli::output_disarmed()
     } else {
         // set servo_test flag
         _heliflags.servo_test_running = false;
-        //Alwasys constrain collective command 
+
+#if USING_RC == 0
+                //Alwasys constrain collective command 
         if(cxdata().Swash_CMD.Col < 4.0) {
             cxdata().Swash_CMD.Col = 4.0;
         } else if (cxdata().Swash_CMD.Col > 13.0) {
@@ -284,11 +287,6 @@ void AP_MotorsHeli::output_disarmed()
         // manual override (i.e. when setting up swash)
         switch (_servo_mode) {
             case SERVO_CONTROL_MODE_MANUAL_PASSTHROUGH:
-                // pass pilot commands straight through to swash
-                // _roll_in = _roll_radio_passthrough;
-                // _pitch_in = _pitch_radio_passthrough;
-                // _throttle_filter.reset(_throttle_radio_passthrough);
-                // _yaw_in = _yaw_radio_passthrough;
                 
                 // #define Max_Cyc_Deg 2.0f => on top of this file
                 // #define Max_Rudder_Deg 2.0f
@@ -296,6 +294,34 @@ void AP_MotorsHeli::output_disarmed()
                 _pitch_in = ( cxdata().Swash_CMD.Lon / Max_Cyc_Deg ) * ((float) _cyclic_max / 4500.0); 
                 _throttle_filter.reset( (cxdata().Swash_CMD.Col - _collective_min_deg) / (_collective_max_deg - _collective_min_deg) ); 
                 _yaw_in = cxdata().Swash.Rud / Max_Rudder_Deg * 0.055556; // 0.055556 = (1/18.0); 
+        
+#elif USING_RC == 1     //Manual RC control for Lateral and Longitudinal Cyclic only
+            //Alwasys constrain collective command 
+        if(cxdata().Swash_CMD.Col < 4.0) {
+            cxdata().Swash_CMD.Col = 4.0;
+        } else if (cxdata().Swash_CMD.Col > 13.0) {
+            cxdata().Swash_CMD.Col = 13.0;
+        }
+        cxdata().Swash_CMD.Lat = _roll_radio_passthrough * 2.0f;
+        cxdata().Swash_CMD.Lon = _pitch_radio_passthrough * 2.0f;
+        //Set Rudder trim
+        cxdata().Swash.Rud = cxdata().Swash_CMD.Rud - cxdata().Swash.Pedal_trim ;
+        // manual override (i.e. when setting up swash)
+        switch (_servo_mode) {
+            case SERVO_CONTROL_MODE_MANUAL_PASSTHROUGH:
+                // pass pilot commands straight through to swash
+                _roll_in = _roll_radio_passthrough * ((float) _cyclic_max / 4500.0);
+                _pitch_in = _pitch_radio_passthrough * ((float) _cyclic_max / 4500.0);
+                // _throttle_filter.reset(_throttle_radio_passthrough);
+                // _yaw_in = _yaw_radio_passthrough * 0.055556;
+                
+                // #define Max_Cyc_Deg 2.0f => on top of this file
+                // #define Max_Rudder_Deg 2.0f
+                // _roll_in = ( cxdata().Swash_CMD.Lat / Max_Cyc_Deg ) * ((float) _cyclic_max / 4500.0); 
+                // _pitch_in = ( cxdata().Swash_CMD.Lon / Max_Cyc_Deg ) * ((float) _cyclic_max / 4500.0); 
+                _throttle_filter.reset( (cxdata().Swash_CMD.Col - _collective_min_deg) / (_collective_max_deg - _collective_min_deg) ); 
+                _yaw_in = cxdata().Swash.Rud / Max_Rudder_Deg * 0.055556; // 0.055556 = (1/18.0); 
+#endif
                 break;
             case SERVO_CONTROL_MODE_MANUAL_CENTER:
                 // fixate mid collective
