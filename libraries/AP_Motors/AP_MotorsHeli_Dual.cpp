@@ -556,38 +556,36 @@ void AP_MotorsHeli_Dual::update_motor_control(RotorControlState state)
 //
 void AP_MotorsHeli_Dual::move_actuators(float roll_out, float pitch_out, float collective_in, float yaw_out)
 {
+    if(cxdata().ctrl.debug != 3) {
+        yaw_out -= cxdata().Swash.Pedal_trim / 2.0f * 0.055556;
+    }
     // initialize limits flag
     limit.throttle_lower = false;
     limit.throttle_upper = false;
 
-    if (_dual_mode == AP_MOTORS_HELI_DUAL_MODE_TRANSVERSE || _dual_mode == AP_MOTORS_HELI_DUAL_MODE_INTERMESHING) {
-        //Coaxial rotor heli uses AP_MOTORS_HELI_DUAL_MODE_INTERMESHING
-        if (pitch_out < -_cyclic_max/4500.0f) {
+    if (pitch_out < -_cyclic_max/4500.0f) {
             pitch_out = -_cyclic_max/4500.0f;
             limit.pitch = true;
-        }
-
-        if (pitch_out > _cyclic_max/4500.0f) {
-            pitch_out = _cyclic_max/4500.0f;
-            limit.pitch = true;
-        }
-    }
-    //strangely, roll_out is not limited for AP_MOTORS_HELI_DUAL_MODE_INTERMESHING or tendem rotor
-    if (_dual_mode != AP_MOTORS_HELI_DUAL_MODE_TRANSVERSE) { //Bug fixed : V1.01.33 latest AP update is applied in this line
-        if (roll_out < -_cyclic_max/4500.0f) {
-            roll_out = -_cyclic_max/4500.0f;
-            limit.roll = true;
-        }
-
-        if (roll_out > _cyclic_max/4500.0f) {
-            roll_out = _cyclic_max/4500.0f;
-            limit.roll = true;
-        }
     }
 
-    if (_heliflags.inverted_flight) {
-        collective_in = 1 - collective_in;
-    }   //We will never use inverted flight anyway....
+    if (pitch_out > _cyclic_max/4500.0f) {
+        pitch_out = _cyclic_max/4500.0f;
+        limit.pitch = true;
+    }
+
+    if (roll_out < -_cyclic_max/4500.0f) {
+        roll_out = -_cyclic_max/4500.0f;
+        limit.roll = true;
+    }
+
+    if (roll_out > _cyclic_max/4500.0f) {
+        roll_out = _cyclic_max/4500.0f;
+        limit.roll = true;
+    }
+
+    // if (_heliflags.inverted_flight) {
+    //     collective_in = 1 - collective_in;
+    // }   //We will never use inverted flight anyway....
 
     // constrain collective input
     float collective_out = collective_in;
@@ -601,7 +599,7 @@ void AP_MotorsHeli_Dual::move_actuators(float roll_out, float pitch_out, float c
     }
 
     // ensure not below landed/landing collective
-    if (_heliflags.landing_collective && collective_out < _collective_land_min_pct) {
+    if ((cxdata().ctrl.debug != 3) && (collective_out < _collective_land_min_pct)) { //must limit unless in ground test mode
         collective_out = _collective_land_min_pct;
         limit.throttle_lower = true;
     }
@@ -697,6 +695,14 @@ void AP_MotorsHeli_Dual::move_actuators(float roll_out, float pitch_out, float c
     cxdata().SV_Pos[3].CtrlOut = (_servo_out[CH_4] + 1.0f) / 2.0f;
     cxdata().SV_Pos[4].CtrlOut = (_servo_out[CH_5] + 1.0f) / 2.0f;
     cxdata().SV_Pos[5].CtrlOut = (_servo_out[CH_6] + 1.0f) / 2.0f;
+
+    if (cxdata().ctrl.debug != 3) {
+        cxdata().Swash.Lat = roll_out * 2.0f * 4500.0f / ((float)_cyclic_max);
+        cxdata().Swash.Lon = pitch_out * 2.0f * 4500.0f / ((float)_cyclic_max);
+        cxdata().Swash.Rud = yaw_out * 2.0f * 18.0f;
+        cxdata().Swash.Col = collective_out * (_collective_max_deg - _collective_min_deg) + _collective_min_deg;
+    }
+
 }
 
 void AP_MotorsHeli_Dual::output_to_motors()

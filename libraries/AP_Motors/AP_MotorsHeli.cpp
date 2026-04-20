@@ -217,6 +217,12 @@ void AP_MotorsHeli::output()
     // update throttle filter
     update_throttle_filter();   //apply filter to '_throttle_in'
 
+    //use get_throttle() to calculate collective command
+    cxdata().ctrl.throttle_in = get_throttle();
+    cxdata().ctrl.pitch_in = _pitch_in;
+    cxdata().ctrl.roll_in = _roll_in;
+    cxdata().ctrl.yaw_in = _yaw_in;
+    cxdata().ctrl.debug = 0;
     // run spool STATE MACHINE : SHUT_DOWN → GROUND_IDLE → SPOOLING_UP → THROTTLE_UNLIMITED
     // THROTTLE_UNLIMITED → SPOOLING_DOWN → GROUND_IDLE → SHUT_DOWN
     output_logic();
@@ -226,11 +232,15 @@ void AP_MotorsHeli::output()
         _servo_test_cycle_counter = 0;
         calculate_armed_scalars(); // AP_MotorsHeli_Dual::calculate_armed_scalars() for Coaxial Rotor Motor for rotating rotors
         if (!get_interlock()) {
+            cxdata().ctrl.debug = 1;
             output_armed_zero_throttle();
         } else {
+            cxdata().ctrl.debug = 2;
             output_armed_stabilizing();
         }
+        //cxdata().Swash.Lat = _roll_in * 4500.0 / ((float) _cyclic_max)
     } else {
+        cxdata().ctrl.debug = 3;
         output_disarmed();
     }
 
@@ -247,7 +257,13 @@ void AP_MotorsHeli::output_armed_stabilizing()
     if (_servo_mode != SERVO_CONTROL_MODE_AUTOMATED) {
         reset_flight_controls();
     }
-
+    //temp debug
+    cxdata().Swash_CMD.Lat = _roll_in * 2.0f * 4500.0f / ((float)_cyclic_max);
+    cxdata().Swash_CMD.Lon = _pitch_in * 2.0f * 4500.0f / ((float)_cyclic_max);
+    cxdata().Swash_CMD.Rud = _yaw_in * 18.0f * Max_Rudder_Deg;
+    cxdata().Swash_CMD.Col = get_throttle() * (_collective_max_deg - _collective_min_deg) + _collective_min_deg;
+    
+    //end of temp debug
     move_actuators(_roll_in, _pitch_in, get_throttle(), _yaw_in);
 }
 
@@ -258,6 +274,19 @@ void AP_MotorsHeli::output_armed_zero_throttle()
     if (_servo_mode != SERVO_CONTROL_MODE_AUTOMATED) {
         reset_flight_controls();
     }
+    //temp debug
+    cxdata().Swash_CMD.Lat = _roll_in * 2.0f * 4500.0f / ((float)_cyclic_max);
+    cxdata().Swash_CMD.Lon = _pitch_in * 2.0f * 4500.0f / ((float)_cyclic_max);
+    cxdata().Swash_CMD.Rud = _yaw_in * 18.0f * Max_Rudder_Deg;
+    cxdata().Swash_CMD.Col = get_throttle() * (_collective_max_deg - _collective_min_deg) + _collective_min_deg;
+    // cxdata().Swash_CMD.Lat = _roll_radio_passthrough * 2.0f;
+    // cxdata().Swash_CMD.Lon = _pitch_radio_passthrough * 2.0f;
+    // cxdata().Swash.Rud = cxdata().Swash_CMD.Rud - cxdata().Swash.Pedal_trim ;
+    // _roll_in = _roll_radio_passthrough * ((float) _cyclic_max / 4500.0);
+    // _pitch_in = _pitch_radio_passthrough * ((float) _cyclic_max / 4500.0);
+    // _throttle_filter.reset( (cxdata().Swash_CMD.Col - _collective_min_deg) / (_collective_max_deg - _collective_min_deg) ); 
+    // _yaw_in = cxdata().Swash.Rud / Max_Rudder_Deg * 0.055556; // 0.055556 = (1/18.0); 
+    //end of temp debug
 
     move_actuators(_roll_in, _pitch_in, get_throttle(), _yaw_in);
 }
@@ -304,6 +333,9 @@ void AP_MotorsHeli::output_disarmed()
         }
         cxdata().Swash_CMD.Lat = _roll_radio_passthrough * 2.0f;
         cxdata().Swash_CMD.Lon = _pitch_radio_passthrough * 2.0f;
+        cxdata().Swash.Lat = cxdata().Swash_CMD.Lat;
+        cxdata().Swash.Lon = cxdata().Swash_CMD.Lon;
+        cxdata().Swash.Col = cxdata().Swash_CMD.Col;
         //Set Rudder trim
         cxdata().Swash.Rud = cxdata().Swash_CMD.Rud - cxdata().Swash.Pedal_trim ;
         // manual override (i.e. when setting up swash)

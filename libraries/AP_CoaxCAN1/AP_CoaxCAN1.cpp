@@ -19,7 +19,7 @@ extern const AP_HAL::HAL& hal;
 #define DEBUG_GCSCMD 0
 // #define DEBUG_COAXSERVO 1
 
-#define P_CURRENT_SERVO_VEL     819     //changed from 4095 to 819
+#define P_CURRENT_SERVO_VEL     2048  //819     //changed from 4095 to 819
 // Table of user settable CAN bus parameters
 const AP_Param::GroupInfo AP_COAXCAN1::var_info[] = {
     // @Param: example
@@ -174,24 +174,18 @@ void AP_COAXCAN1::run(void)
     
     //COM-failsafe code to stop inverter during ground test
     if((cxdata().Failsafe.GCS_lost) && (!cxdata().Failsafe.GCS_lost_prev)) { //Detect Rising : GCS fail-safe first detected
-        if (!_armed) {
-            //failsafe code only works during Ground test mode
-            if(cxdata().INV_data.Rdy2useINV == 1) {
-                cxdata().Failsafe.GCS_FC_action_step = 0; //Step to 0
-                // cxdata().CX_State = CoaxState::CXSTATE_F2_GCS_FAIL_ON_GNDTEST; // Move servo to gcs-failsafe-at-ground-test mode
-
-                //===Invoked Command
-                cxdata().Command_Received.NewCMD.bits.Motor_RPM = 1;
-                cxdata().Command_Received.Target_INV_RPM = 0;
-            }
+        //failsafe code works both in Ground test mode and tethered flight mode (Only fly in tethered mode)
+        if(cxdata().INV_data.Rdy2useINV == 1) {
+            cxdata().Failsafe.GCS_FC_action_step = 0; //Step to 0
+            //===Invoked Command
+            cxdata().Command_Received.NewCMD.bits.Motor_RPM = 1;
+            cxdata().Command_Received.Target_INV_RPM = 0;
         }
     } else if ((cxdata().Failsafe.GCS_lost) && (cxdata().Failsafe.GCS_lost_prev)) { //Continued GCS failsafe state
-        if (!_armed) {
-            if((cxdata().INV_data.Rdy2useINV == 1) && (INV_GET_CMD.Ref1_RAW != 0)) { //
-                //===Invoked Command
-                cxdata().Command_Received.NewCMD.bits.Motor_RPM = 1;
-                cxdata().Command_Received.Target_INV_RPM = 0;
-            }
+        if((cxdata().INV_data.Rdy2useINV == 1) && (INV_GET_CMD.Ref1_RAW != 0)) {
+            //===Invoked Command
+            cxdata().Command_Received.NewCMD.bits.Motor_RPM = 1;
+            cxdata().Command_Received.Target_INV_RPM = 0;
         }
     }
     cxdata().Failsafe.GCS_lost_prev = cxdata().Failsafe.GCS_lost;

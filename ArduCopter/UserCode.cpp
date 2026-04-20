@@ -169,6 +169,19 @@ void Copter::userhook_MediumLoop()
     //static variables
     static uint16_t Count1Hz = 0;
 
+    // 5Hz GCS data
+    if (Count1Hz%2 == 0) {
+        MAV_GCSTX_CXSV_SWASH.Swash_State = static_cast<uint8_t>(cxdata().CX_State);
+        MAV_GCSTX_CXSV_SWASH.Collective = cxdata().Swash.Col;
+        MAV_GCSTX_CXSV_SWASH.Cyclic_Lon = cxdata().Swash.Lon;
+        MAV_GCSTX_CXSV_SWASH.Cyclic_Lat = cxdata().Swash.Lat;
+        MAV_GCSTX_CXSV_SWASH.Pedal      = cxdata().Swash.Rud;   //Rud is added with pedal trim within servo control code
+        MAV_GCSTX_CXSV_SWASH.CMD_Collective = cxdata().Swash_CMD.Col;
+        MAV_GCSTX_CXSV_SWASH.CMD_Cyclic_Lon = cxdata().Swash_CMD.Lon;
+        MAV_GCSTX_CXSV_SWASH.CMD_Cyclic_Lat = cxdata().Swash_CMD.Lat;
+        MAV_GCSTX_CXSV_SWASH.CMD_Pedal      = cxdata().Swash_CMD.Rud;
+        gcs().send_message(MSG_CXSV_SWASH);
+    }
     //Send to GCS at 1Hz Testing
     // MSG_INV_STATE,  // mavlink message to send Inverter state
     // MSG_HBSYS,      // mavlink message to send Hybrid-system state1
@@ -247,17 +260,17 @@ void Copter::userhook_MediumLoop()
         // MAV_GCSTX_CXSV_POS.SV5_POS_RAW = cxdata().SV_Pos[4].raw;
         // MAV_GCSTX_CXSV_POS.SV6_POS_RAW = cxdata().SV_Pos[5].raw;
         gcs().send_message(MSG_CXSV_POS);
-    } else if (Count1Hz%10 == 5) {
-        MAV_GCSTX_CXSV_SWASH.Swash_State = static_cast<uint8_t>(cxdata().CX_State);
-        MAV_GCSTX_CXSV_SWASH.Collective = cxdata().Swash.Col;
-        MAV_GCSTX_CXSV_SWASH.Cyclic_Lon = cxdata().Swash.Lon;
-        MAV_GCSTX_CXSV_SWASH.Cyclic_Lat = cxdata().Swash.Lat;
-        MAV_GCSTX_CXSV_SWASH.Pedal      = cxdata().Swash.Rud;   //Rud is added with pedal trim within servo control code
-        MAV_GCSTX_CXSV_SWASH.CMD_Collective = cxdata().Swash_CMD.Col;
-        MAV_GCSTX_CXSV_SWASH.CMD_Cyclic_Lon = cxdata().Swash_CMD.Lon;
-        MAV_GCSTX_CXSV_SWASH.CMD_Cyclic_Lat = cxdata().Swash_CMD.Lat;
-        MAV_GCSTX_CXSV_SWASH.CMD_Pedal      = cxdata().Swash_CMD.Rud;
-        gcs().send_message(MSG_CXSV_SWASH);
+    // } else if (Count1Hz%10 == 5) {
+    //     MAV_GCSTX_CXSV_SWASH.Swash_State = static_cast<uint8_t>(cxdata().CX_State);
+    //     MAV_GCSTX_CXSV_SWASH.Collective = cxdata().Swash.Col;
+    //     MAV_GCSTX_CXSV_SWASH.Cyclic_Lon = cxdata().Swash.Lon;
+    //     MAV_GCSTX_CXSV_SWASH.Cyclic_Lat = cxdata().Swash.Lat;
+    //     MAV_GCSTX_CXSV_SWASH.Pedal      = cxdata().Swash.Rud;   //Rud is added with pedal trim within servo control code
+    //     MAV_GCSTX_CXSV_SWASH.CMD_Collective = cxdata().Swash_CMD.Col;
+    //     MAV_GCSTX_CXSV_SWASH.CMD_Cyclic_Lon = cxdata().Swash_CMD.Lon;
+    //     MAV_GCSTX_CXSV_SWASH.CMD_Cyclic_Lat = cxdata().Swash_CMD.Lat;
+    //     MAV_GCSTX_CXSV_SWASH.CMD_Pedal      = cxdata().Swash_CMD.Rud;
+    //     gcs().send_message(MSG_CXSV_SWASH);
     } else if (Count1Hz%10 == 6) {
         MAV_GCSTX_DMI_data.LDC_State = cxdata().DMI_PMS_data.LDC_State;
         MAV_GCSTX_DMI_data.PMS_Mv_Battery_VoltageX10 = (uint16_t)(cxdata().DMI_PMS_data.Mv_Battery_Voltage * 10.0);
@@ -300,6 +313,15 @@ void Copter::userhook_MediumLoop()
 
 //----For 10Hz Logging
 #if COAXCAN_LOGGING == 1
+    AP::logger().Write("CXCT", "TimeUS,RIN,PIN,TIN,YIN,DEBUG", "QffffB",
+        AP_HAL::micros64(),                             //Q     TimeUS
+        cxdata().ctrl.roll_in,
+        cxdata().ctrl.pitch_in,
+        cxdata().ctrl.throttle_in,
+        cxdata().ctrl.yaw_in,
+        cxdata().ctrl.debug
+    );
+
     AP::logger().Write("INV1", "TimeUS,ONOFF,RPM,RPMCMD,IA,IB,IC", "QBfffff",
         AP_HAL::micros64(),                             //Q     TimeUS
         cxdata().INV_data.CMD_Flag.bits.Inverter_ONOFF, //B     ONOFF

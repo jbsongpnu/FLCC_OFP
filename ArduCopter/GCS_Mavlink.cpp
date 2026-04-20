@@ -1168,7 +1168,10 @@ MAV_RESULT GCS_MAVLINK_Copter::handle_command_COAX_SET_MOTOR(const mavlink_comma
     uint8_t param2 = (uint8_t)msg.param2;
     float rpm = msg.param3;
     float acc = msg.param4;
-
+    // limit rpm to 4400, limit acc to 200
+    if(rpm > 4400) rpm = 4400;
+    if(acc > 200) acc = 200;
+    
     if((param1 > 0) && (param1 < 3)) {
         //Only send On/Off if param1 is 1 or 2
         if(cxdata().INV_data.Rdy2useINV == 0) {//For first time to press RUN, just set Inverter ready to use

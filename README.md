@@ -5,6 +5,12 @@
 ***
 
 ## Version History  
+- V1.00.00 Tethered flight mode test version  
+  + Motor fail-safe algorithm also works during flight mode  
+  + Motor RPM is limited to 4400 rpm  
+  + Servo Motor(HiTech) speed is increased from 819 to 2048  
+  + Added SAS algorithm to Stabilize mode collective control with 10% throttle limit and gain value of 0.05 being hard-coded  
+  + Swashplate information is sent at 5Hz from now  
 - V0.01.46 Ground Cyclic Test Version
   + RC Controller is linked to lateral and longitudinal cyclic (NO collective and rudder for safety) for cyclic test on a ground test bench
   + In this version, USING_RC defines the use of RC controller, and GCS command is negelected for both cyclic commands if USING_RC = 1

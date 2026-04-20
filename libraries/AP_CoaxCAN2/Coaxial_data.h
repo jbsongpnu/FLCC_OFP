@@ -472,6 +472,14 @@ struct failsafe {
     uint8_t Motor_Stop_CMD = 0; //Motor stop command sent
 };
 
+struct control {
+    float throttle_in = 0.0f;
+    float roll_in = 0.0f;
+    float pitch_in = 0.0f;
+    float yaw_in = 0.0f;
+    uint8_t debug = 0;
+};
+
 class CoaxData
 {
 public:
@@ -505,7 +513,7 @@ public:
     CoaxSwashState Swash_CMD;    
     HiTechTestState SVTestState;
     SVErrorCode SVError;
-
+    control ctrl;
     //====State Machine and Fail-safe
     CoaxState CX_State; //Coaxial State-machine state
     failsafe Failsafe;

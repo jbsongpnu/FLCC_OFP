@@ -5,6 +5,10 @@
  * Init and run calls for stabilize flight mode for trad heli
  */
 
+// Vertical SAS (Stability Augmentation System) damping gain
+// Units: collective_fraction / (m/s), e.g. 0.05 means 1 m/s descent speed increases collective by 0.05 (5%)
+#define VERTICAL_SAS_DAMPING_GAIN 0.05f
+
 // stabilize_init - initialise stabilize controller
 bool ModeStabilize_Heli::init(bool ignore_checks)
 {
@@ -77,6 +81,19 @@ void ModeStabilize_Heli::run()
 
     // call attitude controller
     attitude_control->input_euler_angle_roll_pitch_euler_rate_yaw(target_roll, target_pitch, target_yaw_rate);
+
+    // Vertical SAS: apply damping to collective based on vertical speed
+    // Only active when spooled up, not landed, and not in autorotation
+    if (motors->get_spool_state() == AP_Motors::SpoolState::THROTTLE_UNLIMITED &&
+        !copter.ap.land_complete &&
+        !copter.heli_flags.in_autorotation) {
+        Vector3f vel_ned;
+        if (AP::ahrs().get_velocity_NED(vel_ned)) {
+            // vel_ned.z is positive-down (m/s), so adding it increases collective on descent
+            const float sas_correction = constrain_float(VERTICAL_SAS_DAMPING_GAIN * vel_ned.z, -0.1f, 0.1f);
+            pilot_throttle_scaled = constrain_float(pilot_throttle_scaled + sas_correction, 0.0f, 1.0f);
+        }
+    }
 
     // output pilot's throttle - note that TradHeli does not used angle-boost
     attitude_control->set_throttle_out(pilot_throttle_scaled, false, g.throttle_filt);
