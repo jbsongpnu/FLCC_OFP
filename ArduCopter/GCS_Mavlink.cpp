@@ -1148,6 +1148,10 @@ MAV_RESULT GCS_MAVLINK_Copter::handle_command_CXSV_SET_PARAM(const mavlink_comma
 MAV_RESULT GCS_MAVLINK_Copter::handle_command_CXSV_SWASH_OVERRIDE(const mavlink_command_long_t &msg)
 {
     //gcs().send_text(MAV_SEVERITY_INFO, "Swash Overriden");
+    if(cxdata().CX_State == CoaxState::CXSTATE_2_WAIT) {
+        gcs().send_text(MAV_SEVERITY_WARNING, "Starting Ground Test Mode");
+        cxdata().CX_State = CoaxState::CXSTATE_3_GNDTEST;
+    }
     cxdata().Swash_CMD.Col = msg.param1;
     cxdata().Swash_CMD.Lon = msg.param2;
     cxdata().Swash_CMD.Lat = msg.param3;

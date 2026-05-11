@@ -5,6 +5,13 @@
 ***
 
 ## Version History  
+- V1.00.01 Final tethered-flight mode version  
+  + Reads RC Channel 6 to enable 3-way switch, and controls upper/lower rotor's cyclic option  
+  + Fixed bug for H-tank pressure value for GCS  
+  + Renamed the function SV_Waiting_StateLoop to SV_Control_Loop  
+  + New state-machine structure for CX_State with updated fail-safe algorithm  
+  + During ground test mode of CX_state, the servo mode falls back to manualpassthrough mode when a transition from armed to disarmed is detected  
+  + I-terms of roll/pitch/yaw rate controllers get reset command unless it's armed and CX_State is in flight mode.
 - V1.00.00 Tethered flight mode test version  
   + Motor fail-safe algorithm also works during flight mode  
   + Motor RPM is limited to 4400 rpm  

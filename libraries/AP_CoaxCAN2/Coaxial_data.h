@@ -436,17 +436,14 @@ struct CoaxSwashState {
 
 //Coaxial State-machine state
 enum class CoaxState {
-    CXSTATE_0_INIT,
-    CXSTATE_1_CHECK,
-    CXSTATE_2_WAIT,
-    CXSTATE_3_READY,
-    CXSTATE_4_GNDTEST,
-    CXSTATE_5_MOTSPOOL,
-    CXSTATE_6_IDLERPM,
-    CXSTATE_7_ONFLIGHT,
-    CXSTATE_8_LANDED,
-    CXSTATE_F1_SERVOFAIL,
-    CXSTATE_F2_GCS_FAIL_ON_GNDTEST
+    CXSTATE_0_INIT,         //Servo link check
+    CXSTATE_1_CHECK,        //Servo configuration check
+    CXSTATE_2_WAIT,         //Initial state after check
+    CXSTATE_3_GNDTEST,      //Enters when first actuator check command is given
+    CXSTATE_4_PREPFLIGHT,   //Enters when FCReady is on and HDC_on is on
+    CXSTATE_5_ONFLIGHT,     //Enters when motor is given command to run
+    CXSTATE_6_FAILSAFE,    //For GCS and Power-fail state
+    CXSTATE_F1_SERVOFAIL
 };
 
 struct HiTechTestState {
@@ -477,7 +474,11 @@ struct control {
     float roll_in = 0.0f;
     float pitch_in = 0.0f;
     float yaw_in = 0.0f;
+    float SAS = 0.0f;
+    float V_z = 0.0f;
+    float Pilot_th_scaled = 0.0f;
     uint8_t debug = 0;
+    uint8_t cyc_option = 3; //0 : none, 1 : lower-only, 2 : upper only, 3 ; both upper and lower
 };
 
 class CoaxData

@@ -161,6 +161,8 @@ void Copter::userhook_50Hz()
 #endif
 
 #ifdef USERHOOK_MEDIUMLOOP
+
+#define DEF_CYC_OPTION_RC_CH    6
 void Copter::userhook_MediumLoop()
 {
     //User Code for Coaxial Helicopter 
@@ -168,6 +170,34 @@ void Copter::userhook_MediumLoop()
 
     //static variables
     static uint16_t Count1Hz = 0;
+
+    // Read RC channel for cyclic option
+    RC_Channel *cyc_opt_ch = RC_Channels::rc_channel(DEF_CYC_OPTION_RC_CH - 1);
+    //if (!rc().has_had_rc_receiver() && !rc().has_had_rc_override()) 
+    if ((cyc_opt_ch != nullptr) && rc().has_had_rc_receiver()) {
+        int16_t rc_in  = cyc_opt_ch->get_radio_in();
+        int16_t rc_min = cyc_opt_ch->get_radio_min();
+        int16_t rc_max = cyc_opt_ch->get_radio_max();
+        int16_t rc_trim = cyc_opt_ch->get_radio_trim();
+        int16_t thresh_low  = (rc_min + rc_trim) / 2;
+        int16_t thresh_high = (rc_trim + rc_max) / 2;
+        if (rc_in < thresh_low) {
+            if(cxdata().ctrl.cyc_option != 1) {
+                gcs().send_text(MAV_SEVERITY_NOTICE, "Lower-Rotor Cyclic Mode");
+                cxdata().ctrl.cyc_option = 1;       // near minimum: lower-only
+            }
+        } else if (rc_in < thresh_high) {
+            if(cxdata().ctrl.cyc_option != 3) {
+                gcs().send_text(MAV_SEVERITY_NOTICE, "Both-Rotor Cyclic Mode");
+                cxdata().ctrl.cyc_option = 3;       // near trim: both
+            }
+        } else {
+            if(cxdata().ctrl.cyc_option != 2) {
+                gcs().send_text(MAV_SEVERITY_NOTICE, "Upper-Rotor Cyclic Mode");
+                cxdata().ctrl.cyc_option = 2;       // near maximum: upper-only
+            }
+        }
+    }
 
     // 5Hz GCS data
     if (Count1Hz%2 == 0) {
@@ -295,7 +325,7 @@ void Copter::userhook_MediumLoop()
         MAV_GCSTX_HDM_data.Ifcu_AmbTemp = cxdata().IFCU_data.AmbTemp;
         MAV_GCSTX_HDM_data.Ifcu_RoomTemp = cxdata().IFCU_data.RoomTemp;
         MAV_GCSTX_HDM_data.Ifcu_H2TnkTmp = cxdata().IFCU_data.H2TnkTmp;
-        MAV_GCSTX_HDM_data.Ifcu_H2TnkPrsX10 = cxdata().IFCU_data.H2TnkPrs;
+        MAV_GCSTX_HDM_data.Ifcu_H2TnkPrsX10 = (uint16_t)(cxdata().IFCU_data.H2TnkPrs * 10.0f);
         gcs().send_message(MSG_HDM_DATA);
 #if CCB_AUTOSEQUENCE == 1
         if (Count1Hz > 50) {
@@ -313,12 +343,14 @@ void Copter::userhook_MediumLoop()
 
 //----For 10Hz Logging
 #if COAXCAN_LOGGING == 1
-    AP::logger().Write("CXCT", "TimeUS,RIN,PIN,TIN,YIN,DEBUG", "QffffB",
+    AP::logger().Write("CXCT", "TimeUS,RIN,PIN,TIN,YIN,ZSAS,PTS,DEBUG", "QffffffB",
         AP_HAL::micros64(),                             //Q     TimeUS
         cxdata().ctrl.roll_in,
         cxdata().ctrl.pitch_in,
         cxdata().ctrl.throttle_in,
         cxdata().ctrl.yaw_in,
+        cxdata().ctrl.SAS,
+        cxdata().ctrl.Pilot_th_scaled,
         cxdata().ctrl.debug
     );
 

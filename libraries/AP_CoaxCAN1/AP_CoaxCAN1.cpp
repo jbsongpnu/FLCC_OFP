@@ -8,6 +8,8 @@
 #include <AP_Math/AP_Math.h>
 #include <AP_CoaxCAN2/Coaxial_data.h>
 #include <AP_Motors/AP_Motors_Class.h>
+#include <AP_Motors/AP_MotorsHeli.h>
+#include <AC_AttitudeControl/AC_AttitudeControl.h>
 
 extern const AP_HAL::HAL& hal;
 
@@ -172,24 +174,6 @@ void AP_COAXCAN1::run(void)
         gcs().send_text(MAV_SEVERITY_INFO, "Disarming detected from COAXCAN function");
     }
     
-    //COM-failsafe code to stop inverter during ground test
-    if((cxdata().Failsafe.GCS_lost) && (!cxdata().Failsafe.GCS_lost_prev)) { //Detect Rising : GCS fail-safe first detected
-        //failsafe code works both in Ground test mode and tethered flight mode (Only fly in tethered mode)
-        if(cxdata().INV_data.Rdy2useINV == 1) {
-            cxdata().Failsafe.GCS_FC_action_step = 0; //Step to 0
-            //===Invoked Command
-            cxdata().Command_Received.NewCMD.bits.Motor_RPM = 1;
-            cxdata().Command_Received.Target_INV_RPM = 0;
-        }
-    } else if ((cxdata().Failsafe.GCS_lost) && (cxdata().Failsafe.GCS_lost_prev)) { //Continued GCS failsafe state
-        if((cxdata().INV_data.Rdy2useINV == 1) && (INV_GET_CMD.Ref1_RAW != 0)) {
-            //===Invoked Command
-            cxdata().Command_Received.NewCMD.bits.Motor_RPM = 1;
-            cxdata().Command_Received.Target_INV_RPM = 0;
-        }
-    }
-    cxdata().Failsafe.GCS_lost_prev = cxdata().Failsafe.GCS_lost;
-
     //from %8, loops 0~6 for servo, 7 for CCB and Inverter
     if(_AP_COAXCAN1_loop_cnt%8 == 7) { 
         //Inverter and CCB 
@@ -204,9 +188,19 @@ void AP_COAXCAN1::run(void)
     _armed_prev = _armed;
 }
 
-//Coax Servo loop at 200Hz
+//State-machine CX_State : runs inside of the CoaxServoRun loop at 200Hz
 void AP_COAXCAN1::CoaxServoRun(void)
-{   //_AP_COAXCAN1_loop_cnt still usable
+{
+    //Reset rate PID I-terms while disarmed on the ground to prevent integrator wind-up
+    if ((!_armed) || (cxdata().CX_State != CoaxState::CXSTATE_5_ONFLIGHT)) {
+        AC_AttitudeControl *attitude_control = AC_AttitudeControl::get_singleton();
+        if (attitude_control != nullptr) {
+            attitude_control->get_rate_roll_pid().reset_I();
+            attitude_control->get_rate_pitch_pid().reset_I();
+            attitude_control->get_rate_yaw_pid().reset_I();
+        }
+    }
+
     switch (cxdata().CX_State) {
         case CoaxState::CXSTATE_0_INIT : 
             if(_AP_COAXCAN1_loop_cnt%4 == 0) {
@@ -250,7 +244,7 @@ void AP_COAXCAN1::CoaxServoRun(void)
                         //transit to next state
                         cxdata().CX_State = CoaxState::CXSTATE_2_WAIT;
                         cxdata().SVTestState.ServoCheckFinished = 0;
-                        gcs().send_text(MAV_SEVERITY_INFO, "Servos at Wait-state");
+                        gcs().send_text(MAV_SEVERITY_WARNING, "Servos at Wait-state");
                     } else {
                         cxdata().CX_State = CoaxState::CXSTATE_F1_SERVOFAIL;
                     }
@@ -260,11 +254,92 @@ void AP_COAXCAN1::CoaxServoRun(void)
             }
         break;
         case CoaxState::CXSTATE_2_WAIT :
-            SV_Waiting_StateLoop(); //Enable this line for normal test
-            //SV_Waiting_State_TESTLoop(); //Enable this line for temporary test
-            // if(_AP_COAXCAN1_loop_cnt%8000 == 0) {
-            //     gcs().send_text(MAV_SEVERITY_INFO, "Servo Motor at Wait State");
-            // }
+            SV_Control_Loop();
+            if(_AP_COAXCAN1_loop_cnt%8000 == 0) {
+                gcs().send_text(MAV_SEVERITY_INFO, "Servo Motor at Wait State");
+            }
+            //Move to next state only when first MAV_CMD_CXSV_SWASH_OVERRIDE message is sent and handle_command_CXSV_SWASH_OVERRIDE() function is handled
+            if(cxdata().DMI_PMS_data.PMS_State == 2) {  //When PMS goes to Run state
+                if(_AP_COAXCAN1_loop_cnt%2000 == 0) {
+                    gcs().send_text(MAV_SEVERITY_ERROR, "HDC is ON at WAIT-STATE");
+                }
+            }
+        break;
+        case CoaxState::CXSTATE_3_GNDTEST :
+            SV_Control_Loop();
+            //Armed -> Disarmed fall-back : switch servos to manual passthrough
+            if ((!_armed) && (_armed_prev)) {
+                AP_Motors *motors = AP_Motors::get_singleton();
+                if (motors != nullptr) {
+                    static_cast<AP_MotorsHeli*>(motors)->set_servo_mode_passthrough();
+                }
+            }
+            if(CHECK_GCS_FAIL()) {
+                cxdata().CX_State = CoaxState::CXSTATE_6_FAILSAFE;
+            } else {
+                if(cxdata().DMI_PMS_data.PMS_State == 2) {  //When PMS goes to Run state
+                    if(cxdata().IFCU_data.State == 2) {
+                        gcs().send_text(MAV_SEVERITY_WARNING, "Pre-flight preparation mode");
+                        cxdata().CX_State = CoaxState::CXSTATE_4_PREPFLIGHT;
+                    } else if (cxdata().IFCU_data.State == 0) {
+                        if(_AP_COAXCAN1_loop_cnt%8000 == 0) {
+                            gcs().send_text(MAV_SEVERITY_WARNING, "HDC is running without Fuel-cell");
+                        }
+                    }
+                }
+            }
+        break;
+        case CoaxState::CXSTATE_4_PREPFLIGHT :
+            SV_Control_Loop();
+            if(CHECK_GCS_FAIL()) {
+                cxdata().CX_State = CoaxState::CXSTATE_6_FAILSAFE;
+            } else {
+                if(cxdata().DMI_PMS_data.PMS_State > 2) {
+                    gcs().send_text(MAV_SEVERITY_WARNING, "HDC wrong : Go to GND Mode");
+                    cxdata().CX_State = CoaxState::CXSTATE_3_GNDTEST;
+                } else if (cxdata().DMI_PMS_data.PMS_State < 2) {
+                    gcs().send_text(MAV_SEVERITY_WARNING, "HDC OFF : Go to GND Mode");
+                    cxdata().CX_State = CoaxState::CXSTATE_3_GNDTEST;
+                } else {    //if properly running
+                    if(((uint16_t)cxdata().INV_data.motor_Spd) > 800) {
+                        gcs().send_text(MAV_SEVERITY_WARNING, "Go to Flight Mode");
+                        cxdata().CX_State = CoaxState::CXSTATE_5_ONFLIGHT;
+                    }
+                }
+            }
+        break;
+        case CoaxState::CXSTATE_5_ONFLIGHT :
+            SV_Control_Loop();
+            if ( CHECK_GCS_FAIL() //GCS fail case
+                || (cxdata().IFCU_data.State != 2) //Fuel-cell shut down failure case
+                || (cxdata().DMI_PMS_data.PMS_State != 2)) {    //Converter fail case
+                //Go to fail-safe mode
+                cxdata().CX_State = CoaxState::CXSTATE_6_FAILSAFE;
+            } else {
+                if(((uint16_t)cxdata().INV_data.motor_Spd) < 200) {
+                    gcs().send_text(MAV_SEVERITY_WARNING, "Go back to WAIT-STATE");
+                    cxdata().CX_State = CoaxState::CXSTATE_2_WAIT;
+                }
+            }
+        break;
+        case CoaxState::CXSTATE_6_FAILSAFE :
+            SV_Control_Loop();
+            //stage 1 : decrease RPM command to 400
+            if((cxdata().INV_data.Motor_RPM_CMD > 400) || (cxdata().Command_Received.Target_INV_RPM > 400)) {
+                if(cxdata().Failsafe.GCS_FC_action_step == 0) {
+                    //===Invoked Command
+                    cxdata().Command_Received.NewCMD.bits.Motor_RPM = 1;
+                    cxdata().Command_Received.Target_INV_RPM = 400;
+                    gcs().send_text(MAV_SEVERITY_CRITICAL, "Critical Fail : set motor to 400rpm");
+                }
+            } else if(cxdata().INV_data.motor_Spd < 800.0) {
+                gcs().send_text(MAV_SEVERITY_CRITICAL, "Stop Inverter and go to WAIT-STATE");
+                //Turn off the inverter
+                cxdata().Command_Received.NewCMD.bits.Inverter_ONOFF = 1;
+                cxdata().Command_Received.Inv_On_Off = 2; 
+                //go to wait-sate
+                cxdata().CX_State = CoaxState::CXSTATE_2_WAIT;
+            }
         break;
         case CoaxState::CXSTATE_F1_SERVOFAIL :
             if(_AP_COAXCAN1_loop_cnt%4000 == 0) {
@@ -276,6 +351,30 @@ void AP_COAXCAN1::CoaxServoRun(void)
     }
 }
 
+bool AP_COAXCAN1::CHECK_GCS_FAIL()
+{
+    bool fail = false;
+    //COM-failsafe code to stop inverter during ground test
+    if((cxdata().Failsafe.GCS_lost) && (!cxdata().Failsafe.GCS_lost_prev)) { //Detect Rising : GCS fail-safe first detected
+        //failsafe code works both in Ground test mode and tethered flight mode (Only fly in tethered mode)
+        if(cxdata().INV_data.Rdy2useINV == 1) {
+            cxdata().Failsafe.GCS_FC_action_step = 0; //Step to 0
+        }
+        fail = true;
+    } else if ((cxdata().Failsafe.GCS_lost) && (cxdata().Failsafe.GCS_lost_prev)) { //Continued GCS failsafe state
+
+        cxdata().Failsafe.GCS_FC_action_step++;
+
+        // if((cxdata().INV_data.Rdy2useINV == 1) && (INV_GET_CMD.Ref1_RAW != 0)) {
+        //     //===Invoked Command
+        //     cxdata().Command_Received.NewCMD.bits.Motor_RPM = 1;
+        //     cxdata().Command_Received.Target_INV_RPM = 0;
+        // }
+        fail = true;
+    }
+    cxdata().Failsafe.GCS_lost_prev = cxdata().Failsafe.GCS_lost;
+    return fail;
+}
 // -------------------------------------------------------------------------
 // RX 
 // -------------------------------------------------------------------------
@@ -2654,7 +2753,7 @@ void AP_COAXCAN1::SV_Check_State(void)
 // From 400Hz loop, tick 1~6 for send position, 7 for reading state, 8 for rest to allow INV and CCB comm.
 // cxdata().Swash_CMD.Col to SV_TX diff
 #define TEST_SET 1
-void AP_COAXCAN1::SV_Waiting_StateLoop(void) {
+void AP_COAXCAN1::SV_Control_Loop(void) {
     static uint8_t IndexLoop = 0;   //0~7 loop
     static uint8_t StateLoop = 0;   //0 ~5 loop
     static uint8_t CheckSV_ID = 1;  //1~6 loop

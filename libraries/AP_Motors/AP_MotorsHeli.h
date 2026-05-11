@@ -147,6 +147,9 @@ public:
 
     // set land complete flag
     void set_land_complete(bool landed) { _heliflags.land_complete = landed; }
+
+    // set servo mode to manual passthrough (pass radio inputs directly to servos)
+    void set_servo_mode_passthrough() { _servo_mode.set(SERVO_CONTROL_MODE_MANUAL_PASSTHROUGH); }
 	
 	//return zero lift collective position
     float get_coll_mid() const { return _collective_zero_thrust_pct; }

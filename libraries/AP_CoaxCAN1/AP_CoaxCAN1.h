@@ -159,12 +159,13 @@ private:
     void SV_Config_Test(void);
     void SV_Check_State(void);
     void CoaxServoRun(void);
-    void SV_Waiting_StateLoop(void);
+    void SV_Control_Loop(void);
     void SV_Waiting_State_TESTLoop(void);
     int16_t round_to_i16(float v);
     int ColTableLOW_LerpToI16(float x, int16_t* sv4, int16_t* sv5, int16_t* sv6);
     int ColTableUpper_LerpToI16(float x, int16_t* sv1, int16_t* sv2, int16_t* sv3);
     int Pedal_from_Collective(float col, float* pedal);
+    bool CHECK_GCS_FAIL(void);
 };
 
 #endif

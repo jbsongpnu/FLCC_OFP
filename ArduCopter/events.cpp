@@ -176,22 +176,22 @@ void Copter::failsafe_gcs_on_event(void)
             break;
         case FS_GCS_ENABLED_ALWAYS_RTL:
         case FS_GCS_ENABLED_CONTINUE_MISSION:
-            desired_action = FailsafeAction::RTL;
+            desired_action = FailsafeAction::NONE;
             break;
         case FS_GCS_ENABLED_ALWAYS_SMARTRTL_OR_RTL:
-            desired_action = FailsafeAction::SMARTRTL;
+            desired_action = FailsafeAction::NONE;
             break;
         case FS_GCS_ENABLED_ALWAYS_SMARTRTL_OR_LAND:
-            desired_action = FailsafeAction::SMARTRTL_LAND;
+            desired_action = FailsafeAction::NONE;
             break;
         case FS_GCS_ENABLED_ALWAYS_LAND:
-            desired_action = FailsafeAction::LAND;
+            desired_action = FailsafeAction::NONE;
             break;
         case FS_GCS_ENABLED_AUTO_RTL_OR_RTL:
-            desired_action = FailsafeAction::AUTO_DO_LAND_START;
+            desired_action = FailsafeAction::NONE;
             break;
         default: // if an invalid parameter value is set, the fallback is RTL
-            desired_action = FailsafeAction::RTL;
+            desired_action = FailsafeAction::NONE;
     }
 
     // Conditions to deviate from FS_GCS_ENABLE parameter setting

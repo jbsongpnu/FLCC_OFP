@@ -7,7 +7,7 @@
 
 // Vertical SAS (Stability Augmentation System) damping gain
 // Units: collective_fraction / (m/s), e.g. 0.05 means 1 m/s descent speed increases collective by 0.05 (5%)
-#define VERTICAL_SAS_DAMPING_GAIN 0.05f
+#define VERTICAL_SAS_DAMPING_GAIN 0.03f
 
 // stabilize_init - initialise stabilize controller
 bool ModeStabilize_Heli::init(bool ignore_checks)
@@ -90,8 +90,11 @@ void ModeStabilize_Heli::run()
         Vector3f vel_ned;
         if (AP::ahrs().get_velocity_NED(vel_ned)) {
             // vel_ned.z is positive-down (m/s), so adding it increases collective on descent
+            cxdata().ctrl.V_z = vel_ned.z;
             const float sas_correction = constrain_float(VERTICAL_SAS_DAMPING_GAIN * vel_ned.z, -0.1f, 0.1f);
+            cxdata().ctrl.SAS = sas_correction;
             pilot_throttle_scaled = constrain_float(pilot_throttle_scaled + sas_correction, 0.0f, 1.0f);
+            cxdata().ctrl.Pilot_th_scaled = pilot_throttle_scaled;
         }
     }
 

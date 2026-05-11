@@ -665,12 +665,29 @@ void AP_MotorsHeli_Dual::move_actuators(float roll_out, float pitch_out, float c
     _main_rotor.set_collective(fabsf(collective_out));//=> sets private valriable _collective_in to collective_out
 
     // compute swashplate tilt
-    float swash1_pitch = get_swashplate(1, AP_MOTORS_HELI_DUAL_SWASH_AXIS_PITCH, pitch_out, roll_out, yaw_out, collective_out_scaled);
-    float swash1_roll = get_swashplate(1, AP_MOTORS_HELI_DUAL_SWASH_AXIS_ROLL, pitch_out, roll_out, yaw_out, collective_out_scaled);
-    float swash1_coll = get_swashplate(1, AP_MOTORS_HELI_DUAL_SWASH_AXIS_COLL, pitch_out, roll_out, yaw_out, collective_out_scaled);
-    float swash2_pitch = get_swashplate(2, AP_MOTORS_HELI_DUAL_SWASH_AXIS_PITCH, pitch_out, roll_out, yaw_out, collective2_out_scaled);
-    float swash2_roll = get_swashplate(2, AP_MOTORS_HELI_DUAL_SWASH_AXIS_ROLL, pitch_out, roll_out, yaw_out, collective2_out_scaled);
-    float swash2_coll = get_swashplate(2, AP_MOTORS_HELI_DUAL_SWASH_AXIS_COLL, pitch_out, roll_out, yaw_out, collective2_out_scaled);
+    float swash1_pitch, swash1_roll, swash1_coll, swash2_pitch, swash2_roll, swash2_coll;
+    if(cxdata().ctrl.cyc_option > 3) cxdata().ctrl.cyc_option = 3;//limit to 3
+    //Upper : cxdata().ctrl.cyc_option = 2 or 3
+    if(cxdata().ctrl.cyc_option != 1) {
+        swash1_pitch = get_swashplate(1, AP_MOTORS_HELI_DUAL_SWASH_AXIS_PITCH, pitch_out, roll_out, yaw_out, collective_out_scaled);
+        swash1_roll = get_swashplate(1, AP_MOTORS_HELI_DUAL_SWASH_AXIS_ROLL, pitch_out, roll_out, yaw_out, collective_out_scaled);
+        swash1_coll = get_swashplate(1, AP_MOTORS_HELI_DUAL_SWASH_AXIS_COLL, pitch_out, roll_out, yaw_out, collective_out_scaled);
+    } else {
+        //don't appy cyclic for upper rotor
+        swash1_pitch = get_swashplate(1, AP_MOTORS_HELI_DUAL_SWASH_AXIS_PITCH, 0.0f, 0.0f, yaw_out, collective_out_scaled);
+        swash1_roll = get_swashplate(1, AP_MOTORS_HELI_DUAL_SWASH_AXIS_ROLL, 0.0f, 0.0f, yaw_out, collective_out_scaled);
+        swash1_coll = get_swashplate(1, AP_MOTORS_HELI_DUAL_SWASH_AXIS_COLL, 0.0f, 0.0f, yaw_out, collective_out_scaled);
+    }
+    //Lower : cxdata().ctrl.cyc_option 1 or 3
+    if(cxdata().ctrl.cyc_option != 2) {
+        swash2_pitch = get_swashplate(2, AP_MOTORS_HELI_DUAL_SWASH_AXIS_PITCH, pitch_out, roll_out, yaw_out, collective2_out_scaled);
+        swash2_roll = get_swashplate(2, AP_MOTORS_HELI_DUAL_SWASH_AXIS_ROLL, pitch_out, roll_out, yaw_out, collective2_out_scaled);
+        swash2_coll = get_swashplate(2, AP_MOTORS_HELI_DUAL_SWASH_AXIS_COLL, pitch_out, roll_out, yaw_out, collective2_out_scaled);
+    } else {
+        swash2_pitch = get_swashplate(2, AP_MOTORS_HELI_DUAL_SWASH_AXIS_PITCH, 0.0f, 0.0f, yaw_out, collective2_out_scaled);
+        swash2_roll = get_swashplate(2, AP_MOTORS_HELI_DUAL_SWASH_AXIS_ROLL, 0.0f, 0.0f, yaw_out, collective2_out_scaled);
+        swash2_coll = get_swashplate(2, AP_MOTORS_HELI_DUAL_SWASH_AXIS_COLL, 0.0f, 0.0f, yaw_out, collective2_out_scaled);
+    }
  
     // get servo positions from swashplate library
     _servo_out[CH_1] = _swashplate1.get_servo_out(CH_1,swash1_pitch,swash1_roll,swash1_coll);
