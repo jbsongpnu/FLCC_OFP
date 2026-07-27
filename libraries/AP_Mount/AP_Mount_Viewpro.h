@@ -77,6 +77,13 @@ public:
     // set camera lens as a value from 0 to 5
     bool set_lens(uint8_t lens) override;
 
+    // change IR camera pseudo-color / palette (KAL)
+    bool IR_Color_Change(uint8_t color) override;
+
+    // print connected mount's model name and firmware/protocol version to GCS,
+    // and force a fresh re-query so the next reply also prints (KAL)
+    bool report_camera_info() override;
+
     // set_camera_source is functionally the same as set_lens except primary and secondary lenses are specified by type
     // primary and secondary sources use the AP_Camera::CameraSource enum cast to uint8_t
     bool set_camera_source(uint8_t primary_source, uint8_t secondary_source) override;
@@ -159,13 +166,21 @@ private:
         ZOOM_IN = 0x09,
         FOCUS_PLUS = 0x0A,
         FOCUS_MINUS = 0x0B,
+        IR_COLOR_WHITE_HOT = 0x0E,  // KAL: thermal palette - white hot
+        IR_COLOR_BLACK_HOT = 0x0F,  // KAL: thermal palette - black hot
+        IR_RAINBOW = 0x12,          // KAL: pseudo-color mode prelude (sent before IR_COLOR_1..5)
         TAKE_PICTURE = 0x13,
         START_RECORD = 0x14,
         STOP_RECORD = 0x15,
         AUTO_FOCUS = 0x19,
         MANUAL_FOCUS = 0x1A,
         IR_ZOOM_OUT = 0x1B,
-        IR_ZOOM_IN = 0x1C
+        IR_ZOOM_IN = 0x1C,
+        IR_COLOR_1 = 0x21,          // KAL: thermal palette - color 1
+        IR_COLOR_2 = 0x22,          // KAL: thermal palette - color 2
+        IR_COLOR_3 = 0x23,          // KAL: thermal palette - color 3
+        IR_COLOR_4 = 0x24,          // KAL: thermal palette - color 4
+        IR_COLOR_5 = 0x25           // KAL: thermal palette - color 5 (reserved)
     };
 
     // C1 rangefinder commands
@@ -405,6 +420,7 @@ private:
     TrackingStatus _last_tracking_status;           // last tracking status received from gimbal (used to notify users)
     ImageSensor _image_sensor;                      // user selected image sensor (aka camera lens)
     float _zoom_times;                              // zoom times received from gimbal
+    uint8_t _palette_pending_color;                 // KAL: deferred palette code, sent on next update() tick after IR_RAINBOW prelude (0 = none pending)
     uint32_t _firmware_version;                     // firmware version from gimbal
     bool _got_firmware_version;                     // true once we have received the firmware version
     uint8_t _model_name[11] {};                     // model name received from gimbal

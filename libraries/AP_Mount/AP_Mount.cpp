@@ -870,6 +870,26 @@ bool AP_Mount::set_lens(uint8_t instance, uint8_t lens)
     return backend->set_lens(lens);
 }
 
+// change IR camera pseudo-color / palette (KAL)
+bool AP_Mount::IR_Color_Change(uint8_t instance, uint8_t color)
+{
+    auto *backend = get_instance(instance);
+    if (backend == nullptr) {
+        return false;
+    }
+    return backend->IR_Color_Change(color);
+}
+
+// print connected mount's model name and firmware/protocol version (KAL)
+bool AP_Mount::report_camera_info(uint8_t instance)
+{
+    auto *backend = get_instance(instance);
+    if (backend == nullptr) {
+        return false;
+    }
+    return backend->report_camera_info();
+}
+
 #if HAL_MOUNT_SET_CAMERA_SOURCE_ENABLED
 // set_camera_source is functionally the same as set_lens except primary and secondary lenses are specified by type
 // primary and secondary sources use the AP_Camera::CameraSource enum cast to uint8_t

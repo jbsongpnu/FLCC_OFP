@@ -29,6 +29,10 @@ extern const AP_HAL::HAL& hal;
 #define AP_MOUNT_VIEWPRO_DEBUG 0
 #define debug(fmt, args ...) do { if (AP_MOUNT_VIEWPRO_DEBUG) { GCS_SEND_TEXT(MAV_SEVERITY_INFO, "Viewpro: " fmt, ## args); } } while (0)
 
+// KAL: outgoing-message debug for IR pseudo-color/palette commands.
+// Set to 1 to print the C1-packet fields built by IR_Color_Change() to the GCS.
+#define AP_MOUNT_VIEWPRO_IR_DEBUG 0
+
 const char* AP_Mount_Viewpro::send_text_prefix = "Viewpro:";
 
 // update mount position - should be called periodically
@@ -58,6 +62,20 @@ void AP_Mount_Viewpro::update()
     // request firmware version
     if (!_got_firmware_version) {
         send_comm_config_cmd(CommConfigCmd::QUERY_FIRMWARE_VER);
+    }
+
+    // JB: send any deferred IR-palette packet from the previous tick. The
+    // prelude (IR_RAINBOW) was sent last tick; the gimbal MCU only services
+    // one C1 command per its own scheduler cycle, so we wait one update()
+    // before transmitting the actual color code.
+    if (_palette_pending_color != 0) {
+        send_camera_command(_image_sensor, (CameraCommand)_palette_pending_color, 0);
+#if AP_MOUNT_VIEWPRO_IR_DEBUG
+        GCS_SEND_TEXT(MAV_SEVERITY_INFO,
+                      "%s IR_Color deferred TX op=0x%02X",
+                      send_text_prefix, (unsigned)_palette_pending_color);
+#endif
+        _palette_pending_color = 0;
     }
 
     // send handshake
@@ -852,6 +870,90 @@ bool AP_Mount_Viewpro::set_tracking(TrackingType tracking_type, const Vector2f& 
 
     // should never reach here
     return false;
+}
+
+// change IR camera pseudo-color / palette via C1 packet (KAL)
+// `color` is the 7-bit C1 operation command number (bits 6-12 of the
+// sensor_zoom_cmd field). Caller selects which IR-color op code to send;
+// the specific values will be designated in the next step.
+bool AP_Mount_Viewpro::IR_Color_Change(uint8_t color)
+{
+    if (!_initialised) {
+#if AP_MOUNT_VIEWPRO_IR_DEBUG
+        GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "%s IR_Color: not initialised (color=0x%02X)",
+                      send_text_prefix, (unsigned)color);
+#endif
+        return false;
+    }
+
+    // Palette only makes sense for the IR pipeline. Refuse unless IR is
+    // currently on screen, matching the set_zoom/set_focus convention of
+    // pairing an active op-code with _image_sensor.
+    if (_image_sensor != ImageSensor::IR && _image_sensor != ImageSensor::IR_EO1_PIP) {
+#if AP_MOUNT_VIEWPRO_IR_DEBUG
+        GCS_SEND_TEXT(MAV_SEVERITY_WARNING,
+                      "%s IR_Color: display not IR (disp=%u) - ignored",
+                      send_text_prefix, (unsigned)_image_sensor);
+#endif
+        return false;
+    }
+
+#if AP_MOUNT_VIEWPRO_IR_DEBUG
+    GCS_SEND_TEXT(MAV_SEVERITY_INFO,
+                  "%s IR_Color TX disp=%u op=0x%02X",
+                  send_text_prefix, (unsigned)_image_sensor, (unsigned)color);
+    // report_camera_info();
+#endif
+
+    // For color codes >= 0x21 (IR_COLOR_1..5), send IR_RAINBOW (0x12) first as
+    // a pseudo-color-mode prelude, then defer the actual color packet to the
+    // next update() tick. The gimbal MCU services at most one C1 command per
+    // its own scheduler cycle, so back-to-back sends get the second packet
+    // silently dropped. White-hot (0x0E) and black-hot (0x0F) need no prelude.
+    if (color >= (uint8_t)CameraCommand::IR_COLOR_1) {
+        if (!send_camera_command(_image_sensor, CameraCommand::IR_RAINBOW, 0)) {
+            return false;
+        }
+        _palette_pending_color = color;
+        return true;
+    }
+
+    return send_camera_command(_image_sensor, (CameraCommand)color, 0);
+}
+
+// print connected mount's model name and firmware/protocol version to GCS (KAL)
+// Prints cached values immediately if available, then clears the _got_* latches
+// so update() re-issues QUERY_MODEL / QUERY_FIRMWARE_VER. The existing V-packet
+// handler will print fresh values when the gimbal replies.
+bool AP_Mount_Viewpro::report_camera_info()
+{
+    if (!_initialised) {
+        GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "%s report_camera_info: not initialised", send_text_prefix);
+        return false;
+    }
+
+    if (_got_model_name) {
+        GCS_SEND_TEXT(MAV_SEVERITY_INFO, "%s model: %s",
+                      send_text_prefix, (const char *)_model_name);
+    } else {
+        GCS_SEND_TEXT(MAV_SEVERITY_INFO, "%s model: (no reply yet)", send_text_prefix);
+    }
+
+    if (_got_firmware_version) {
+        const uint8_t major = (_firmware_version >> 0)  & 0xFF;
+        const uint8_t minor = (_firmware_version >> 8)  & 0xFF;
+        const uint8_t patch = (_firmware_version >> 16) & 0xFF;
+        GCS_SEND_TEXT(MAV_SEVERITY_INFO, "%s fw: %u.%u.%u",
+                      send_text_prefix,
+                      (unsigned)major, (unsigned)minor, (unsigned)patch);
+    } else {
+        GCS_SEND_TEXT(MAV_SEVERITY_INFO, "%s fw: (no reply yet)", send_text_prefix);
+    }
+
+    // force a re-query so fresh values arrive in the next ~50ms-1s
+    _got_model_name = false;
+    _got_firmware_version = false;
+    return true;
 }
 
 // set camera lens as a value from 0 to 5

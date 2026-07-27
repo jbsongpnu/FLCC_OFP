@@ -100,7 +100,8 @@ void AP_Mount_Backend::set_angle_target(float roll_deg, float pitch_deg, float y
 {
     // enforce angle limits
     roll_deg = constrain_float(roll_deg, _params.roll_angle_min, _params.roll_angle_max);
-    pitch_deg = constrain_float(pitch_deg, _params.pitch_angle_min, _params.pitch_angle_max);
+    // pitch_deg = constrain_float(pitch_deg, _params.pitch_angle_min, _params.pitch_angle_max); //This is legacy code
+    pitch_deg = constrain_float(-pitch_deg, _params.pitch_angle_min, _params.pitch_angle_max);   //We reverse it for viewpro Camera
     if (!yaw_is_earth_frame) {
         // only limit yaw if in body-frame.  earth-frame yaw limiting is backend specific
         // custom wrap code (instead of wrap_180) to better handle yaw of <= -180

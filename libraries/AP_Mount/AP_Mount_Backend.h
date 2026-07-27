@@ -176,6 +176,12 @@ public:
     // set camera lens as a value from 0 to 5
     virtual bool set_lens(uint8_t lens) { return false; }
 
+    // change IR camera pseudo-color / palette (KAL)
+    virtual bool IR_Color_Change(uint8_t color) { return false; }
+
+    // print connected mount's model name and firmware/protocol version (KAL)
+    virtual bool report_camera_info() { return false; }
+
 #if HAL_MOUNT_SET_CAMERA_SOURCE_ENABLED
     // set_camera_source is functionally the same as set_lens except primary and secondary lenses are specified by type
     // primary and secondary sources use the AP_Camera::CameraSource enum cast to uint8_t

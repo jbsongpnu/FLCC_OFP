@@ -6713,6 +6713,11 @@
       <field type="uint8_t" name="Tracking_CMD" units="N/A">Tracking_CMD[SF:N/A, MIN:N/A, MAX:N/A]</field>
     </message>
 
+    <message id="50004" name="SYS_ICD_GCS_FLCC_OBJECT_AVOIDANCE_CMD">
+    <description>TC4 (OA).</description>
+      <field type="uint8_t" name="OA_Mode" units="N/A">0: Normal, 1: OA Level1, 2: OA Level2[SF:N/A, MIN:0, MAX:2]</field>
+    </message>
+
    <!-- TM -->
     <message id="51001" name="SYS_ICD_FLCC_GCS_PMU_STATUS">
     <description>TM1 (PMU).</description>
@@ -6764,6 +6769,13 @@
       <field type="uint8_t" name="Componet_ID" units="N/A">Componet[SF:N/A, MIN:0, MAX:255]</field>
       <field type="uint8_t" name="PMUCAN_Fail" units="N/A">PMUCAN_Fail[SF:N/A, MIN:0, MAX:5]</field>
       <field type="uint32_t" name="Reserved" units="N/A">Reserved[SF:TBD, MIN:TBD, MAX:TBD]</field>
+    </message>
+
+    <message id="51005" name="SYS_ICD_FLCC_GCS_OBJECT_AVOIDANCE_STATUS">
+    <description>TM5 (OA) Object avoidance status.</description>
+      <field type="uint8_t" name="Object_Avoidance_Status" units="N/A">0:Normal, 1:Warning, 2:Alert[SF:1, MIN:0, MAX:2]</field>
+      <field type="uint8_t" name="Object_Avoidance_Mode" units="N/A">0: Normal, 1: OA Level1, 2: OA Level2[SF:1, MIN:0, MAX:2]</field>
+      <field type="uint8_t" name="Object_Existence" units="N/A">Bit0~Bit7 to Sectors 0~7, 0:none, 1:object exists[SF:N/A, MIN:0, MAX:255]</field>
     </message>
     <!-- KAL -->
 

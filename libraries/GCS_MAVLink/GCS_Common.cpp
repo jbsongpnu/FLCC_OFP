@@ -68,6 +68,8 @@
 #include <AP_LandingGear/AP_LandingGear.h>
 #include <AP_Landing/AP_Landing_config.h>
 #include <AP_Generator/AP_Generator_Loweheiser.h>
+#include <AC_Avoidance/AC_Avoid.h>
+#include <AP_Proximity/AP_Proximity.h>
 
 #include "MissionItemProtocol_Waypoints.h"
 #include "MissionItemProtocol_Rally.h"
@@ -152,6 +154,10 @@ extern mavlink_sys_icd_flcc_gcs_cam_attitude_status_t   CAM_ATTITUDE_STATUS;// M
 
 extern mavlink_sys_icd_flcc_gcs_pmu_status_t            PMU_Status;         // MAVLINK Message for PMU Status (KAL)
 extern mavlink_sys_icd_gcs_flcc_pmu_ctrl_echo_t         PMU_Ctrl_Echo;      // MAVLINK Message for PMU Command ECHO (KAL)
+
+// KAL: incoming-message debug for Viewpro IR pseudo-color/palette commands.
+// Set to 1 to print Tracking_CMD received in handle_gcs_flcc_cam_cmd() to the GCS.
+#define GCS_VIEWPRO_IR_DEBUG 0
 
 // END KAL
 
@@ -610,7 +616,7 @@ void GCS_MAVLINK::send_proximity()
             }
         }
     }
-
+/* Currently, no upward sensor
     // send upward distance
     float dist_up;
     if (proximity->get_upward_distance(dist_up)) {
@@ -628,7 +634,7 @@ void GCS_MAVLINK::send_proximity()
                 MAV_SENSOR_ROTATION_PITCH_90,                             // direction upwards
                 0,                                                        // Measurement covariance in centimeters, 0 for unknown / invalid readings
                 0, 0, nullptr, 0);
-    }
+    }*/
 }
 #endif // HAL_PROXIMITY_ENABLED
 
@@ -1218,6 +1224,10 @@ ap_message GCS_MAVLINK::mavlink_id_to_ap_message_id(const uint32_t mavlink_id) c
 #if AP_MAVLINK_MSG_FLIGHT_INFORMATION_ENABLED
         { MAVLINK_MSG_ID_FLIGHT_INFORMATION, MSG_FLIGHT_INFORMATION},
 #endif
+        { MAVLINK_MSG_ID_SYS_ICD_FLCC_GCS_PMU_STATUS,                   MSG_PMU_STATUS},
+        { MAVLINK_MSG_ID_SYS_ICD_FLCC_GCS_CAM_ATTITUDE_STATUS,          MSG_CAM_STATUS},
+        { MAVLINK_MSG_ID_SYS_ICD_GCS_FLCC_PMU_CTRL_ECHO,                MSG_PMU_CTRL_ECHO},
+		{ MAVLINK_MSG_ID_SYS_ICD_FLCC_GCS_OBJECT_AVOIDANCE_STATUS,      MSG_OBJECT_AVOIDANCE_STATUS},
     };
 
     for (uint8_t i=0; i<ARRAY_SIZE(map); i++) {
@@ -4643,6 +4653,10 @@ void GCS_MAVLINK::handle_message(const mavlink_message_t &msg)
         handle_gcs_flcc_cam_cmd(msg);
         break;
 
+    case MAVLINK_MSG_ID_SYS_ICD_GCS_FLCC_OBJECT_AVOIDANCE_CMD:	// Receive Command to select Object avoidance level (PNU & KAL)
+    	handle_gcs_flcc_object_avoidance_cmd(msg);
+    	break;
+
     }
 
 }
@@ -6762,6 +6776,11 @@ bool GCS_MAVLINK::try_send_message(const enum ap_message id)
         send_message_gcs_flcc_pmu_ctrl_echo();
         break;
 
+    case MSG_OBJECT_AVOIDANCE_STATUS:
+    	CHECK_PAYLOAD_SIZE(SYS_ICD_FLCC_GCS_OBJECT_AVOIDANCE_STATUS);
+    	send_message_flcc_gcs_object_avoidance_status();
+    	break;
+
 #if HAL_HIGH_LATENCY2_ENABLED
     case MSG_HIGH_LATENCY2:
         CHECK_PAYLOAD_SIZE(HIGH_LATENCY2);
@@ -7599,18 +7618,17 @@ void GCS_MAVLINK::send_message_gcs_flcc_cam_status() const
     float roll=0, pitch = 0, yaw = 0, zoom_times = 0;
     if(mount->get_attitude_euler(0, roll, pitch, yaw)) {
 
-        CAM_ATTITUDE_STATUS.Roll_REL_ANG = roll * 10;
-        CAM_ATTITUDE_STATUS.Pitch_REL_ANG = pitch * 10;
-        CAM_ATTITUDE_STATUS.Yaw_REL_ANG = yaw * 10;
+        CAM_ATTITUDE_STATUS.Roll_REL_ANG = CAM_ATTITUDE_STATUS.Roll_IMU_ANG = roll * 10;
+        CAM_ATTITUDE_STATUS.Pitch_REL_ANG = CAM_ATTITUDE_STATUS.Pitch_IMU_ANG = -pitch * 10;    //Reverse the pitch angle to match KGCS style
+        CAM_ATTITUDE_STATUS.Yaw_REL_ANG = CAM_ATTITUDE_STATUS.Pitch_IMU_ANG = yaw * 10;
     } else {
-        CAM_ATTITUDE_STATUS.Roll_REL_ANG = 110;
-        CAM_ATTITUDE_STATUS.Pitch_REL_ANG = 120;
-        CAM_ATTITUDE_STATUS.Yaw_REL_ANG = 130;
+        CAM_ATTITUDE_STATUS.Roll_REL_ANG = CAM_ATTITUDE_STATUS.Roll_IMU_ANG = 0;
+        CAM_ATTITUDE_STATUS.Pitch_REL_ANG = CAM_ATTITUDE_STATUS.Pitch_IMU_ANG = 0;
+        CAM_ATTITUDE_STATUS.Yaw_REL_ANG = CAM_ATTITUDE_STATUS.Pitch_IMU_ANG = 0;
     }
     zoom_times = mount->get_zoom_times(0);
 
     CAM_ATTITUDE_STATUS.Zoom_POS_FB = (int16_t)zoom_times;
-    CAM_ATTITUDE_STATUS.Roll_IMU_ANG = (int16_t)(zoom_times * 10.0);
 
     mavlink_msg_sys_icd_flcc_gcs_cam_attitude_status_send(
             chan,
@@ -7652,6 +7670,14 @@ void GCS_MAVLINK::handle_gcs_flcc_cam_cmd(const mavlink_message_t &msg)
 
     mavlink_sys_icd_gcs_flcc_cam_cmd_t  cam_cmd;
     mavlink_msg_sys_icd_gcs_flcc_cam_cmd_decode(&msg, &cam_cmd);
+
+#if GCS_VIEWPRO_IR_DEBUG
+    // Echo the incoming Tracking_CMD so we can confirm which IR-color request
+    // (14: WhiteHot, 15: BlackHot, 16-19: Color1-4) was received from the GCS.
+    GCS_SEND_TEXT(MAV_SEVERITY_INFO, "FLCC CAM_CMD RX Track=%u Ctrl=%u",
+                  (unsigned)cam_cmd.Tracking_CMD,
+                  (unsigned)cam_cmd.Control_Mode);
+#endif
 
     AP_Q30 *Q30 = AP::Q30();
     if (Q30 == nullptr) {
@@ -7862,6 +7888,82 @@ void GCS_MAVLINK::handle_gcs_flcc_pmu_ctrl(const mavlink_message_t &msg)
                                            gcs().PMU_Ctrl.Engine_Throttle_CMD,
                                            gcs().PMU_Ctrl.Engine_CHK_CMD);
 
+}
+
+// -------------------------------------------------------------------------
+// Send object avoidance status to GCS with Mavlink Message (PNU & KAL)
+// -------------------------------------------------------------------------
+void GCS_MAVLINK::send_message_flcc_gcs_object_avoidance_status() const
+{
+	AP_Proximity *proximity = AP_Proximity::get_singleton();
+	Proximity_Distance_Array dist_array;
+	uint8_t Obj_Exists = 0;		//object existence for 0~7 sectors using bit0~bit7
+	uint8_t warning_level = 0;	//0:none, 1:warning, 2:alert
+	uint16_t temp_distance = 0;	//distance in centimeters
+
+	// static uint16_t debug_temp = 0;//Debug only - remove later
+	// debug_temp++;//Debug only - remove later
+
+	// get min/max distances => ex) Tera Tower Evo has 0.5m and 60m encrypted at AP_Proximity/AP_Proximity_TeraRangerTowerEvo.h, NOT from parameter
+	const uint16_t dist_min = (uint16_t)(proximity->distance_min() * 100.0f); // minimum distance the sensor can measure in centimeters
+	const uint16_t dist_max = (uint16_t)(proximity->distance_max() * 100.0f); // maximum distance the sensor can measure in centimeters
+
+	proximity->get_horizontal_distances(dist_array);
+
+	if (proximity == nullptr) {
+		return;
+	}
+	for (uint8_t i=0; i < 8; i++){
+		temp_distance = (uint16_t)(dist_array.distance[i] * 100.0);
+		if((temp_distance >= dist_min) && (temp_distance < dist_max)){
+			Obj_Exists |= (1<<i);
+			if(temp_distance <= 1000){
+				warning_level |= 2;
+			}else if(temp_distance <= 1500){
+				warning_level |= 1;
+			}
+		}
+		//Debug only - remove later
+		// if(debug_temp>=50){
+		// 	gcs().send_text(MAV_SEVERITY_INFO, "Obj %d %d %d", i, Obj_Exists, temp_distance);
+		// }//Debug only - remove later
+	}
+	// if(debug_temp>=50)debug_temp = 0;//Debug only - remove later
+
+	if(warning_level>2)warning_level=2;
+	gcs().OA_Status.Object_Avoidance_Status = warning_level;
+	gcs().OA_Status.Object_Existence = Obj_Exists;
+	mavlink_msg_sys_icd_flcc_gcs_object_avoidance_status_send(
+			chan,
+			gcs().OA_Status.Object_Avoidance_Status,
+			gcs().OA_Status.Object_Avoidance_Mode,
+			gcs().OA_Status.Object_Existence);
+
+}
+
+// -------------------------------------------------------------------------
+// Receive Object Avoidance Level Control Command from GCS with Mavlink Message
+// -------------------------------------------------------------------------
+void GCS_MAVLINK::handle_gcs_flcc_object_avoidance_cmd(const mavlink_message_t &msg)
+{
+	AC_Avoid *avoid = AP::ac_avoid();
+	mavlink_msg_sys_icd_gcs_flcc_object_avoidance_cmd_decode(&msg, &gcs().GCS_Ctrl_OA_Mode);	//save OA_Mode to 'GCS_Ctrl_OA_Mode'
+
+	if(gcs().prev_Ctrl_OA_Mode != gcs().GCS_Ctrl_OA_Mode.OA_Mode){
+		//Currently, KGCS is keep sending this, so detect change of mode
+		if(gcs().GCS_Ctrl_OA_Mode.OA_Mode){
+			//For OA level 1 or 2, turn on OA
+			gcs().OA_Status.Object_Avoidance_Mode = gcs().GCS_Ctrl_OA_Mode.OA_Mode;
+			avoid->proximity_avoidance_enable(true);	//force on - no need to check current state
+			gcs().send_text(MAV_SEVERITY_CRITICAL, "GCS command Avoidance ON Level %d", gcs().GCS_Ctrl_OA_Mode.OA_Mode);
+		}else{
+			//For OA zero, turn off OA
+			gcs().OA_Status.Object_Avoidance_Mode = 0;
+			avoid->proximity_avoidance_enable(false);
+			gcs().send_text(MAV_SEVERITY_CRITICAL, "GCS command Avoidance OFF");
+		}
+		gcs().prev_Ctrl_OA_Mode = gcs().GCS_Ctrl_OA_Mode.OA_Mode;
+	}
 }
 
 #endif  // HAL_GCS_ENABLED

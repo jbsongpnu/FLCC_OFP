@@ -83,7 +83,8 @@ void AP_Q30::send_cmd_speed(mavlink_sys_icd_gcs_flcc_cam_cmd_t cmd)
     // sets rate target in deg/s
     // yaw_lock should be true if the yaw rate is earth-frame, false if body-frame (e.g. rotates with body of vehicle)
     // void AP_Mount_Backend::set_rate_target(float roll_degs, float pitch_degs, float yaw_degs, bool yaw_is_earth_frame)
-    mount->set_rate_target(0,cmd.Pitch_Speed_CMD,cmd.Yaw_Speed_CMD, 0);
+    // Pitch_Speed_CMD is now reversed
+    mount->set_rate_target(0,-cmd.Pitch_Speed_CMD,cmd.Yaw_Speed_CMD, 0);
     
 }
 
@@ -237,6 +238,9 @@ void AP_Q30::no_control_mode_operation(mavlink_sys_icd_gcs_flcc_cam_cmd_t cam_cm
 // -------------------------------------------------------------------------
 void AP_Q30::IR_operation(mavlink_sys_icd_gcs_flcc_cam_cmd_t cam_cmd)
 {
+    static uint8_t prev_IR_zoom_cmd = 20;
+    static uint8_t prev_EO_zoom_cmd = 0;
+    static uint8_t EO_zoom_pct = 1;
     AP_Mount *mount = AP::mount();
     if (mount == nullptr) {
         return;
@@ -277,43 +281,42 @@ void AP_Q30::IR_operation(mavlink_sys_icd_gcs_flcc_cam_cmd_t cam_cmd)
     }
     // gcs().send_text(MAV_SEVERITY_ERROR,"Zoom %u Foc %u Rec %u Trk %u IR %u", debug_cam_zoom_cmd, debug_cam_focus_cmd, debug_cam_record_cmd, debug_cam_track_cmd, debug_cam_ir_cmd);
 
-    //IR color is not supported by Ardupilot yet
-
-    // // Control Image Color
-    // if(cam_cmd.Tracking_CMD==14U)               // White Hot
-    // {
-    //     send_cmd_ir_color(0x00, 0x01, 0xba);
-    //     debug_cam_ir_cmd = 2U; //debug //0: not sent, 1: mode, 2: coler, 3: zoom
-    // }
-    // else if(cam_cmd.Tracking_CMD==15U)          // Black Hot
-    // {
-    //     send_cmd_ir_color(0x00, 0x00, 0xb9);
-    //     debug_cam_ir_cmd = 2U; //debug //0: not sent, 1: mode, 2: coler, 3: zoom
-    // }
-    // else if(cam_cmd.Tracking_CMD==16U)          // Color 1
-    // {
-    //     send_cmd_ir_color(0x01, 0x00, 0xba);
-    //     debug_cam_ir_cmd = 2U; //debug //0: not sent, 1: mode, 2: coler, 3: zoom
-    // }
-    // else if(cam_cmd.Tracking_CMD==17U)          // Color 2
-    // {
-    //     send_cmd_ir_color(0x02, 0x00, 0xbb);
-    //     debug_cam_ir_cmd = 2U; //debug //0: not sent, 1: mode, 2: coler, 3: zoom
-    // }
-    // else if(cam_cmd.Tracking_CMD==18U)          // Color 3
-    // {
-    //     send_cmd_ir_color(0x03, 0x00, 0xbc);
-    //     debug_cam_ir_cmd = 2U; //debug //0: not sent, 1: mode, 2: coler, 3: zoom
-    // }
-    // else if(cam_cmd.Tracking_CMD==19U)          // Color 4
-    // {
-    //     send_cmd_ir_color(0x04, 0x00, 0xbd);
-    //     debug_cam_ir_cmd = 2U; //debug //0: not sent, 1: mode, 2: coler, 3: zoom
-    // }
-    // else
-    // {
-    //     //nothing
-    // }
+    // Control Image Color (IR pseudo-color palette via Viewpro C1 packet)
+    if(cam_cmd.Tracking_CMD==14U)               // White Hot
+    {
+        mount->IR_Color_Change(0, 0x0E);
+        debug_cam_ir_cmd = 2U; //debug //0: not sent, 1: mode, 2: coler, 3: zoom
+    }
+    else if(cam_cmd.Tracking_CMD==15U)          // Black Hot
+    {
+        mount->IR_Color_Change(0, 0x0F);
+        debug_cam_ir_cmd = 2U; //debug //0: not sent, 1: mode, 2: coler, 3: zoom
+    }
+    else if(cam_cmd.Tracking_CMD==16U)          // Color 1
+    {
+        mount->IR_Color_Change(0, 0x21);
+        debug_cam_ir_cmd = 2U; //debug //0: not sent, 1: mode, 2: coler, 3: zoom
+    }
+    else if(cam_cmd.Tracking_CMD==17U)          // Color 2
+    {
+        mount->IR_Color_Change(0, 0x22);
+        debug_cam_ir_cmd = 2U; //debug //0: not sent, 1: mode, 2: coler, 3: zoom
+    }
+    else if(cam_cmd.Tracking_CMD==18U)          // Color 3
+    {
+        // mount->IR_Color_Change(0, 0x23);
+        mount->IR_Color_Change(0, 0x0E);
+        debug_cam_ir_cmd = 2U; //debug //0: not sent, 1: mode, 2: coler, 3: zoom
+    }
+    else if(cam_cmd.Tracking_CMD==19U)          // Color 4
+    {
+        // mount->IR_Color_Change(0, 0x24);
+        mount->IR_Color_Change(0, 0x0F);
+        debug_cam_ir_cmd = 2U; //debug //0: not sent, 1: mode, 2: coler, 3: zoom
+    }
+    // Tracking_CMD == 20 is intentionally left unassigned for future use.
+    // NOTE : For recent Viewpro camear, color options 2~4 are not supported, but only Red color is supported by IR Rainbow command
+    // NOTE : Thereore, any color 1~4 may show Red IR option.
 
     //IR zoom => Now control main source zoom
 
@@ -322,41 +325,57 @@ void AP_Q30::IR_operation(mavlink_sys_icd_gcs_flcc_cam_cmd_t cam_cmd)
         debug_cam_ir_cmd = 3U; //debug //0: not sent, 1: mode, 2: coler, 3: zoom
 
         if (_primary_EOIR_source == 1) {    //This case will lead to zoom EO
-            switch (cam_cmd.Tracking_CMD) 
+            if (cam_cmd.Tracking_CMD > prev_EO_zoom_cmd) 
             {
-                case 21:    //Zoom x1
-                    mount->set_zoom(0, ZoomType::PCT, 1.0);
-                break;
-                case 22:    //Zoom x2
-                    mount->set_zoom(0, ZoomType::PCT, 2.0);
-                break;
-                case 23:    //Zoom x3
-                    mount->set_zoom(0, ZoomType::PCT, 15.0);
-                break;
-                case 24:    //Zoom x4
-                    mount->set_zoom(0, ZoomType::PCT, _Max_zoom_EO);
-                break;
-                default:
-                break;
+                EO_zoom_pct++;
             }
+            else if(cam_cmd.Tracking_CMD < prev_EO_zoom_cmd) 
+            {
+                EO_zoom_pct--;
+            } 
+            else //for cam_cmd.Tracking_CMD == prev_IR_zoom_cmd case
+            {
+                if (cam_cmd.Tracking_CMD == 21)  //same as ((prev_IR_zoom_cmd == 21) && (cam_cmd.Tracking_CMD == 21)
+                {
+                    EO_zoom_pct--;
+                }
+                else if (cam_cmd.Tracking_CMD == 24)
+                {
+                    EO_zoom_pct++;
+                }
+            }
+            //constrain
+            if(EO_zoom_pct > _Max_zoom_EO) 
+            {
+                EO_zoom_pct = _Max_zoom_EO;
+            }
+            if(EO_zoom_pct < 1) 
+            {
+                EO_zoom_pct = 1;
+            }
+            mount->set_zoom(0, ZoomType::PCT, EO_zoom_pct);
+            prev_EO_zoom_cmd = cam_cmd.Tracking_CMD;
         } else if (_primary_EOIR_source == 2) { //This case will lead to zoom IR
-            switch (cam_cmd.Tracking_CMD) 
+            if (cam_cmd.Tracking_CMD > prev_IR_zoom_cmd) 
             {
-                case 21:    //Zoom x1
-                    mount->set_zoom(0, ZoomType::PCT, 1.0);
-                break;
-                case 22:    //Zoom x2
-                    mount->set_zoom(0, ZoomType::PCT, 2.0);
-                break;
-                case 23:    //Zoom x3
-                    mount->set_zoom(0, ZoomType::PCT, 3.0);
-                break;
-                case 24:    //Zoom x4
-                    mount->set_zoom(0, ZoomType::PCT, _Max_zoom_IR);
-                break;
-                default:
-                break;
+                mount->set_zoom(0, ZoomType::RATE, 1.0);
             }
+            else if(cam_cmd.Tracking_CMD < prev_IR_zoom_cmd) 
+            {
+                mount->set_zoom(0, ZoomType::RATE, -1.0);
+            } 
+            else //for cam_cmd.Tracking_CMD == prev_IR_zoom_cmd case
+            {
+                if (cam_cmd.Tracking_CMD == 21)  //same as ((prev_IR_zoom_cmd == 21) && (cam_cmd.Tracking_CMD == 21)
+                {
+                    mount->set_zoom(0, ZoomType::RATE, -1.0);
+                }
+                else if (cam_cmd.Tracking_CMD == 24)
+                {
+                    mount->set_zoom(0, ZoomType::RATE, 1.0);
+                }
+            }
+            prev_IR_zoom_cmd = cam_cmd.Tracking_CMD;
         }
     }
     

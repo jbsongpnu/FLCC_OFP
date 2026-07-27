@@ -120,5 +120,6 @@ enum ap_message : uint8_t {
 	MSG_PMU_STATUS,                 // Mavlink Message to send PMU_STATUS (KAL)
     MSG_CAM_STATUS,                 // Mavlink Message to send CAM_STATUS (KAL)
 	MSG_PMU_CTRL_ECHO,              // Mavlink Message to send PMU_CMD_EGHO (KAL)
+    MSG_OBJECT_AVOIDANCE_STATUS,
     MSG_LAST // MSG_LAST must be the last entry in this enum
 };

@@ -1,6 +1,15 @@
 # Work Note for KAL FLCC version-up from 4.6.2
 
- - V4.0.6. Release of the FIRMWARE_VERSION as 4.0.6
+ - V4.0.8. Release of the FIRMWARE_VERSION 4.0.8
+    - Added mission code for proximity sensor for KGCS
+ - V4.0.7. Release of the FIRMWARE_VERSION 4.0.7  
+    - Enable IR color control (AP_Mount_Viewpro::IR_Color_Change, AP_Mount::IR_Color_Change, AP_Mount_Backend::IR_Color_Change)  
+    - For debugging, AP_MOUNT_VIEWPRO_IR_DEBUG and GCS_VIEWPRO_IR_DEBUG source control is added(disabled for release but they can be used later)  
+    - AP_Mount_Viewpro::report_camera_info() function is added to check camera model name and firmware version  
+    - In AP_Mount_Backend::set_angle_target() function which sends command for camera's angle control, is now reversed with the pitch angle control to match former GCS command style  
+    - IR Zoom is enabled in AP_Q30::IR_operation  
+    - EO and IR Zoom now has incremetally increasing zoom level 
+ - V4.0.6. Release of the FIRMWARE_VERSION as 4.0.6  
     - Disabled unwanted GCS message, unnecessary log of PMU debug message.  
     - Limit PMU's allowed  RX session to 1 ms and 20 RX frames.  
     - Added null point detection for gimbal class in handle_gcs_flcc_cam_cmd() of GCS_Common.cpp
