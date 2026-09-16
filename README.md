@@ -1,5 +1,9 @@
 # Work Note for KAL FLCC version-up from 4.7.1
 
+ - V5.0.6. Release of the FIRMWARE_VERSION as 5.0.6 (folds old V4.0.5 + V4.0.6)
+    - version.h: THISFIRMWARE "PNU_OFP V5.0.6-dev", FW 5/0/6, base FIRMWARE_VERSION kept at 4,7,1
+    - Removed now-unused Q30 serial protocol (SerialProtocol_Q30, AP_SERIALMANAGER_Q30_*) after camera moved to AP_Mount_Viewpro
+    - PMU RX session limited to 1ms / 20 frames; gimbal null-check in handle_gcs_flcc_cam_cmd()
  - V5.0.05. Camera control changed to legacy AP_Mount/AP_Mount_Viewpro for Viewpro camera
     - Abandoned the standalone AP_Q30 serial driver; camera routes through AP_Mount_Viewpro
     - Added get_zoom_times() to AP_Mount/AP_Mount_Backend/AP_Mount_Viewpro; zoom formula + ZOOM_MAX 10->30

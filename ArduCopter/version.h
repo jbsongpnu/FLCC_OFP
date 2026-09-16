@@ -6,14 +6,14 @@
 
 #include "ap_version.h"
 
-#define THISFIRMWARE "ArduCopter V4.7.1"
+#define THISFIRMWARE "PNU_OFP V5.0.6-dev"
 
 // the following line is parsed by the autotest scripts
 #define FIRMWARE_VERSION 4,7,1,FIRMWARE_VERSION_TYPE_OFFICIAL
 
-#define FW_MAJOR 4
-#define FW_MINOR 7
-#define FW_PATCH 1
+#define FW_MAJOR 5
+#define FW_MINOR 0
+#define FW_PATCH 6
 #define FW_TYPE FIRMWARE_VERSION_TYPE_OFFICIAL
 
 #include <AP_Common/AP_FWVersionDefine.h>

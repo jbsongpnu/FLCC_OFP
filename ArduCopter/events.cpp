@@ -553,9 +553,9 @@ void Copter::failsafe_pmucan_check()
     }
 
     // Log Data
-    AP::logger().Write("CAN1","TimeUS,CANF","QB",
-                    AP_HAL::micros64(),
-                    PMU_Ctrl_Echo.PMUCAN_Fail);
+    // AP::logger().Write("CAN1","TimeUS,CANF","QB",
+    //                 AP_HAL::micros64(),
+    //                 PMU_Ctrl_Echo.PMUCAN_Fail);
 
 
     // Check Condition : Already Failfe or Not Arming
@@ -571,10 +571,10 @@ void Copter::failsafe_pmucan_check()
     AP::logger().Write_Error(LogErrorSubsystem::FAILSAFE_PMU,  LogErrorCode::FAILSAFE_OCCURRED);
 
     // Log Data
-    AP::logger().Write("CAN2","TimeUS,PCFS,CANF","QBB",
-                        AP_HAL::micros64(),
-                        failsafe.pmucan,
-                        PMU_Ctrl_Echo.PMUCAN_Fail);
+    // AP::logger().Write("CAN2","TimeUS,PCFS,CANF","QBB",
+    //                     AP_HAL::micros64(),
+    //                     failsafe.pmucan,
+    //                     PMU_Ctrl_Echo.PMUCAN_Fail);
 
 
     // Check Condition : Disarm

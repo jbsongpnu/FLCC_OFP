@@ -151,6 +151,8 @@ private:
     uint32_t pmucan_period_us;
 
     static const uint16_t PMUCAN_SEND_TIMEOUT_US = 500;
+    static const uint16_t PMUCAN_RX_MAX_TIME_US = 1000;   // Max 1ms for RX processing
+    static const uint8_t  PMUCAN_RX_MAX_FRAMES = 20;      // Max 20 frames per RXspin call
 
     enum PMUCAN_STATUS : uint8_t{ // Status Manage
         CONNECTED               = 0,

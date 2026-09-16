@@ -300,19 +300,21 @@ void AP_PMUCAN::RXspin()
                 PMUCAN_ErrCnt = PMUCAN_ErrCnt - 1;    // Decrease Error Count
             }
 
-            while(res > 0)
+            const uint64_t rx_start_us = AP_HAL::micros64();
+            uint8_t frame_count = 0;
+            //Preventing stuck in a while-loop
+            while(res > 0 &&
+                  frame_count < PMUCAN_RX_MAX_FRAMES &&
+                  (AP_HAL::micros64() - rx_start_us) < PMUCAN_RX_MAX_TIME_US)
             {
-                if (flags & pmucan::CanIOFlagLoopback)
+                if (!(flags & pmucan::CanIOFlagLoopback))
                 {
-//                    Not Used
-                }
-                else
-                {
-                    // hal.util->perf_count(_perf_rcv_num_cnt); // KAL 23.05.23 -- REMOVED 
+                    // hal.util->perf_count(_perf_rcv_num_cnt); // KAL 23.05.23 -- REMOVED
                     handleFrame(frame);
                 }
 
                 res = _can_iface->receive(frame, time, flags);     // Try Receive
+                frame_count++;
             }
         }
         else        // Data Not Received
@@ -341,19 +343,21 @@ void AP_PMUCAN::RXspin()
                 PMUCAN_RcvrCnt      = 0; // Reset Error Count
             }
 
-            while(res > 0)
+            const uint64_t rx_start_us = AP_HAL::micros64();
+            uint8_t frame_count = 0;
+            //Preventing stuck in a while-loop
+            while(res > 0 &&
+                  frame_count < PMUCAN_RX_MAX_FRAMES &&
+                  (AP_HAL::micros64() - rx_start_us) < PMUCAN_RX_MAX_TIME_US)
             {
-                if (flags & pmucan::CanIOFlagLoopback)
+                if (!(flags & pmucan::CanIOFlagLoopback))
                 {
-//                    Not Used
-                }
-                else
-                {
-                    // hal.util->perf_count(_perf_rcv_num_cnt); // KAL 23.05.23 -- REMOVED 
+                    // hal.util->perf_count(_perf_rcv_num_cnt); // KAL 23.05.23 -- REMOVED
                     handleFrame(frame);
                 }
 
                 res = _can_iface->receive(frame, time, flags);     // Try Receive
+                frame_count++;
             }
 
         }
