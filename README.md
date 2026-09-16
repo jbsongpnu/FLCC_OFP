@@ -1,5 +1,9 @@
 # Work Note for KAL FLCC version-up from 4.7.1
 
+ - V5.0.8. Release of the FIRMWARE_VERSION as 5.0.8
+    - IR color/palette control (IR_Color_Change), report_camera_info(), incremental EO/IR zoom for Viewpro
+    - set_angle_target() pitch reversed for Viewpro; proximity/object-avoidance mission code for KGCS
+    - common.xml OA messages (50004, 51005) already present from V5.0.01
  - V5.0.6. Release of the FIRMWARE_VERSION as 5.0.6 (folds old V4.0.5 + V4.0.6)
     - version.h: THISFIRMWARE "PNU_OFP V5.0.6-dev", FW 5/0/6, base FIRMWARE_VERSION kept at 4,7,1
     - Removed now-unused Q30 serial protocol (SerialProtocol_Q30, AP_SERIALMANAGER_Q30_*) after camera moved to AP_Mount_Viewpro
