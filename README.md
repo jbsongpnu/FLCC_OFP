@@ -1,5 +1,8 @@
 # Work Note for KAL FLCC version-up from 4.7.1
 
+ - V5.0.03. Applying basic Mavlink messages of KAL HD ICD, definition of serial ports
+    - Wired KAL RX/TX handlers into GCS_Common.cpp (handle_message / try_send_message), added MSG_PMU_STATUS/MSG_CAM_STATUS/MSG_PMU_CTRL_ECHO to ap_message.h
+    - Filled in AP_Q30 library, added KAL serial protocol + arming/logger/OSD hooks
  - V5.0.02. Applying basic library folder structure (AP_PMUCAN, AP_Q30). Updated Mavlink definition(common.xml)
     - Added AP_PMUCAN and AP_Q30 skeleton libraries and registered them in ArduCopter/wscript
     - common.xml messages (50001,50002,51001,51002,51003) already applied in V5.0.01
