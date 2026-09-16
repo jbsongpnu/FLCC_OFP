@@ -1,5 +1,8 @@
 # Work Note for KAL FLCC version-up from 4.7.1
 
+ - V5.0.02. Applying basic library folder structure (AP_PMUCAN, AP_Q30). Updated Mavlink definition(common.xml)
+    - Added AP_PMUCAN and AP_Q30 skeleton libraries and registered them in ArduCopter/wscript
+    - common.xml messages (50001,50002,51001,51002,51003) already applied in V5.0.01
  - V5.0.01. Starting version-up process from 4.6.2 to 4.7.1
     - Rebuilt common.xml on pristine 4.7.1 upstream and appended the 7 KAL HD ICD messages (id 50001,50002,50004,51001,51002,51003,51005)
     - Re-applied cubepilot.xml id fix (50001~50005 -> 70001~70005)
