@@ -49,6 +49,7 @@ public:
         GPGGA   = (1<<0),
         GPRMC   = (1<<1),
         PASHR   = (1<<2),
+        GPVTG   = (1<<3),
     };
 
     static const struct AP_Param::GroupInfo var_info[];

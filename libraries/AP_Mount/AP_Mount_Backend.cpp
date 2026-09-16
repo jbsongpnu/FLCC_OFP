@@ -383,6 +383,9 @@ void AP_Mount_Backend::set_target_sysid(uint8_t sysid)
 // send a GIMBAL_DEVICE_ATTITUDE_STATUS message to GCS
 void AP_Mount_Backend::send_gimbal_device_attitude_status(mavlink_channel_t chan)
 {
+    // KAL: disable GIMBAL_DEVICE_ATTITUDE_STATUS (msg 285) due to error in KGCS
+    return;
+
     if (suppress_heartbeat()) {
         // block heartbeat from transmitting to the GCS
         GCS_MAVLINK::disable_channel_routing(chan);

@@ -41,6 +41,7 @@
 
 #include <AP_Common/sorting.h>
 #include <AP_Logger/AP_Logger.h>
+#include <AP_PMUCAN/AP_PMUCAN.h>
 
 extern const AP_HAL::HAL& hal;
 
@@ -213,6 +214,13 @@ void AP_CANManager::init()
             AP_Param::load_object_from_eeprom((AP_PiccoloCAN*)_drivers[drv_num], AP_PiccoloCAN::var_info);
             break;
 #endif
+        case AP_CAN::Protocol::PMUCAN :
+            _drivers[drv_num] = _drv_param[drv_num]._pmucan = NEW_NOTHROW AP_PMUCAN;
+            if (_drivers[drv_num] == nullptr) {
+                AP_BoardConfig::allocation_error("PMUCAN %d", drv_num + 1);
+                continue;
+            }
+            break;
         default:
             continue;
         }

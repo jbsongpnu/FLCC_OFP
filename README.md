@@ -1,5 +1,14 @@
 # Work Note for KAL FLCC version-up from 4.7.1
 
+ - V5.0.05. Camera control changed to legacy AP_Mount/AP_Mount_Viewpro for Viewpro camera
+    - Abandoned the standalone AP_Q30 serial driver; camera routes through AP_Mount_Viewpro
+    - Added get_zoom_times() to AP_Mount/AP_Mount_Backend/AP_Mount_Viewpro; zoom formula + ZOOM_MAX 10->30
+    - Disabled GIMBAL_DEVICE_ATTITUDE_STATUS (msg 285) via early-return in AP_Mount_Backend (KGCS error)
+    - Runtime params: SERIAL4_PROTOCOL=8, SERIAL4_BAUD=115, MNT1_TYPE=11, CAM1_TYPE=4
+ - V5.0.04. Applying PMUCAN, full Mavlink, logger codes
+    - Added AP_PMUCAN CAN driver (registered as AP_CAN::Protocol::PMUCAN=15 in AP_CANManager)
+    - Ported to 4.7.1 AP_CANDriver::init(uint8_t) (dropped enable_filters); kept HAL_CANMANAGER_ENABLED guards (dropped the 4.6.2 guard-comment hack)
+    - 3-way merged AP_NMEA_Output.cpp onto 4.7.1 AHRS API; KAL GGA/VTG output, PASHR removed
  - V5.0.03. Applying basic Mavlink messages of KAL HD ICD, definition of serial ports
     - Wired KAL RX/TX handlers into GCS_Common.cpp (handle_message / try_send_message), added MSG_PMU_STATUS/MSG_CAM_STATUS/MSG_PMU_CTRL_ECHO to ap_message.h
     - Filled in AP_Q30 library, added KAL serial protocol + arming/logger/OSD hooks
