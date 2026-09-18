@@ -6,7 +6,7 @@
 
 #include "ap_version.h"
 
-#define THISFIRMWARE "PNU_OFP V5.0.8-dev"
+#define THISFIRMWARE "PNU_OFP V5.0.8"
 
 // the following line is parsed by the autotest scripts
 #define FIRMWARE_VERSION 4,7,1,FIRMWARE_VERSION_TYPE_OFFICIAL
