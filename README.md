@@ -1,13 +1,15 @@
 # Migration Break Point for Future Updates
 - This branch will update Copter-4.7.1 to FLCC V5.0.8 step-by-step to find new commit break points for future updates.
-- IN THIS VERSION : Step 1 - MAVLink dialects
-
+- IN THIS VERSION : Step 2 - Enum & ID registry
+   - Changes in AP_SerialManager, AP_OSD_ParamSetting.cpp was not required - deleted
+- PNU-KAL Specific options
+   - CAN Driver Option for PMU : CAN_D1_PROTOCOL = 15 
 <Planned Commit Breaks and Migration Steps>
 
 | # | Step | Files | Needs | Unblocks |
 |:---:|---|---|---|---|
 | 1 | MAVLink dialect | `Forced Submodule File/` ×2 | — | 2, 5, 6, 8, 9 |
-| 2 | Enum & ID registry | `ModeReason.h`, `AP_Logger.h`, `AP_Arming.h`, `AP_CAN.h`, `AP_SerialManager.h`, `AP_OSD_ParamSetting.cpp`, `ap_message.h`, `GCS.h`, `AP_Arming.cpp` | 1 | 5, 6, 7, 8, 9 |
+| 2 | Enum & ID registry | `ModeReason.h`, `AP_Logger.h`, `AP_Arming.h`, `AP_CAN.h`, `ap_message.h`, `GCS.h`, `AP_Arming.cpp` | 1 | 5, 6, 7, 8, 9 |
 | 3 | Gimbal driver | `AP_Mount.{cpp,h}`, `AP_Mount_Backend.{cpp,h}`, `AP_Mount_Viewpro.{cpp,h}` | — | 6, 8 |
 | 4 | Version & repo meta | `version.h`, `README.md`, `.gitignore` | — | — |
 | 5 | PMU CAN stack | `AP_PMUCAN/` ×6, `AP_CANManager.{h,cpp}`, `wscript` (PMUCAN line only) | 1, 2 | 7, 8 |

@@ -1351,7 +1351,8 @@ bool AP_Arming::can_checks(bool report)
                 case AP_CAN::Protocol::Scripting:
                 case AP_CAN::Protocol::Scripting2:
                 case AP_CAN::Protocol::KDECAN:
-
+                case AP_CAN::Protocol::PMUCAN:
+                //PNU : Required to compile, but zero runtime effect.
                     break;
             }
         }
@@ -2145,7 +2146,10 @@ void AP_Arming::check_forced_logging(const AP_Arming::Method method)
             // keep logging for longer if disarmed for a bad reason
             AP::logger().set_long_log_persist(true);
             return;
-
+        case Method::FAILSAFE_PMU: // PNU
+            // keep logging for longer if disarmed for a bad reason
+            AP::logger().set_long_log_persist(true);
+            return;
         case Method::RUDDER:
         case Method::TOYMODE:
         case Method::MAVLINK:

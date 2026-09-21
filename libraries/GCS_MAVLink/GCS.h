@@ -34,6 +34,15 @@
 
 #define GCS_DEBUG_SEND_MESSAGE_TIMINGS 0
 
+// PNU : FLCC OFP version reported to the PMU over CAN and to the GCS in TM1
+// (AP_PMUCAN.cpp -> PMU_Status.Version_FLCC_*, int8_t each). Base ArduPilot is 4.7.1.
+// Keep these in step with ArduCopter/version.h FW_MAJOR/FW_MINOR/FW_PATCH.
+// NOTE: write these as plain decimal - a leading zero makes the literal octal,
+// so 08 / 09 will not compile.
+#define OFP_VER_MAIN        5
+#define OFP_VER_SUB         0
+#define OFP_VER_REV         8
+
 #ifndef HAL_GCS_ALLOW_PARAM_SET_DEFAULT
 #define HAL_GCS_ALLOW_PARAM_SET_DEFAULT 1
 #endif  // HAL_GCS_IGNORE_PARAM_SET_DEFAULT
@@ -723,6 +732,15 @@ protected:
     MAV_RESULT handle_command_set_ekf_source_set(const mavlink_command_int_t &packet);
     MAV_RESULT handle_command_airframe_configuration(const mavlink_command_int_t &packet);
 
+// ==================================================================================
+// KAL OFP Firmware version : OFP_Orange v1.99.1
+// Data  : 21/04/30 
+// ==================================================================================
+    // Declare Functions for Handling Mavlink Message
+    void handle_gcs_flcc_cam_cmd(const mavlink_message_t &msg);                 // Handle Message of 'gcs_flcc_cam_cmd' (KAL)
+    void handle_gcs_flcc_pmu_ctrl(const mavlink_message_t &msg);                // Handle Message of 'gcs_flcc_pmu_cmd' (KAL)
+    void handle_gcs_flcc_object_avoidance_cmd(const mavlink_message_t &msg);    // Handle Message of 'GCS_FLCC_OBJECT_AVOIDANCE_CMD' (PNU & KAL)
+
     /*
       handle MAV_CMD_CAN_FORWARD and CAN_FRAME messages for CAN over MAVLink
      */
@@ -1108,6 +1126,20 @@ private:
     bool send_available_modes();
     bool send_available_mode_monitor();
 
+// ==================================================================================
+// KAL OFP Firmware version : OFP_Orange v1.99.1
+// Data  : 21/04/30 
+// ==================================================================================
+    // -------------------------------------------------------------------------
+    // Declare Functions to parse data with CAM
+    void send_message_gcs_flcc_cam_status() const;                                      // Send CAM Status to GCS with Mavlink Message (KAL)
+    void send_message_gcs_flcc_pmu_status() const;                                      // Send PMU Status to GCS with Mavlink Message (KAL)
+    void send_message_gcs_flcc_pmu_ctrl_echo() const;                                   // Send PMU Command(Echo) to GCS with Mavlink Message (KAL)
+
+    // -------------------------------------------------------------------------
+    // Declare extra additional functions
+    void send_message_flcc_gcs_object_avoidance_status() const;		//Send object avoidance status to GCS with Mavlink Message (PNU & KAL)
+
 };
 
 /// @class GCS
@@ -1207,6 +1239,15 @@ public:
     static class MissionItemProtocol *missionitemprotocols[3];
     class MissionItemProtocol *get_prot_for_mission_type(const MAV_MISSION_TYPE mission_type) const;
     void try_send_queued_message_for_type(MAV_MISSION_TYPE type) const;
+
+// ==================================================================================
+// KAL OFP Firmware version : UNCLASSIFIED
+// ==================================================================================
+    mavlink_sys_icd_gcs_flcc_pmu_ctrl_t    PMU_Ctrl;                                        // MAVLINK Message for PMU Command (KAL)
+    uint8_t PMU_Ctrl_Seq;                                                                   // Sequence Number of PMU Control Command (KAL)
+    mavlink_sys_icd_gcs_flcc_object_avoidance_cmd_t		GCS_Ctrl_OA_Mode;					// MAVLINK Message for Object Avoidance Level Control (PNU & KAL)
+    mavlink_sys_icd_flcc_gcs_object_avoidance_status_t	OA_Status;							// MAVLINK Message sent to GCS for Object Avoidance Status (PNU & KAL)
+    uint8_t prev_Ctrl_OA_Mode = 4;
 
     void update_send();
     void update_receive();

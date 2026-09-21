@@ -140,7 +140,11 @@ enum class LogErrorSubsystem : uint8_t {
     PILOT_INPUT = 28,
     FAILSAFE_VIBE = 29,
     INTERNAL_ERROR = 30,
-    FAILSAFE_DEADRECKON = 31
+    FAILSAFE_DEADRECKON = 31,
+// ==================================================================================
+// PNU - KAL OFP Firmware version
+// ==================================================================================
+    FAILSAFE_PMU            = 99,     // PNU : PMU Failsafe Error Code (KAL)
 };
 
 // bizarrely this enumeration has lots of duplicate values, offering
