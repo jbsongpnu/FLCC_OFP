@@ -118,9 +118,9 @@ enum ap_message : uint8_t {
 // ==================================================================================
 // PNU - KAL OFP Firmware version 
 // ==================================================================================
-	MSG_PMU_STATUS,                 // PNU : Mavlink Message to send PMU_STATUS (KAL)
-    MSG_CAM_STATUS,                 // PNU : Mavlink Message to send CAM_STATUS (KAL)
-	MSG_PMU_CTRL_ECHO,              // PNU : Mavlink Message to send PMU_CMD_EGHO (KAL)
+	MSG_PMU_STATUS,                 // PNU : Mavlink Message to send PMU_STATUS
+    MSG_CAM_STATUS,                 // PNU : Mavlink Message to send CAM_STATUS
+	MSG_PMU_CTRL_ECHO,              // PNU : Mavlink Message to send PMU_CMD_EGHO
     MSG_OBJECT_AVOIDANCE_STATUS,
     MSG_LAST // MSG_LAST must be the last entry in this enum
 };

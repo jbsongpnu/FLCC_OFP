@@ -1,9 +1,14 @@
 # Migration Break Point for Future Updates
 - This branch will update Copter-4.7.1 to FLCC V5.0.8 step-by-step to find new commit break points for future updates.
-- IN THIS VERSION : Step 2 - Enum & ID registry
-   - Changes in AP_SerialManager, AP_OSD_ParamSetting.cpp was not required - deleted
+- IN THIS VERSION : Step 3 - Gimbal driver
+   - Some notes in previous step has changed, but real changes were kept within planned list as below
 - PNU-KAL Specific options
    - CAN Driver Option for PMU : CAN_D1_PROTOCOL = 15 
+- Viewpro Mount Specific options
+   - MNT1_TYPE = 11 (Viewpro) / CAM1_TYPE = 4 (Mount) / SERIALx_BAUD = 115 (115,200 bps) / SERIALx_PROTOCOL = 8 (Viewpro)
+- Gremsy Mount Specific options
+   - MNT1_TYPE = 6 (MAVLink-Gremsy) / CAM1_TYPE = 6 (MAVLinkCAMV2) / SERIALx_BAUD = 115 (115,200 bps) / SERIALx_PROTOCOL = 2 (MAVLink2)   
+
 <Planned Commit Breaks and Migration Steps>
 
 | # | Step | Files | Needs | Unblocks |
@@ -19,6 +24,23 @@
 | 9 | Object avoidance | `UserCode.cpp`, `APM_Config.h` | 2, 8 | — |
 | — | NMEA output | `AP_NMEA_Output.{cpp,h}` | — | — |
 | — | Vehicle tuning | `config.h` | — | — |
+
+<Deferred Issues>
+
+Open decisions parked until a later step can validate them. Each has a `PNU-ISSUE(<id>)`
+marker at the code site. List them all with:
+
+```
+grep -rn "PNU-ISSUE" libraries/ ArduCopter/
+```
+
+| ID | Issue | Site | Blocked until | Decision needed |
+|:--:|---|---|:--:|---|
+| D1 | IR palette deferral: `_image_sensor` not re-checked at send time; send result ignored. Underlying question — does the gimbal really service only one C1 command per cycle? If not, the whole deferral can be deleted; if so, a general C1 queue may be needed (a rapid Colour-1-then-IR-full sequence is currently unguarded). | `AP_Mount_Viewpro.cpp` | 6, 8 | Bench-test the premise, then: delete / point-fix / C1 queue |
+| D2 | All 7 PNU-KAL ICD messages are id ≥ 50001, so MAVLink **v2 only**. A link set to `SERIALn_PROTOCOL=1` (MAVLink1) silently carries no PNU-KAL telemetry or commands. | `Forced Submodule File/common.xml` | 8 | Assert v2 on the PNU-KAL link, or document as a setup constraint |
+| D3 | The `modules/mavlink` dialect edits are invisible to git — a `submodule update` or fresh clone silently reverts them and the build fails at step 8 with ~21 unknown-type errors. | `Forced Submodule File/ReadMe.txt` | — | Write `Tools/pnu/apply_mavlink_dialect.sh` (idempotent re-apply) |
+| D4 | `OFP_VER_MAIN/SUB/REV` in `GCS.h` and `FW_MAJOR/MINOR/PATCH` in `version.h` are two hand-maintained copies of the same version with nothing enforcing agreement. | `GCS.h`, `version.h` | 5 | Add a `static_assert` in `AP_PMUCAN.cpp` (sees both) |
+| D5 | 375 of `GCS_Common.cpp`'s 454 added lines are one block appended at EOF — the main recurring merge cost on every future ArduPilot bump. | `GCS_Common.cpp` | 8 | Extract to `libraries/GCS_MAVLink/GCS_PNU.cpp` |
 
 # ArduPilot Project
 

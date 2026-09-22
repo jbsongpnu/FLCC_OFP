@@ -29,6 +29,6 @@ public:
         Scripting2 = 12,
         TOFSenseP = 13,
         RadarCAN = 14,  // used by NanoRadar and Hexsoon
-        PMUCAN = 15,    // PNU : KAL HD PMUCAN
+        PMUCAN = 15,    // PNU : PNU-KAL HD PMUCAN
     };
 };

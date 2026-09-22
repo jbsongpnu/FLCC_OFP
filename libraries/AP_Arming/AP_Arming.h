@@ -89,7 +89,7 @@ public:
         AUTO_ARM_ONCE = 36,
         TURTLE_MODE = 37,
         TOYMODE = 38,
-        FAILSAFE_PMU    = 99,   // PNU : PMU Failsafe Error Code (KAL)
+        FAILSAFE_PMU    = 99,   // PNU : PMU Failsafe Error Code
         UNKNOWN         = 100,
     };
 

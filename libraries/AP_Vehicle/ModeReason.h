@@ -76,5 +76,5 @@ enum class ModeReason : uint8_t {
 // ==================================================================================
 // PNU - KAL OFP Firmware version
 // ==================================================================================
-  FAILSAFE_PMU                                  = 56,     // PNU : PMU Failsafe Error Code (KAL) : previously, 51
+  FAILSAFE_PMU                                  = 56,     // PNU : PMU Failsafe Error Code : previously, 51
 };

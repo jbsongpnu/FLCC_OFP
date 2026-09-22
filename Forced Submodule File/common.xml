@@ -7483,7 +7483,7 @@
     </message>
 
 <!-- ================================================================================== -->
-<!-- KAL OFP Firmware version : UNCLASSIFIED                                            -->
+<!-- PNU-KAL OFP Firmware version : UNCLASSIFIED                                            -->
 <!-- ================================================================================== -->
 
    <!-- TC -->
@@ -7574,6 +7574,6 @@
       <field type="uint8_t" name="Object_Avoidance_Mode" units="N/A">0: Normal, 1: OA Level1, 2: OA Level2[SF:1, MIN:0, MAX:2]</field>
       <field type="uint8_t" name="Object_Existence" units="N/A">Bit0~Bit7 to Sectors 0~7, 0:none, 1:object exists[SF:N/A, MIN:0, MAX:255]</field>
     </message>
-    <!-- KAL -->
+    <!-- PNU-KAL -->
   </messages>
 </mavlink>

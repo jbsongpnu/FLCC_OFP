@@ -69,6 +69,9 @@ public:
     // yaw is in body-frame.
     virtual bool get_attitude_quaternion(Quaternion& att_quat) = 0;
 
+    // PNU : Get zoom times
+    virtual float get_zoom_times(uint8_t instance) { return 0.0f; }
+
     // get angular velocity of mount. Only available on some backends
     virtual bool get_angular_velocity(Vector3f& rates) { return false; }
 
@@ -197,6 +200,12 @@ public:
 
     // set camera lens as a value from 0 to 5
     virtual bool set_lens(uint8_t lens) { return false; }
+
+    // PNU : change IR camera pseudo-color / palette
+    virtual bool IR_Color_Change(uint8_t color) { return false; }
+
+    // PNU : print connected mount's model name and firmware/protocol version
+    virtual bool report_camera_info() { return false; }
 
 #if HAL_MOUNT_SET_CAMERA_SOURCE_ENABLED
     // set_camera_source is functionally the same as set_lens except primary and secondary lenses are specified by type
@@ -356,6 +365,12 @@ protected:
 
     // returns true if mavlink heartbeat should be suppressed for this gimbal (only used by Solo gimbal)
     virtual bool suppress_heartbeat() const { return false; }
+
+    // PNU : Pitch control reversal for certain camera type
+    // returns true if this gimbal expects pitch angle targets with the opposite
+    // sign to ArduPilot's convention (ArduPilot: positive = up).  Angle limits
+    // are always applied in ArduPilot convention before the sign is flipped.
+    virtual bool pitch_target_is_reversed() const { return false; }
 
     // change to RC_TARGETTING mode if rc inputs have changed by more than the dead zone
     // should be called on every update

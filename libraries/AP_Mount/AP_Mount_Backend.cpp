@@ -183,6 +183,10 @@ void AP_Mount_Backend::set_angle_target(float roll_deg, float pitch_deg, float y
     // enforce angle limits
     roll_deg = constrain_float(roll_deg, _params.roll_angle_min, _params.roll_angle_max);
     pitch_deg = constrain_float(pitch_deg, _params.pitch_angle_min, _params.pitch_angle_max);
+    if (pitch_target_is_reversed()) {
+        // PNU : gimbals such as Viewpro take pitch with the opposite sign
+        pitch_deg = -pitch_deg;
+    }
     if (!yaw_is_earth_frame) {
         // only limit yaw if in body-frame.  earth-frame yaw limiting is backend specific
         // custom wrap code (instead of wrap_180) to better handle yaw of <= -180
@@ -383,6 +387,9 @@ void AP_Mount_Backend::set_target_sysid(uint8_t sysid)
 // send a GIMBAL_DEVICE_ATTITUDE_STATUS message to GCS
 void AP_Mount_Backend::send_gimbal_device_attitude_status(mavlink_channel_t chan)
 {
+    // PNU : disable GIMBAL_DEVICE_ATTITUDE_STATUS (msg 285) due to error in KGCS
+    return;
+
     if (suppress_heartbeat()) {
         // block heartbeat from transmitting to the GCS
         GCS_MAVLINK::disable_channel_routing(chan);

@@ -144,7 +144,7 @@ enum class LogErrorSubsystem : uint8_t {
 // ==================================================================================
 // PNU - KAL OFP Firmware version
 // ==================================================================================
-    FAILSAFE_PMU            = 99,     // PNU : PMU Failsafe Error Code (KAL)
+    FAILSAFE_PMU            = 99,     // PNU : PMU Failsafe Error Code
 };
 
 // bizarrely this enumeration has lots of duplicate values, offering

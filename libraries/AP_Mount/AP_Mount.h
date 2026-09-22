@@ -242,6 +242,9 @@ public:
     // returns true on success
     bool get_attitude_euler(uint8_t instance, float& roll_deg, float& pitch_deg, float& yaw_bf_deg);
 
+    // Get zoom times - JBSong
+    float get_zoom_times(uint8_t instance);
+
     // run pre-arm check.  returns false on failure and fills in failure_msg
     // any failure_msg returned will not include a prefix
     bool pre_arm_checks(char *failure_msg, uint8_t failure_msg_len);
@@ -291,6 +294,12 @@ public:
 
     // set camera lens as a value from 0 to 5
     bool set_lens(uint8_t instance, uint8_t lens);
+
+    // PNU : change IR camera pseudo-color / palette
+    bool IR_Color_Change(uint8_t instance, uint8_t color);
+
+    // PNU : print connected mount's model name and firmware/protocol version
+    bool report_camera_info(uint8_t instance);
 
 #if HAL_MOUNT_SET_CAMERA_SOURCE_ENABLED
     // set_camera_source is functionally the same as set_lens except primary and secondary lenses are specified by type
