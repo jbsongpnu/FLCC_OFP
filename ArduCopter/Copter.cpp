@@ -81,6 +81,14 @@
 #include "version.h"
 #undef FORCE_VERSION_H_INCLUDE
 
+// PNU : the FLCC OFP version is held in two hand-maintained places - OFP_VER_*
+// in GCS_MAVLink/GCS.h (reported to the PMU over CAN and to the GCS in TM1 via
+// AP_PMUCAN) and FW_* in version.h.  This is the only translation unit that
+// sees both, so guard them against drifting apart.
+static_assert(OFP_VER_MAIN == FW_MAJOR, "OFP_VER_MAIN (GCS.h) must match FW_MAJOR (version.h)");
+static_assert(OFP_VER_SUB  == FW_MINOR, "OFP_VER_SUB (GCS.h) must match FW_MINOR (version.h)");
+static_assert(OFP_VER_REV  == FW_PATCH, "OFP_VER_REV (GCS.h) must match FW_PATCH (version.h)");
+
 const AP_HAL::HAL& hal = AP_HAL::get_HAL();
 
 #define SCHED_TASK(func, rate_hz, _max_time_micros, _prio) SCHED_TASK_CLASS(Copter, &copter, func, rate_hz, _max_time_micros, _prio)
@@ -210,6 +218,10 @@ const AP_Scheduler::Task Copter::scheduler_tasks[] = {
     SCHED_TASK_CLASS(GCS,                  (GCS*)&copter._gcs,          update_receive, 400, 180, 102),
     SCHED_TASK_CLASS(GCS,                  (GCS*)&copter._gcs,          update_send,    400, 550, 105),
 #if HAL_MOUNT_ENABLED
+    // PNU-ISSUE(D8) step 5 lowers this to 10 Hz. Angle maths is safe (Viewpro and
+    // Gremsy both declare NATIVE_ANGLES_AND_RATES_ONLY so AP_MOUNT_UPDATE_DT is
+    // never used), but send_m_ahrs() then feeds the gimbal 5x staler attitude for
+    // its own stabilisation loop. Verify with Gremsy / MAVLink2 cameras.
     SCHED_TASK_CLASS(AP_Mount,             &copter.camera_mount,        update,          50,  75, 108),
 #endif
 #if AP_CAMERA_ENABLED

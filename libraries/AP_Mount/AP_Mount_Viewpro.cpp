@@ -66,7 +66,7 @@ void AP_Mount_Viewpro::update()
         send_comm_config_cmd(CommConfigCmd::QUERY_FIRMWARE_VER);
     }
 
-    // PNU-ISSUE(D1) blocked-until: step6+step8 bench test. Two defects held here
+    // PNU-ISSUE(D1) blocked-until: step5+step7 bench test. Two defects held here
     //   pending validation: (a) _image_sensor is not re-checked at send time and
     //   can drift (it is set only from gimbal telemetry), (b) the send result is
     //   ignored and the pending colour is cleared regardless. Fix strategy and
