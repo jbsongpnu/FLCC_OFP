@@ -354,6 +354,14 @@
 #ifndef LAND_DETECTOR_ACCEL_LPF_CUTOFF
 # define LAND_DETECTOR_ACCEL_LPF_CUTOFF     1.0f    // frequency cutoff of land detector accelerometer filter
 #endif
+// PNU-NOT-APPLIED : V5.0.8 raised this to 3.0f, most likely because gas-engine airframe
+// vibration keeps the filtered earth-frame accel above 1.0 m/s/s, so the aircraft lands
+// but never declares landed and never auto-disarms.  Deliberately not applied here:
+// accel_stationary is one of eight AND-ed gates in land_detector.cpp, and upstream's own
+// loosening (land_detector_scalar = 2) applies only when a weight-on-wheels sensor
+// corroborates it - 3.0f exceeds that unconditionally.  If the airframe needs it, set
+// "define LAND_DETECTOR_ACCEL_MAX 3.0f" in the board hwdef rather than editing the
+// vehicle source, and record the flight-log evidence.  See README free-floaters.
 #ifndef LAND_DETECTOR_ACCEL_MAX
 # define LAND_DETECTOR_ACCEL_MAX            1.0f    // vehicle acceleration must be under 1m/s/s
 #endif

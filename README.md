@@ -1,11 +1,10 @@
 # Migration Break Point for Future Updates
 - This branch will update Copter-4.7.1 to FLCC V5.0.8 step-by-step to find new commit break points for future updates.  
-- IN THIS VERSION : Step 7 - GCS handler bodies (`GCS_Common.cpp`)  
-   - PMU telemetry (TM1/TM3) and PMU/CAM commands (TC1/TC2) now reach the GCS end-to-end  
-   - CAM status (TM2) and object-avoidance status (TM5) senders are in place but not yet streamed - step 8 adds the callers  
-   - New PNU-ISSUE D12, resolved in the same step : TM5 could not distinguish "nothing nearby" from "sensor reporting nothing"  
-   - D12 closed **provisionally** without an ICD change - to be revisited once the migration break points are established  
-   - PNU-ISSUE D5 is now unblocked by step 7, but **not started** - the EOF block has not been extracted  
+- IN THIS VERSION : Step 8 - Object avoidance (`UserCode.cpp`, `APM_Config.h`)  
+   - `USERHOOK_INIT` and `USERHOOK_MEDIUMLOOP` enabled; TM2 (CAM status) and TM5 (object avoidance) now stream at 10 Hz  
+   - This is the **last migration step**; both free-floaters have since been reviewed and **deliberately not applied** - each file carries a `PNU-NOT-APPLIED` note  
+   - New PNU-ISSUE D13 : the CAM path depends on `HAL_MOUNT_ENABLED` with no guard - a mount-disabled build will not compile  
+   - PNU-ISSUE D10's TM2 residual is now **live** rather than latent - TM2 actually streams from this step  
 - PNU-KAL Specific options  
    - CAN Driver Option for PMU : CAN_D1_PROTOCOL = 15  
 - Viewpro Mount Specific options  
@@ -25,8 +24,8 @@
 | 6 | PMU failsafe | `events.cpp`, `Copter.h` (failsafe bit + decl), `Copter.cpp` (10 Hz call) | 2, 4 | — |
 | 7 | GCS handler bodies | `GCS_Common.cpp`, `GCS.h` (D12 edge latch) | 1, 2, 3, 4, 5 | 8 |
 | 8 | Object avoidance | `UserCode.cpp`, `APM_Config.h` | 1, 2, 7 | — |
-| — | NMEA output | `AP_NMEA_Output.{cpp,h}` | — | — |
-| — | Vehicle tuning | `config.h` | — | — |
+| — | NMEA output | `AP_NMEA_Output.{cpp,h}` | — | **NOT APPLIED** - see file notes |
+| — | Vehicle tuning | `config.h` | — | **NOT APPLIED** - see file notes |
 
 <Deferred Issues>
 
@@ -51,6 +50,7 @@ grep -rn "PNU-ISSUE" libraries/ ArduCopter/
 | D10 | **`AP_Q30` routes every camera function through `AP::mount()`, never `AP::camera()`.** Valid for Viewpro (one serial protocol carries gimbal + camera), but on any other mount all ~27 camera calls fall through to the base class and silently do nothing, and `get_zoom_times()` returns a fabricated `0.0f`. Dormant if the camera is driven by standard MAVLink2 instead of KGCS TC2. | `AP_Q30.cpp`, `UserCode.cpp` | 8 | Decide whether KGCS TC2 must drive non-Viewpro cameras; if so, route camera calls via `AP::camera()` - but see **D11**, the destination cannot do everything. See details below. |
 | D11 | **Even with correct routing (D10), the MAVLink camera backend cannot cover everything KGCS needs.** Pristine 4.7.1 *does* have a MAVLink camera path (`AP_Camera_MAVLinkCamV2`, `CAM1_TYPE=6`) - it is the *mount* that is gimbal-only. Of `AP_Q30`'s 8 camera functions, 4 work, 2 exist only in the `AP_Camera` base, and 2 have **no path at all**: `get_zoom_times` (the backend never decodes `CAMERA_SETTINGS` msg 260, where `zoomLevel` lives) and `IR_Color_Change` (MAVLink has no standard thermal-palette message). | `AP_Camera_MAVLinkCamV2.cpp` | — | Bench a real VIO first; then decide per function - upstream fix, local fix, or vendor-specific. See details below. |
 | D12 | **TM5 could not distinguish "nothing nearby" from "sensor reporting nothing".** *RESOLVED (step 7), decision provisional - see revisit note below.* The V5.0.8 code ignored the return of `get_horizontal_distances()`, which fills every sector with `dist_max` on failure (`AP_Proximity_Boundary_3D.cpp:434`) and reads back as "no object" - so a dead sensor was byte-identical to open sky. Sector scanning is now gated on `sensor_failed()`, the return value is checked, and `dist_array.valid(i)` excludes sectors that never reported. | `GCS_Common.cpp` | — | **Decided for now: no ICD change** (provisional - PNU will revisit). `Object_Avoidance_Status = 3` ("sensor unhealthy") was considered and **rejected** - it would need a KGCS update, and the failure already reaches KGCS two other ways. TM5 stays all-zero when the sensor is dead; the health signal is the `MAV_SEVERITY_CRITICAL` statustext on the healthy&rarr;failed edge (plus one if avoidance is switched on while already failed) and the `MAV_SYS_STATUS_SENSOR_PROXIMITY` bit, which `GCS_Copter.cpp:67` drives from the *same* `sensor_failed()` predicate - so TM5 and `SYS_STATUS` cannot contradict each other. **Residual:** confirm 10 m / 15 m are the intended operator thresholds (`PNU_OA_ALERT_DISTANCE_CM` / `PNU_OA_WARN_DISTANCE_CM`); they are hard-coded and unrelated to `AVOID_MARGIN` |
+| D13 | **The KGCS camera path hard-depends on `HAL_MOUNT_ENABLED` with no guard.** `AP::mount()` is declared only inside `#if HAL_MOUNT_ENABLED` (`AP_Mount.h`), but `AP_Q30.cpp` calls it 5x with no guard and `AP_Q30.h` has no `#if` at all; `GCS_Common.cpp::send_message_gcs_flcc_cam_status()` and now `UserCode.cpp`'s 10 Hz `MSG_CAM_STATUS` send sit on the same chain. `HAL_MOUNT_ENABLED` defaults to 1 so CubeOrangePlus is unaffected, but it is a `build_options.py` feature - a custom build with MOUNT disabled fails to compile, not gracefully degrade. Contradicts the AGENTS.md rule that a core component must not depend on an optional one. | `AP_Q30.{h,cpp}`, `GCS_Common.cpp`, `UserCode.cpp` | — | Wrap the `AP_Q30` class body and every CAM call site in `#if HAL_MOUNT_ENABLED`, or give `AP_Q30` its own `AP_Q30_ENABLED` flag defaulting to `HAL_MOUNT_ENABLED` and add it to `build_options.py`. Cheap and self-contained; deferred only to keep step 8 to the OA change. Verify with a `HAL_MOUNT_ENABLED=0` build, not by inspection |
 
 **PNU-ISSUE D7 bench matrix** - engine disconnected, watch `Engine_OnOff_Echo` in TM3:
 
@@ -99,7 +99,7 @@ Any other gimbal (Gremsy etc.) inherits `false` from the base class and is
 unaffected.
 
 
-**PNU-ISSUE D10 details** - resume at Step 8.
+**PNU-ISSUE D10 details** - step 8 is done; this is now free-standing work.
 
 `AP_Q30` holds no `AP::camera()` reference. Of its 30 `mount->` calls only three are
 genuinely gimbal operations:
@@ -136,7 +136,7 @@ told zoom is 0x. No error, no warning, no build failure.
   is `handle_gcs_flcc_cam_cmd()` (`GCS_Common.cpp`), reached only by msg 50002 (TC2).
 - *KGCS TC2 driving a non-Viewpro camera* is the case that breaks.
 
-**Related residual, also Step 8:** `UserCode.cpp::userhook_MediumLoop()` sends
+**Related residual - now LIVE as of step 8:** `UserCode.cpp::userhook_MediumLoop()` sends
 `MSG_CAM_STATUS` unconditionally at 10 Hz. `send_message_gcs_flcc_cam_status()` guards
 `AP::mount() == nullptr` but not whether the mount supports zoom - so with a Gremsy it
 emits a 10 Hz TM2 stream reporting zoom 0x to every connected GCS. Gate it on the mount
@@ -146,6 +146,44 @@ actually supporting zoom, or on TC2 having been seen recently.
 was modified to take zoom *times* (`zoom_value * 10`), while `AP_Camera_MAVLinkCamV2::set_zoom(PCT)`
 follows the MAVLink contract of 0-100 percent. A shared route must convert.
 
+
+
+**D10 resolution plan, and what a Stage 1 prototype found (2026-09-28).**
+
+A staged plan, cheapest first:
+
+| Stage | What | Blocked on |
+|:--:|---|---|
+| 0 | Ask PNU: **must KGCS TC2 drive non-Viewpro cameras at all?** If no, D10 closes by rejecting TC2 camera commands on a non-Viewpro mount and gating the TM2 stream - roughly 20 lines, no refactor | one question to PNU |
+| 1 | Stop fabricating values: give `get_zoom_times()` an error signal, and check the ~26 unchecked camera return values | nothing |
+| 2 | Dual-dispatch in `AP_Q30` - try `AP::mount()`, fall back to `AP::camera()` | stage 0 answer |
+| 3 | The two functions with no `AP_Camera` path at all | **D11** / the PNU action item |
+
+**Stage 1 was prototyped on 2026-09-28 and reverted** - it is correct but touches 8 files
+and ~26 call sites, which is too broad to carry alongside the migration. Deferred, not
+rejected. Findings worth keeping, so they need not be rediscovered:
+
+- **`AP_Mount` and `AP_Camera` are signature-compatible for 6 of the 8 camera functions** -
+  same names, same `ZoomType` / `FocusType` / `TrackingType` / `SetFocusResult` enums, same
+  `bool` returns. Stage 2 is therefore mechanical forwarding, not a redesign. Only
+  `set_camera_source` differs (`uint8_t` vs a `CameraSource` enum).
+- `get_zoom_times()` has only **three callers in the whole tree** (`AP_Q30.cpp` x2,
+  `GCS_Common.cpp` x1), so changing its signature is cheap.
+- `AP_Mount::get_zoom_times()` contains `return false;` inside a `float` function - a second
+  fabricated `0.0f`, on the no-backend path.
+- `AP_Mount_Viewpro::_zoom_times` has **no initialiser** and the class uses an inherited
+  constructor, so before the first gimbal report it is *indeterminate*, not 0. Any
+  "is this value real?" test must account for that. EO and IR zoom are both >= 1x, so
+  `is_positive()` is a usable validity test once it is initialised.
+- There is **not one `if (mount->...)` in `AP_Q30.cpp`** - 26 camera calls, no return checked.
+- TM2's `Zoom_POS_FB` has no "unknown" encoding, exactly like TM5 in D12, so a zoom-truth fix
+  cannot change what goes on the wire without an ICD decision.
+- `EO_zoom_pct` is constrained to `[1, _Max_zoom_EO]` with `_Max_zoom_EO = 30.0`: it carries
+  zoom **times** while being passed as `ZoomType::PCT`, and only works because
+  `AP_Mount_Viewpro::set_zoom()` was modified to reinterpret PCT as times. **This is the trap
+  in Stage 2** - forwarding it to `AP_Camera_MAVLinkCamV2::set_zoom(PCT)`, which honours the
+  MAVLink 0-100 % contract, turns 10x into 10 %, zoomed out instead of in. Rename the
+  variable and convert at the boundary as a separate commit before any routing change.
 
 **PNU-ISSUE D11 details** - capability gap behind D10. Resume with Gremsy hardware.
 
@@ -304,6 +342,7 @@ If it shows deletions, apply targeted edits only.
 | `libraries/AP_OSD/AP_OSD_ParamSetting.cpp` | `"Q30"` padding deliberately **not** applied |
 | `libraries/GCS_MAVLink/GCS_Common.cpp` | upward-proximity block deliberately **not** commented out; the step-7 defect fixes and `#if` guards below |
 | `libraries/AP_Q30/AP_Q30.cpp` | `send_cmd_speed()` negates pitch at the call site - see the pitch-reversal table |
+| `ArduCopter/UserCode.cpp` | `#if HAL_PROXIMITY_ENABLED && AP_AVOIDANCE_ENABLED` guard around the OA block |
 | `ArduCopter/events.cpp` | D9(a) recovery-clear fix; `LOGGER_WRITE_ERROR` portability fix |
 | `ArduCopter/version.h` | 5.0.8 **DEV** + the 5.1.0 release note |
 | `README.md` | this file - never taken from the snapshot |
@@ -325,6 +364,9 @@ make a wholesale copy a regression.
 | `send_proximity()` upward-distance block **not** commented out | V5.0.8 wrapped it in `/* Currently, no upward sensor */`. `AP_Proximity::get_upward_distance()` already returns false when no backend supplies one (`AP_Proximity.cpp:498`), and TeraRanger Tower Evo is not one of the backends that does - so the comment-out is a no-op here and a silent regression for `AP_Proximity_RangeFinder` / `_MAV` / scripting users. Not applied |
 | OA sender/handler guarded `#if HAL_PROXIMITY_ENABLED && AP_AVOIDANCE_ENABLED` | `GCS_Common.cpp` is core; `AC_Avoid` and `AP_Proximity` are optional. Step 8's `UserCode.cpp` caller needs the same guard - without it a proximity-disabled build hits the `try_send_message()` default case, which spams "Sending unknown message" and panics in SITL |
 | step-7 defect fixes in the `GCS_Common.cpp` block | see the table below |
+| step 8: OA block in `userhook_MediumLoop()` guarded `#if HAL_PROXIMITY_ENABLED && AP_AVOIDANCE_ENABLED` | `avoid` is itself `#if AP_AVOIDANCE_ENABLED` (`Copter.h:511`), and step 7 put `MSG_OBJECT_AVOIDANCE_STATUS` behind the same guard. Without it a proximity-disabled build hits the `try_send_message()` default case, which sends "Sending unknown message" and panics in SITL |
+| step 8: `copter.avoid.` &rarr; `avoid.` | inside a `Copter` member function; `copter.` is the global instance and redundant |
+| step 8: tabs &rarr; 4 spaces in the added lines | V5.0.8 mixed tabs and spaces in both hunks |
 
 **Step 7 defects fixed while applying `GCS_Common.cpp`.** All are in the V5.0.8 block; none
 change the wire format of any ICD message except where stated.
@@ -347,8 +389,39 @@ Left alone on purpose: the `warning_level |= 2` / `|= 1` then `> 2 -> 2` clamp (
 correct - alert wins) and `MAV_SEVERITY_CRITICAL` on the avoidance on/off statustext
 (operator feedback KGCS relies on).
 
-**Remaining work:** step 8 (`UserCode.cpp`, `APM_Config.h`) and the two free-floaters
-(`AP_NMEA_Output.{cpp,h}`, `config.h`) which have no dependencies and can land anywhere.
+**Step 8 notes.**
+
+- `userhook_MediumLoop()` runs at 10 Hz with a 75 us budget (`Copter.cpp:267`). Both calls
+  only set bits in the per-channel deferred-message mask, so the cost is trivial and the
+  actual sending stays in the GCS task.
+- `USERHOOK_INIT` fires from `system.cpp:132`, long after `GCS::_singleton` is set in the
+  `GCS` constructor (`GCS.h:1153`), so the `gcs()` writes there are safe. The two fields it
+  zeroes are already zero from static init - it is documentation, not a fix.
+- `Object_Avoidance_Mode` is recomputed every tick from `proximity_avoidance_enabled()`,
+  which is `_proximity_enabled && (AVOID_ENABLE & AC_AVOID_USE_PROXIMITY_SENSOR)`. **So with
+  `AVOID_ENABLE` bit 1 clear, KGCS gets "Avoidance ON Level n" from the TC4 handler but TM5
+  keeps reporting mode 0.** That is correct - TM5 reports what is in force, not what was
+  asked for - but it is a confusing setup trap worth checking on the bench.
+- `gcs().send_message()` broadcasts to **every** channel, so a second GCS on another link
+  also receives TM2/TM5 (~520 B/s combined). Harmless - MAVLink ignores unknown ids - but it
+  is bandwidth spent on a link that cannot use it.
+
+**Free-floaters - reviewed, deliberately NOT applied.** Both carry an in-file note:
+
+```
+grep -rn "PNU-NOT-APPLIED" libraries/ ArduCopter/
+```
+
+| File | V5.0.8 change | Why not applied |
+|---|---|---|
+| `ArduCopter/config.h` | `LAND_DETECTOR_ACCEL_MAX` 1.0f &rarr; 3.0f | Probably needed for gas-engine vibration, but it relaxes a safety threshold past upstream's own WoW-corroborated `land_detector_scalar = 2`. Belongs in the board hwdef, not the vehicle source, and needs flight-log evidence first |
+| `libraries/AP_NMEA_Output/*` | Korean drone-ID / UTM rewrite | Comments out `HAL_NMEA_OUTPUT_ENABLED` in the `.cpp` only &rarr; fails to build wherever the feature is off; deletes GPRMC and PASHR but keeps their bits; passes a double to `%d`; hardcodes the station ID and the 1 Hz rate; non-standard VTG. Re-specify as separate PNU work if needed |
+
+**Open question for the NMEA decision:** is any serial port on the aircraft set to
+`SERIALn_PROTOCOL = 20` (NMEAOutput)? If not, this is dead code and the issue closes.
+
+**Remaining work:** all 8 numbered steps are applied, and both free-floaters are closed as
+not-applied. Left over: the open issues D1, D2, D3, D5, D6, D7, D9(b), D10, D11, D12 (provisional) and D13.
 
 **Open issues** are the `PNU-ISSUE` table above; code markers carry the same ids.
 List them with:

@@ -45,6 +45,9 @@ public:
 
     void init();
 
+    // PNU-NOT-APPLIED : V5.0.8 added GPVTG = (1<<3) here and replaced the GPRMC and
+    // PASHR senders in the .cpp.  Not applied - see the note at the top of
+    // AP_NMEA_Output.cpp.
     enum class Enabled_Messages {
         GPGGA   = (1<<0),
         GPRMC   = (1<<1),

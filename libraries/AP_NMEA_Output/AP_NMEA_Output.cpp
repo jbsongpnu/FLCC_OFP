@@ -17,6 +17,20 @@
 
  */
 
+/*
+  PNU-NOT-APPLIED : V5.0.8 rewrote this file for a Korean drone-ID / UTM receiver -
+  GPVTG in place of GPRMC, PASHR removed, a hardcoded "PNUDRONE" station ID appended to
+  GGA, a fixed 1 Hz rate that ignores the interval parameter, and the
+  HAL_NMEA_OUTPUT_ENABLED guard commented out in this file while AP_NMEA_Output.h keeps
+  its own.  Deliberately not applied: that guard mismatch fails to build on any board
+  with the feature off (AP_Periph defaults, minimize_common.inc, skyviper); it drops two
+  standard sentences while leaving their Enabled_Messages bits in place; its GGA HDOP
+  formatting passes a double to "%d"; and its VTG sentence carries a leading time field
+  that standard $--VTG does not have.  If the drone-ID output is required it belongs in a
+  separate PNU output path with the ID as a parameter, not in this shared library.
+  See README free-floaters.
+ */
+
 #define AP_MATH_ALLOW_DOUBLE_FUNCTIONS 1
 
 #include "AP_NMEA_Output.h"
