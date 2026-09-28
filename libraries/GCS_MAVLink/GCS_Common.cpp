@@ -68,6 +68,7 @@
 #include <AP_LandingGear/AP_LandingGear.h>
 #include <AP_Landing/AP_Landing_config.h>
 #include <AP_Generator/AP_Generator_Loweheiser.h>
+#include <AC_Avoidance/AC_Avoid.h>
 
 #include "MissionItemProtocol_Waypoints.h"
 #include "MissionItemProtocol_Rally.h"
@@ -77,6 +78,9 @@
 
 #include <AP_Notify/AP_Notify.h>
 #include <AP_Vehicle/AP_Vehicle_config.h>
+
+// PNU-KAL : camera / gimbal command adapter for the KGCS ICD messages
+#include <AP_Q30/AP_Q30.h>
 
 #include <stdio.h>
 
@@ -132,6 +136,29 @@ GCS *GCS::_singleton = nullptr;
 
 GCS_MAVLINK_InProgress GCS_MAVLINK_InProgress::in_progress_tasks[1];
 uint32_t GCS_MAVLINK_InProgress::last_check_ms;
+
+// PNU-KAL : state shared with the camera adapter (AP_Q30.cpp) and the PMU CAN
+// driver (AP_PMUCAN.cpp), which own the definitions.
+extern int32_t tracking_counter;                                            // PNU : tracking counter for CAM
+extern uint8_t debug_cam_gimbal_cmd;                                        // PNU : gimbal status for logging
+extern uint8_t debug_cam_zoom_cmd;                                          // PNU : zoom status for logging
+extern uint8_t debug_cam_focus_cmd;                                         // PNU : focus status for logging
+extern uint8_t debug_cam_record_cmd;                                        // PNU : record status for logging
+extern uint8_t debug_cam_track_cmd;                                         // PNU : tracking status for logging
+extern uint8_t debug_cam_ir_cmd;                                            // PNU : IR status for logging
+
+extern mavlink_sys_icd_flcc_gcs_cam_attitude_status_t   CAM_ATTITUDE_STATUS;// PNU : MAVLINK message for CAM
+
+extern mavlink_sys_icd_flcc_gcs_pmu_status_t            PMU_Status;         // PNU : MAVLINK message for PMU status
+extern mavlink_sys_icd_gcs_flcc_pmu_ctrl_echo_t         PMU_Ctrl_Echo;      // PNU : MAVLINK message for PMU command echo
+
+// PNU : incoming-message debug for Viewpro IR pseudo-color/palette commands.
+// Set to 1 to report the Tracking_CMD received by handle_gcs_flcc_cam_cmd() to the GCS.
+#define GCS_VIEWPRO_IR_DEBUG 0
+
+// PNU : object-avoidance warning thresholds reported to KGCS in TM5, in centimetres
+#define PNU_OA_ALERT_DISTANCE_CM 1000
+#define PNU_OA_WARN_DISTANCE_CM  1500
 
 GCS_MAVLINK::GCS_MAVLINK(AP_HAL::UARTDriver &uart)
 {
@@ -1202,6 +1229,13 @@ ap_message GCS_MAVLINK::mavlink_id_to_ap_message_id(const uint32_t mavlink_id) c
         { MAVLINK_MSG_ID_AVAILABLE_MODES_MONITOR, MSG_AVAILABLE_MODES_MONITOR},
 #if AP_MAVLINK_MSG_FLIGHT_INFORMATION_ENABLED
         { MAVLINK_MSG_ID_FLIGHT_INFORMATION, MSG_FLIGHT_INFORMATION},
+#endif
+        // PNU-KAL ICD messages
+        { MAVLINK_MSG_ID_SYS_ICD_FLCC_GCS_PMU_STATUS, MSG_PMU_STATUS},
+        { MAVLINK_MSG_ID_SYS_ICD_FLCC_GCS_CAM_ATTITUDE_STATUS, MSG_CAM_STATUS},
+        { MAVLINK_MSG_ID_SYS_ICD_GCS_FLCC_PMU_CTRL_ECHO, MSG_PMU_CTRL_ECHO},
+#if HAL_PROXIMITY_ENABLED && AP_AVOIDANCE_ENABLED
+        { MAVLINK_MSG_ID_SYS_ICD_FLCC_GCS_OBJECT_AVOIDANCE_STATUS, MSG_OBJECT_AVOIDANCE_STATUS},
 #endif
     };
 
@@ -4686,6 +4720,21 @@ void GCS_MAVLINK::handle_message(const mavlink_message_t &msg)
         handle_generator_message(msg);
         break;
 #endif
+
+    // PNU-KAL ICD commands from KGCS
+    case MAVLINK_MSG_ID_SYS_ICD_GCS_FLCC_PMU_CTRL:
+        handle_gcs_flcc_pmu_ctrl(msg);
+        break;
+
+    case MAVLINK_MSG_ID_SYS_ICD_GCS_FLCC_CAM_CMD:
+        handle_gcs_flcc_cam_cmd(msg);
+        break;
+
+#if HAL_PROXIMITY_ENABLED && AP_AVOIDANCE_ENABLED
+    case MAVLINK_MSG_ID_SYS_ICD_GCS_FLCC_OBJECT_AVOIDANCE_CMD:
+        handle_gcs_flcc_object_avoidance_cmd(msg);
+        break;
+#endif
     }
 
 }
@@ -6796,6 +6845,29 @@ bool GCS_MAVLINK::try_send_message(const enum ap_message id)
         break;
 #endif
 
+    // PNU-KAL ICD telemetry to KGCS
+    case MSG_PMU_STATUS:
+        CHECK_PAYLOAD_SIZE(SYS_ICD_FLCC_GCS_PMU_STATUS);
+        send_message_gcs_flcc_pmu_status();
+        break;
+
+    case MSG_CAM_STATUS:
+        CHECK_PAYLOAD_SIZE(SYS_ICD_FLCC_GCS_CAM_ATTITUDE_STATUS);
+        send_message_gcs_flcc_cam_status();
+        break;
+
+    case MSG_PMU_CTRL_ECHO:
+        CHECK_PAYLOAD_SIZE(SYS_ICD_GCS_FLCC_PMU_CTRL_ECHO);
+        send_message_gcs_flcc_pmu_ctrl_echo();
+        break;
+
+#if HAL_PROXIMITY_ENABLED && AP_AVOIDANCE_ENABLED
+    case MSG_OBJECT_AVOIDANCE_STATUS:
+        CHECK_PAYLOAD_SIZE(SYS_ICD_FLCC_GCS_OBJECT_AVOIDANCE_STATUS);
+        send_message_flcc_gcs_object_avoidance_status();
+        break;
+#endif
+
 #if HAL_HIGH_LATENCY2_ENABLED
     case MSG_HIGH_LATENCY2:
         CHECK_PAYLOAD_SIZE(HIGH_LATENCY2);
@@ -7622,5 +7694,362 @@ void GCS_MAVLINK::handle_radio_rc_channels(const mavlink_message_t &msg)
     AP::RC().handle_radio_rc_channels(&packet);
 }
 #endif // AP_RCPROTOCOL_MAVLINK_RADIO_ENABLED
+
+// ==================================================================================
+// PNU-KAL ICD handlers (KGCS link)
+// ==================================================================================
+
+// -------------------------------------------------------------------------
+// Send CAM status to GCS (TM2 / msg 51002)
+// -------------------------------------------------------------------------
+void GCS_MAVLINK::send_message_gcs_flcc_cam_status() const
+{
+    AP_Mount *mount = AP::mount();
+    if (mount == nullptr) {
+        return;
+    }
+
+    float roll = 0, pitch = 0, yaw = 0;
+    if (mount->get_attitude_euler(0, roll, pitch, yaw)) {
+        CAM_ATTITUDE_STATUS.Roll_REL_ANG = CAM_ATTITUDE_STATUS.Roll_IMU_ANG = roll * 10;
+        // reverse the pitch angle to match the KGCS image convention, as
+        // AP_Mount_Backend::set_angle_target() does for the command direction
+        CAM_ATTITUDE_STATUS.Pitch_REL_ANG = CAM_ATTITUDE_STATUS.Pitch_IMU_ANG = -pitch * 10;
+        CAM_ATTITUDE_STATUS.Yaw_REL_ANG = CAM_ATTITUDE_STATUS.Yaw_IMU_ANG = yaw * 10;
+    } else {
+        CAM_ATTITUDE_STATUS.Roll_REL_ANG = CAM_ATTITUDE_STATUS.Roll_IMU_ANG = 0;
+        CAM_ATTITUDE_STATUS.Pitch_REL_ANG = CAM_ATTITUDE_STATUS.Pitch_IMU_ANG = 0;
+        CAM_ATTITUDE_STATUS.Yaw_REL_ANG = CAM_ATTITUDE_STATUS.Yaw_IMU_ANG = 0;
+    }
+
+    CAM_ATTITUDE_STATUS.Zoom_POS_FB = (int8_t)mount->get_zoom_times(0);
+
+    mavlink_msg_sys_icd_flcc_gcs_cam_attitude_status_send(
+            chan,
+            CAM_ATTITUDE_STATUS.Roll_REL_ANG,
+            CAM_ATTITUDE_STATUS.Pitch_REL_ANG,
+            CAM_ATTITUDE_STATUS.Yaw_REL_ANG,
+            CAM_ATTITUDE_STATUS.Roll_IMU_ANG,
+            CAM_ATTITUDE_STATUS.Roll_RC_Target_ANG,
+            CAM_ATTITUDE_STATUS.Pitch_IMU_ANG,
+            CAM_ATTITUDE_STATUS.Pitch_RC_Target_ANG,
+            CAM_ATTITUDE_STATUS.Yaw_IMU_ANG,
+            CAM_ATTITUDE_STATUS.Yaw_RC_Target_ANG,
+            CAM_ATTITUDE_STATUS.Zoom_POS_FB);
+
+#if HAL_LOGGING_ENABLED
+    AP::logger().Write("TC_R", "TimeUS,RRLA,PRLA,YRLA,RIMA,RRCA,PIMA,PRCA,YIMA,YRCA,ZPOS", "Qiiihhhhhhb",
+                       AP_HAL::micros64(),
+                       CAM_ATTITUDE_STATUS.Roll_REL_ANG,
+                       CAM_ATTITUDE_STATUS.Pitch_REL_ANG,
+                       CAM_ATTITUDE_STATUS.Yaw_REL_ANG,
+                       CAM_ATTITUDE_STATUS.Roll_IMU_ANG,
+                       CAM_ATTITUDE_STATUS.Roll_RC_Target_ANG,
+                       CAM_ATTITUDE_STATUS.Pitch_IMU_ANG,
+                       CAM_ATTITUDE_STATUS.Pitch_RC_Target_ANG,
+                       CAM_ATTITUDE_STATUS.Yaw_IMU_ANG,
+                       CAM_ATTITUDE_STATUS.Yaw_RC_Target_ANG,
+                       CAM_ATTITUDE_STATUS.Zoom_POS_FB);
+#endif
+}
+
+
+// -------------------------------------------------------------------------
+// Receive CAM control command from GCS (TC2 / msg 50002)
+// -------------------------------------------------------------------------
+void GCS_MAVLINK::handle_gcs_flcc_cam_cmd(const mavlink_message_t &msg)
+{
+    mavlink_sys_icd_gcs_flcc_cam_cmd_t cam_cmd;
+    mavlink_msg_sys_icd_gcs_flcc_cam_cmd_decode(&msg, &cam_cmd);
+
+#if GCS_VIEWPRO_IR_DEBUG
+    // Echo the incoming Tracking_CMD so we can confirm which IR-color request
+    // (14: WhiteHot, 15: BlackHot, 16-19: Color1-4) was received from the GCS.
+    GCS_SEND_TEXT(MAV_SEVERITY_INFO, "FLCC CAM_CMD RX Track=%u Ctrl=%u",
+                  (unsigned)cam_cmd.Tracking_CMD,
+                  (unsigned)cam_cmd.Control_Mode);
+#endif
+
+    AP_Q30 *Q30 = AP::Q30();
+    if (Q30 == nullptr) {
+        return;
+    }
+
+    debug_cam_gimbal_cmd    = 0U;
+    debug_cam_zoom_cmd      = 0U;
+    debug_cam_focus_cmd     = 0U;
+    debug_cam_record_cmd    = 0U;
+    debug_cam_track_cmd     = 0U;
+    debug_cam_ir_cmd        = 0U;
+
+    switch (cam_cmd.Control_Mode) {
+
+    case 0: // no control
+        Q30->no_control_mode_operation(cam_cmd);
+        break;
+
+    case 1: // speed control
+        // legacy protocol: 2-axis speed control only, roll is not controllable
+        if ((cam_cmd.Pitch_Speed_CMD != 0) || (cam_cmd.Yaw_Speed_CMD != 0)) {
+            tracking_counter = 0U;
+            Q30->send_cmd_speed(cam_cmd);
+            debug_cam_gimbal_cmd = 1U;      // 1: rate control
+        } else if (tracking_counter == 0U) {
+            tracking_counter = 1U;
+            Q30->send_cmd_hold_angle();
+            debug_cam_gimbal_cmd = 3U;      // 3: fix/hold
+        }
+        break;
+
+    case 2: // angle control
+        Q30->send_cmd_angle(cam_cmd);
+        debug_cam_gimbal_cmd = 2U;          // 2: angle control
+        break;
+
+    case 3: // ROI control - not implemented
+    default:
+        break;
+    }
+
+    Q30->IR_operation(cam_cmd);
+
+#if HAL_LOGGING_ENABLED
+    AP::logger().Write("TC_C", "TimeUS,RSPD,RAGL,PSPD,PANG,YSPD,YANG,CNTM,ZOOM,SHUT,TRAK", "QhhhhhhBBBB",
+                       AP_HAL::micros64(),
+                       cam_cmd.Roll_Speed_CMD,
+                       cam_cmd.Roll_Angle_CMD,
+                       cam_cmd.Pitch_Speed_CMD,
+                       cam_cmd.Pitch_Angle_CMD,
+                       cam_cmd.Yaw_Speed_CMD,
+                       cam_cmd.Yaw_Angle_CMD,
+                       cam_cmd.Control_Mode,
+                       cam_cmd.Zoom_Focus_Stop_CMD,
+                       cam_cmd.Shutter_CMD,
+                       cam_cmd.Tracking_CMD);
+
+    AP::logger().Write("CM_C", "TimeUS,GIMB,ZOOM,FOCS,RECD,TRAK,IR", "QBBBBBB",
+                       AP_HAL::micros64(),
+                       debug_cam_gimbal_cmd,
+                       debug_cam_zoom_cmd,
+                       debug_cam_focus_cmd,
+                       debug_cam_record_cmd,
+                       debug_cam_track_cmd,
+                       debug_cam_ir_cmd);
+#endif
+}
+
+
+// -------------------------------------------------------------------------
+// Send PMU status to GCS (TM1 / msg 51001)
+// -------------------------------------------------------------------------
+void GCS_MAVLINK::send_message_gcs_flcc_pmu_status() const
+{
+    mavlink_msg_sys_icd_flcc_gcs_pmu_status_send(
+            chan,
+            PMU_Status.Engine_Hour_Count,
+            PMU_Status.Date,
+            PMU_Status.Battery_Current,
+            PMU_Status.Battery_Temp,
+            PMU_Status.Battery_Status,
+            PMU_Status.Engine_RPM,
+            PMU_Status.Engine_Head1_Temp,
+            PMU_Status.Engine_Head2_Temp,
+            PMU_Status.Battery_Quantity_Command,
+            PMU_Status.System_Voltage,
+            PMU_Status.Load_Current,
+            PMU_Status.Current_Control_Command,
+            PMU_Status.PMU_Temp,
+            PMU_Status.PMU_Status,
+            PMU_Status.Throttle_Position_Report,
+            PMU_Status.Fuel_Quantity,
+            PMU_Status.Version_Sub_Number,
+            PMU_Status.Version_Main_Number,
+            PMU_Status.Version_FLCC_Sub_Number,
+            PMU_Status.Version_FLCC_Main_Number,
+            PMU_Status.Version_FLCC_REV_Number,
+            PMU_Status.Version_REV_Number);
+
+#if HAL_LOGGING_ENABLED
+    AP::logger().Write("TM11", "TimeUS,HOURCNT,DATE,IBAT,TEMP,BSTS,RPM,TEMP1,TEMP2,GCMD", "QIIhhHHhhh",
+                       AP_HAL::micros64(),
+                       PMU_Status.Engine_Hour_Count,
+                       PMU_Status.Date,
+                       PMU_Status.Battery_Current,
+                       PMU_Status.Battery_Temp,
+                       PMU_Status.Battery_Status,
+                       PMU_Status.Engine_RPM,
+                       PMU_Status.Engine_Head1_Temp,
+                       PMU_Status.Engine_Head2_Temp,
+                       PMU_Status.Battery_Quantity_Command);
+
+    AP::logger().Write("TM12", "TimeUS,VBUS,ILD,ICMD,PTEMP,PSTS,PCL,GAS,MN,MJ", "QhhhhHbbbb",
+                       AP_HAL::micros64(),
+                       PMU_Status.System_Voltage,
+                       PMU_Status.Load_Current,
+                       PMU_Status.Current_Control_Command,
+                       PMU_Status.PMU_Temp,
+                       PMU_Status.PMU_Status,
+                       PMU_Status.Throttle_Position_Report,
+                       PMU_Status.Fuel_Quantity,
+                       PMU_Status.Version_Sub_Number,
+                       PMU_Status.Version_Main_Number);
+
+    AP::logger().Write("TM13", "TimeUS,FLMJ,FLMN,FLRV,PMRV", "Qbbbb",
+                       AP_HAL::micros64(),
+                       PMU_Status.Version_FLCC_Main_Number,
+                       PMU_Status.Version_FLCC_Sub_Number,
+                       PMU_Status.Version_FLCC_REV_Number,
+                       PMU_Status.Version_REV_Number);
+#endif
+}
+
+
+// -------------------------------------------------------------------------
+// Send PMU command echo to GCS (TM3 / msg 51003)
+// -------------------------------------------------------------------------
+void GCS_MAVLINK::send_message_gcs_flcc_pmu_ctrl_echo() const
+{
+    mavlink_msg_sys_icd_gcs_flcc_pmu_ctrl_echo_send(
+            chan,
+            PMU_Ctrl_Echo.Engine_OnOff_Echo,
+            PMU_Ctrl_Echo.Battery_Control_CMD_Echo,
+            PMU_Ctrl_Echo.Engine_Manual_Echo,
+            PMU_Ctrl_Echo.Engine_Throttle_CMD_Echo,
+            PMU_Ctrl_Echo.Engine_CHK_CMD_Echo,
+            PMU_Ctrl_Echo.Componet_ID,
+            PMU_Ctrl_Echo.PMUCAN_Fail,
+            PMU_Ctrl_Echo.Reserved);
+}
+
+
+// -------------------------------------------------------------------------
+// Receive PMU control command from GCS (TC1 / msg 50001)
+// -------------------------------------------------------------------------
+void GCS_MAVLINK::handle_gcs_flcc_pmu_ctrl(const mavlink_message_t &msg)
+{
+    mavlink_msg_sys_icd_gcs_flcc_pmu_ctrl_decode(&msg, &gcs().PMU_Ctrl);
+
+    // consumed by AP_PMUCAN, which acts on each increment
+    gcs().PMU_Ctrl_Seq = gcs().PMU_Ctrl_Seq + 1;
+
+#if HAL_LOGGING_ENABLED
+    AP::logger().Write("TC1", "TimeUS,EGOF,BCTC,EGM,ETRC,ECHK", "QBBBBB",
+                       AP_HAL::micros64(),
+                       gcs().PMU_Ctrl.Engine_OnOff,
+                       gcs().PMU_Ctrl.Battery_Control_CMD,
+                       gcs().PMU_Ctrl.Engine_Manual,
+                       gcs().PMU_Ctrl.Engine_Throttle_CMD,
+                       gcs().PMU_Ctrl.Engine_CHK_CMD);
+#endif
+}
+
+#if HAL_PROXIMITY_ENABLED && AP_AVOIDANCE_ENABLED
+// -------------------------------------------------------------------------
+// Send object avoidance status to GCS (TM5 / msg 51005)
+// -------------------------------------------------------------------------
+void GCS_MAVLINK::send_message_flcc_gcs_object_avoidance_status() const
+{
+    AP_Proximity *proximity = AP_Proximity::get_singleton();
+    if (proximity == nullptr) {
+        return;
+    }
+
+    uint8_t obj_exists = 0;     // object presence per sector, bit0..bit7
+    uint8_t warning_level = 0;  // 0:none, 1:warning, 2:alert
+
+    // A configured sensor that has stopped reporting must not be scanned for
+    // objects: get_horizontal_distances() fills every sector with dist_max on
+    // failure, which reads back as "no object" and is indistinguishable from a
+    // clear scene.  sensor_failed() is the same predicate that drives the
+    // MAV_SYS_STATUS_SENSOR_PROXIMITY health bit, so TM5 and SYS_STATUS agree.
+    // It is false when no sensor is configured at all.  See README PNU-ISSUE D12.
+    const bool prx_failed = proximity->sensor_failed();
+
+    Proximity_Distance_Array dist_array;
+    if (!prx_failed && proximity->get_horizontal_distances(dist_array)) {
+        // min/max come from the driver, not from a parameter - e.g. TeraRanger
+        // Tower Evo hard-codes 0.5 m / 60 m in AP_Proximity_TeraRangerTowerEvo.h
+        const uint16_t dist_min_cm = (uint16_t)(proximity->distance_min_m() * 100.0f);
+        const uint16_t dist_max_cm = (uint16_t)(proximity->distance_max_m() * 100.0f);
+
+        for (uint8_t i = 0; i < PROXIMITY_MAX_DIRECTION; i++) {
+            if (!dist_array.valid(i)) {
+                // sector never reported a distance: unknown, not clear
+                continue;
+            }
+            const uint16_t distance_cm = (uint16_t)(dist_array.distance[i] * 100.0f);
+            if ((distance_cm >= dist_min_cm) && (distance_cm < dist_max_cm)) {
+                obj_exists |= (1U << i);
+                if (distance_cm <= PNU_OA_ALERT_DISTANCE_CM) {
+                    warning_level |= 2;
+                } else if (distance_cm <= PNU_OA_WARN_DISTANCE_CM) {
+                    warning_level |= 1;
+                }
+            }
+        }
+        if (warning_level > 2) {
+            warning_level = 2;      // alert wins over warning
+        }
+    }
+
+    // TM5 has no encoding for "sensor unhealthy", so report the edge out of band.
+    // KGCS can also read it from the SYS_STATUS proximity health bit.
+    if (prx_failed != gcs().prev_prx_failed) {
+        gcs().prev_prx_failed = prx_failed;
+        if (prx_failed) {
+            GCS_SEND_TEXT(MAV_SEVERITY_CRITICAL, "Avoidance: proximity sensor failed");
+        } else {
+            GCS_SEND_TEXT(MAV_SEVERITY_INFO, "Avoidance: proximity sensor recovered");
+        }
+    }
+
+    gcs().OA_Status.Object_Avoidance_Status = warning_level;
+    gcs().OA_Status.Object_Existence = obj_exists;
+
+    mavlink_msg_sys_icd_flcc_gcs_object_avoidance_status_send(
+            chan,
+            gcs().OA_Status.Object_Avoidance_Status,
+            gcs().OA_Status.Object_Avoidance_Mode,
+            gcs().OA_Status.Object_Existence);
+}
+
+// -------------------------------------------------------------------------
+// Receive object avoidance level command from GCS (TC4 / msg 50004)
+// -------------------------------------------------------------------------
+void GCS_MAVLINK::handle_gcs_flcc_object_avoidance_cmd(const mavlink_message_t &msg)
+{
+    AC_Avoid *avoid = AP::ac_avoid();
+    if (avoid == nullptr) {
+        return;
+    }
+
+    mavlink_msg_sys_icd_gcs_flcc_object_avoidance_cmd_decode(&msg, &gcs().GCS_Ctrl_OA_Mode);
+
+    // KGCS streams this message, so act on a change of mode only
+    if (gcs().prev_Ctrl_OA_Mode == gcs().GCS_Ctrl_OA_Mode.OA_Mode) {
+        return;
+    }
+
+    if (gcs().GCS_Ctrl_OA_Mode.OA_Mode) {
+        // OA level 1 or 2: force avoidance on
+        gcs().OA_Status.Object_Avoidance_Mode = gcs().GCS_Ctrl_OA_Mode.OA_Mode;
+        avoid->proximity_avoidance_enable(true);
+        GCS_SEND_TEXT(MAV_SEVERITY_CRITICAL, "GCS command Avoidance ON Level %u",
+                      (unsigned)gcs().GCS_Ctrl_OA_Mode.OA_Mode);
+        // enabling avoidance against a dead sensor achieves nothing - say so now,
+        // rather than leaving TM5 to report a permanently clear scene (D12)
+        const AP_Proximity *proximity = AP_Proximity::get_singleton();
+        if (proximity != nullptr && proximity->sensor_failed()) {
+            GCS_SEND_TEXT(MAV_SEVERITY_CRITICAL, "Avoidance ON but proximity sensor failed");
+        }
+    } else {
+        // OA level 0: turn avoidance off
+        gcs().OA_Status.Object_Avoidance_Mode = 0;
+        avoid->proximity_avoidance_enable(false);
+        GCS_SEND_TEXT(MAV_SEVERITY_CRITICAL, "GCS command Avoidance OFF");
+    }
+    gcs().prev_Ctrl_OA_Mode = gcs().GCS_Ctrl_OA_Mode.OA_Mode;
+}
+#endif // HAL_PROXIMITY_ENABLED && AP_AVOIDANCE_ENABLED
 
 #endif  // HAL_GCS_ENABLED

@@ -1247,6 +1247,7 @@ public:
     mavlink_sys_icd_gcs_flcc_object_avoidance_cmd_t		GCS_Ctrl_OA_Mode;					// PNU : MAVLINK Message for Object Avoidance Level Control
     mavlink_sys_icd_flcc_gcs_object_avoidance_status_t	OA_Status;							// PNU : MAVLINK Message sent to GCS for Object Avoidance Status
     uint8_t prev_Ctrl_OA_Mode = 4;
+    bool prev_prx_failed;                                                                   // PNU : latches the proximity healthy/failed edge for the TM5 warning (D12)
 
     void update_send();
     void update_receive();

@@ -214,6 +214,12 @@ void AP_Mount_Backend::set_angle_target(float roll_deg, float pitch_deg, float y
 
 // sets rate target in deg/s
 // yaw_lock should be true if the yaw rate is earth-frame, false if body-frame (e.g. rotates with body of vehicle)
+// PNU : this deliberately does NOT apply pitch_target_is_reversed(), unlike
+// set_angle_target() above.  The only KGCS caller, AP_Q30::send_cmd_speed(),
+// negates Pitch_Speed_CMD itself before calling here, so the operator already
+// sees the image convention on the rate path.  Adding the flip here would
+// double-negate it and invert KGCS gimbal pitch rate.  See README PNU-ISSUE
+// "Viewpro pitch reversal".
 void AP_Mount_Backend::set_rate_target(float roll_degs, float pitch_degs, float yaw_degs, bool yaw_is_earth_frame)
 {
     // set rate targets
