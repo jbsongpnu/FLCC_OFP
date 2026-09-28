@@ -372,6 +372,11 @@ protected:
     // are always applied in ArduPilot convention before the sign is flipped.
     virtual bool pitch_target_is_reversed() const { return false; }
 
+    // returns true if this gimbal should NOT emit GIMBAL_DEVICE_ATTITUDE_STATUS
+    // (msg 285). Used where a ground station mis-handles it; the base default
+    // keeps the standard MAVLink behaviour for every other gimbal. (PNU)
+    virtual bool suppress_gimbal_device_attitude_status() const { return false; }
+
     // change to RC_TARGETTING mode if rc inputs have changed by more than the dead zone
     // should be called on every update
     void set_rctargeting_on_rcinput_change();

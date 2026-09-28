@@ -232,13 +232,20 @@ const AP_Param::GroupInfo AP_SerialManager::var_info[] = {
     // @CopyFieldsFrom: SERIAL1_PROTOCOL
     // @DisplayName: Serial4 protocol selection
     // @Description: Control what protocol Serial4 port should be used for. Note that the Frsky options require external converter hardware. See the wiki for details.
-    AP_GROUPINFO("4_PROTOCOL",  7, AP_SerialManager, state[4].protocol, DEFAULT_SERIAL4_PROTOCOL),
+    // AP_GROUPINFO("4_PROTOCOL",  7, AP_SerialManager, state[4].protocol, DEFAULT_SERIAL4_PROTOCOL),
 
     // @Param: 4_BAUD
     // @CopyFieldsFrom: SERIAL1_BAUD
     // @DisplayName: Serial 4 Baud Rate
     // @Description: The baud rate used for Serial4. Most stm32-based boards can support rates of up to 1500. If you setup a rate you cannot support and then can't connect to your board you should load a firmware from a different vehicle type. That will reset all your parameters to defaults.
-    AP_GROUPINFO("4_BAUD", 8, AP_SerialManager, state[4].baud, DEFAULT_SERIAL4_BAUD),
+    // AP_GROUPINFO("4_BAUD", 8, AP_SerialManager, state[4].baud, DEFAULT_SERIAL4_BAUD),
+
+// ==================================================================================
+// KAL OFP Firmware version : OFP_Orange v1.99.1
+// Data  : 21/04/30
+// ==================================================================================
+	AP_GROUPINFO("4_PROTOCOL",  7, AP_SerialManager, state[4].protocol, SerialProtocol_Gimbal),       // Configure the Serial 4 Protocol for CAM Interface (KAL)
+	AP_GROUPINFO("4_BAUD",      8, AP_SerialManager, state[4].baud, AP_SERIALMANAGER_CONSOLE_BAUD/1000), // Configure the Serial 4 baudrate of for CAM Interface (KAL)
 #endif
 
 #if HAL_HAVE_SERIAL5_PARAMS

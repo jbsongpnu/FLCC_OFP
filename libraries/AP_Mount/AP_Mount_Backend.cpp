@@ -387,14 +387,12 @@ void AP_Mount_Backend::set_target_sysid(uint8_t sysid)
 // send a GIMBAL_DEVICE_ATTITUDE_STATUS message to GCS
 void AP_Mount_Backend::send_gimbal_device_attitude_status(mavlink_channel_t chan)
 {
-    // PNU-ISSUE(D8) blocked-until: Gremsy / MAVLink2 camera bring-up.
-    //   This early return is NOT virtual, and AP_Mount::send_gimbal_device_attitude_status()
-    //   calls it for every instance, so msg 285 is suppressed for ALL gimbal types - not
-    //   just Viewpro. Harmless for KGCS (it reads gimbal attitude from TM2), but any other
-    //   GCS loses gimbal attitude for a Gremsy/Siyi/etc. Make it an opt-in backend
-    //   capability before Gremsy work. See README "Deferred Issues".
-    // PNU : disable GIMBAL_DEVICE_ATTITUDE_STATUS (msg 285) due to error in KGCS
-    return;
+    // PNU : suppress msg 285 only for backends that ask for it (Viewpro, because
+    // KGCS mis-handles it and reads gimbal attitude from TM2 instead). Every other
+    // gimbal keeps standard MAVLink behaviour.
+    if (suppress_gimbal_device_attitude_status()) {
+        return;
+    }
 
     if (suppress_heartbeat()) {
         // block heartbeat from transmitting to the GCS

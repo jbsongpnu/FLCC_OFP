@@ -66,11 +66,17 @@ void AP_Mount_Viewpro::update()
         send_comm_config_cmd(CommConfigCmd::QUERY_FIRMWARE_VER);
     }
 
-    // PNU-ISSUE(D1) blocked-until: step5+step7 bench test. Two defects held here
-    //   pending validation: (a) _image_sensor is not re-checked at send time and
-    //   can drift (it is set only from gimbal telemetry), (b) the send result is
-    //   ignored and the pending colour is cleared regardless. Fix strategy and
-    //   the open question ("one C1 per gimbal cycle"?) are in README Deferred Issues.
+    // PNU-ISSUE(D1) mechanism hardware-verified; two residual races remain, both
+    //   cosmetic (a dropped palette command the operator re-presses):
+    //   (a) _image_sensor is not re-checked here - it is assigned ONLY from gimbal
+    //       telemetry (line ~313; set_camera_source() never touches it), so it would
+    //       have to change inside the 100 ms window to bite.
+    //   (b) the send result is ignored and _palette_pending_color is cleared anyway,
+    //       which needs a UART txspace failure at this instant.
+    //   The prelude-to-colour gap is always 100 ms: update() self-throttles to
+    //   AP_MOUNT_VIEWPRO_UPDATE_INTERVAL_MS, independent of the AP_Mount task rate.
+    //   Closure depends on whether KGCS sends TC2 on operator action (races
+    //   unreachable - close as-is) or streams it (apply the fix). See README.
     // PNU : send any deferred IR-palette packet from the previous tick. The
     // prelude (IR_RAINBOW) was sent last tick; the gimbal MCU only services
     // one C1 command per its own scheduler cycle, so we wait one update()

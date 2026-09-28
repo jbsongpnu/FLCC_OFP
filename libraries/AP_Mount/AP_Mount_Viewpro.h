@@ -110,6 +110,10 @@ public:
     // PNU : Viewpro takes pitch angle targets with the opposite sign to ArduPilot
     bool pitch_target_is_reversed() const override { return true; }
 
+    // KGCS mis-handles GIMBAL_DEVICE_ATTITUDE_STATUS (msg 285); it reads gimbal
+    // attitude from TM2 instead, so suppress 285 for this backend only (PNU)
+    bool suppress_gimbal_device_attitude_status() const override { return true; }
+
 protected:
 
     // Viewpro can send either rates or angles

@@ -218,10 +218,15 @@ const AP_Scheduler::Task Copter::scheduler_tasks[] = {
     SCHED_TASK_CLASS(GCS,                  (GCS*)&copter._gcs,          update_receive, 400, 180, 102),
     SCHED_TASK_CLASS(GCS,                  (GCS*)&copter._gcs,          update_send,    400, 550, 105),
 #if HAL_MOUNT_ENABLED
-    // PNU-ISSUE(D8) step 5 lowers this to 10 Hz. Angle maths is safe (Viewpro and
-    // Gremsy both declare NATIVE_ANGLES_AND_RATES_ONLY so AP_MOUNT_UPDATE_DT is
-    // never used), but send_m_ahrs() then feeds the gimbal 5x staler attitude for
-    // its own stabilisation loop. Verify with Gremsy / MAVLink2 cameras.
+    // PNU : kept at 50 Hz - V5.0.8 lowered this to 10 Hz, deliberately reverted.
+    // AP_Mount_Viewpro::update() self-throttles to AP_MOUNT_VIEWPRO_UPDATE_INTERVAL_MS
+    // (100 ms, upstream), so gimbal traffic is 10 Hz either way; the scheduler rate does
+    // not control it. But at 10 Hz the scheduler period equals that throttle interval,
+    // so any late tick pushes the update a full period later -> 200 ms (5 Hz) bursts.
+    // 50 Hz oversamples the throttle 5x (worst case 120 ms) and also keeps
+    // AP_Mount_Backend::update() - servo retract, update_poi_lock_target() - at full
+    // rate, since that runs BEFORE the throttle. To cut gimbal traffic, raise
+    // AP_MOUNT_VIEWPRO_UPDATE_INTERVAL_MS instead. See README PNU-ISSUE D8.
     SCHED_TASK_CLASS(AP_Mount,             &copter.camera_mount,        update,          50,  75, 108),
 #endif
 #if AP_CAMERA_ENABLED
