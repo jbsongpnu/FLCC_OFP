@@ -5,6 +5,13 @@
  *       boolean failsafe reflects the current state
  */
 
+ // ==================================================================================
+// PNU-KAL OFP Firmware version
+// ==================================================================================
+// -------------------------------------------------------------------------
+// Define variables for CAM & PMU (KAL)
+extern mavlink_sys_icd_gcs_flcc_pmu_ctrl_echo_t         PMU_Ctrl_Echo;      // MAVLINK Message for PMU Command ECHO (KAL)
+
 bool Copter::failsafe_option(FailsafeOption opt) const
 {
     return (g2.fs_options & (uint32_t)opt);
@@ -522,4 +529,62 @@ void Copter::do_failsafe_action(FailsafeAction action, ModeReason reason){
     }
 #endif
 }
+
+// ==================================================================================
+// PNU-KAL OFP Firmware version
+// ==================================================================================
+// -------------------------------------------------------------------------
+// failsafe_pmucan_check : PMU Failsafe Action
+// -------------------------------------------------------------------------
+// PNU-ISSUE(D9) see README Deferred Issues. (a) RESOLVED - failsafe.pmucan now
+//   clears on recovery below, matching failsafe.terrain / .deadreckon.
+//   (b) OPEN - this cannot tell "PMU lost in flight" from "armed without one",
+//       so an emergency launch after a PMU dropout is disarmed ~100 ms after
+//       arming, with no prearm warning. Design agreed (arm-time healthy latch +
+//       a Check::SYSTEM prearm check, no new parameter) - see README D9(b).
+//       Deliberately left for its own commit: it changes flight-safety behaviour.
+void Copter::failsafe_pmucan_check()
+{
+    // Check PMU Failsafe Condition
+    if(PMU_Ctrl_Echo.PMUCAN_Fail == 2)
+    {
+        // Before Connection with PMU
+        return;
+    }
+    else if(PMU_Ctrl_Echo.PMUCAN_Fail == 0)
+    {
+        // Normal Operation - clear the failsafe on recovery so it can trigger
+        // again on a later flight (PNU)
+        if (failsafe.pmucan) {
+            LOGGER_WRITE_ERROR(LogErrorSubsystem::FAILSAFE_PMU, LogErrorCode::ERROR_RESOLVED);
+            failsafe.pmucan = false;
+        }
+        return;
+    }
+
+    // Check Condition : Already Failfe or Not Arming
+    if(failsafe.pmucan||!motors->armed())
+    {
+        return;
+    }
+
+    // Set Failsafe Flag
+    failsafe.pmucan = true;
+
+    // Log Data Error Code
+    LOGGER_WRITE_ERROR(LogErrorSubsystem::FAILSAFE_PMU, LogErrorCode::FAILSAFE_OCCURRED);
+
+    // Check Condition : Disarm
+    if(should_disarm_on_failsafe())
+    {
+        // Set Disarm
+        arming.disarm(AP_Arming::Method::FAILSAFE_PMU);
+    }
+    else
+    {
+        // Set RTL ot Land
+        set_mode_RTL_or_land_with_pause(ModeReason::FAILSAFE_PMU);
+    }
+}
+
 

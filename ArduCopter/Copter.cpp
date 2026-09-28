@@ -734,6 +734,7 @@ void Copter::ten_hz_logging_loop()
         camera_mount.write_log();
     }
 #endif
+    failsafe_pmucan_check();        // check PMU failsafe condition & action (PNU)
 }
 
 // twentyfive_hz_logging - should be run at 25hz

@@ -414,6 +414,7 @@ private:
         uint8_t terrain             : 1; // true if the missing terrain data failsafe has occurred
         uint8_t adsb                : 1; // true if an adsb related failsafe has occurred
         uint8_t deadreckon          : 1; // true if a dead reckoning failsafe has triggered
+        uint8_t pmucan              : 1; // PMU failsafe has triggered (PNU)
     } failsafe;
 
     bool any_failsafe_triggered() const {
@@ -825,6 +826,7 @@ private:
     bool should_disarm_on_failsafe();
     void do_failsafe_action(FailsafeAction action, ModeReason reason);
     void announce_failsafe(const char *type, const char *action_undertaken=nullptr);
+    void failsafe_pmucan_check(void);       // PMU failsafe action (PNU)
 
     // failsafe.cpp
     void failsafe_enable();
