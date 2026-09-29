@@ -763,9 +763,14 @@ def _build_cmd_tweaks(bld):
 
 def _build_dynamic_sources(bld):
     if not bld.env.BOOTLOADER:
+        # PNU: built from the staged copy, not the submodule, so modules/mavlink stays
+        # pristine.  Regenerate with Tools/pnu/stage_mavlink_defs.sh.
+        pnu_mavlink_defs = 'Tools/pnu/mavlink_defs/all.xml'
+        if bld.srcnode.find_node(pnu_mavlink_defs) is None:
+            bld.fatal('%s is missing - run Tools/pnu/stage_mavlink_defs.sh' % pnu_mavlink_defs)
         bld(
             features='mavgen',
-            source='modules/mavlink/message_definitions/v1.0/all.xml',
+            source=pnu_mavlink_defs,
             output_dir='libraries/GCS_MAVLink/include/mavlink/v2.0/',
             name='mavlink',
             # this below is not ideal, mavgen tool should set this, but that's not

@@ -41,7 +41,7 @@
 // so 08 / 09 will not compile.
 #define OFP_VER_MAIN        5
 #define OFP_VER_SUB         0
-#define OFP_VER_REV         8
+#define OFP_VER_REV         9
 
 #ifndef HAL_GCS_ALLOW_PARAM_SET_DEFAULT
 #define HAL_GCS_ALLOW_PARAM_SET_DEFAULT 1
@@ -1242,6 +1242,14 @@ public:
 // ==================================================================================
 // PNU - KAL OFP Firmware version : UNCLASSIFIED
 // ==================================================================================
+// PNU-ISSUE(D3) : the PNU-KAL ICD messages come from the staged MAVLink definitions in
+// Tools/pnu/mavlink_defs/, which are generated and gitignored.  On a fresh clone they do
+// not exist yet, and the build would otherwise fail with a pile of unrelated unknown-type
+// errors.  Fail here instead, with something actionable.
+#if !defined(MAVLINK_MSG_ID_SYS_ICD_FLCC_GCS_PMU_STATUS)
+#error "PNU-KAL MAVLink dialect missing - run Tools/pnu/stage_mavlink_defs.sh, then ./waf clean"
+#endif
+
     mavlink_sys_icd_gcs_flcc_pmu_ctrl_t    PMU_Ctrl;                                        // PNU : MAVLINK Message for PMU Command
     uint8_t PMU_Ctrl_Seq;                                                                   // PNU : Sequence Number of PMU Control Command
     mavlink_sys_icd_gcs_flcc_object_avoidance_cmd_t		GCS_Ctrl_OA_Mode;					// PNU : MAVLINK Message for Object Avoidance Level Control

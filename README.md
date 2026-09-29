@@ -1,12 +1,14 @@
 # Migration Break Point for Future Updates
-- This branch will update Copter-4.7.1 to FLCC V5.0.8 step-by-step to find new commit break points for future updates.  
-- IN THIS VERSION : Step 8 - Object avoidance (`UserCode.cpp`, `APM_Config.h`)  
-   - `USERHOOK_INIT` and `USERHOOK_MEDIUMLOOP` enabled; TM2 (CAM status) and TM5 (object avoidance) now stream at 10 Hz  
-   - This is the **last migration step**; both free-floaters have since been reviewed and **deliberately not applied** - each file carries a `PNU-NOT-APPLIED` note  
-   - New PNU-ISSUE D13 : the CAM path depends on `HAL_MOUNT_ENABLED` with no guard - a mount-disabled build will not compile  
-   - PNU-ISSUE D10's TM2 residual is now **live** rather than latent - TM2 actually streams from this step  
+- This branch will update Copter-4.7.1 to FLCC V5.0.8 step-by-step to find new commit break points for future updates.
+- All essential works to make migration break points are done and currently reviewing and revising code for PNU-ISSUE
+- IN THIS VERSION : More Updates to organize releasable verion 5.0.9 from 5.0.8
+   - Issue D1 status flipped - reviewed but not closed - but Viewpro worked fine
+   - Issue D2 is resolved 
+   - Issue D3 is resolved : Do not go back to previous version. This change is critical. See notes.
+   - Viewpro related instructions are added as "bench findings" in this README.md
 - PNU-KAL Specific options  
    - CAN Driver Option for PMU : CAN_D1_PROTOCOL = 15  
+   - KGCS telemetry port : SERIALx_PROTOCOL = 2 (MAVLink2) - **never 1**. Every PNU-KAL ICD message is id >= 50001, which MAVLink1 cannot encode, so a port left on 1 carries no PMU/CAM telemetry and accepts no TC commands at all. See PNU-ISSUE D2  
 - Viewpro Mount Specific options  
    - MNT1_TYPE = 11 (Viewpro) / CAM1_TYPE = 4 (Mount) / SERIALx_BAUD = 115 (115,200 bps) / SERIALx_PROTOCOL = 8 (Viewpro)  
 - Gremsy Mount Specific options  
@@ -16,7 +18,7 @@
 
 | # | Step | Files | Needs | Unblocks |
 |:---:|---|---|---|---|
-| 1 | MAVLink dialect | `Forced Submodule File/` ×2 | — | 2, 4, 5, 7, 8 |
+| 1 | MAVLink dialect | `Forced Submodule File/pnu_kal.xml`, `Tools/pnu/stage_mavlink_defs.sh`, `wscript` | — | 2, 4, 5, 7, 8 |
 | 2 | Enum & ID registry | `ModeReason.h`, `AP_Logger.h`, `AP_Arming.h`, `AP_CAN.h`, `ap_message.h`, `GCS.h`, `AP_Arming.cpp` | 1 | 4, 5, 6, 7, 8 |
 | 3 | Gimbal driver | `AP_Mount.{cpp,h}`, `AP_Mount_Backend.{cpp,h}`, `AP_Mount_Viewpro.{cpp,h}` | — | 5, 7 |
 | 4 | PMU CAN stack / version.h | `AP_PMUCAN/` ×6, `AP_CANManager.{h,cpp}`, `wscript` (PMUCAN line only), `version.h` | 1, 2 | 6, 7 |
@@ -38,9 +40,9 @@ grep -rn "PNU-ISSUE" libraries/ ArduCopter/
 
 | ID | Issue | Site | Blocked until | Decision needed |
 |:--:|---|---|:--:|---|
-| D1 | **IR palette deferral - mechanism hardware-verified; two residual races.** Hardware test confirms the prelude &rarr; 100 ms &rarr; colour sequence works, including alongside `set_camera_source`. Two defects remain but are narrow races that normal operation will not reach: (a) `_image_sensor` is not re-checked at send time - it is assigned *only* from gimbal telemetry (`AP_Mount_Viewpro.cpp:313`; `set_camera_source()` never touches it), so it would have to change inside the 100 ms window; (b) the send result is ignored and the pending colour cleared regardless, which needs a UART txspace failure at that instant. Consequence of either is cosmetic - one dropped palette command the operator re-presses; nothing safety-relevant. The prelude-to-colour gap is always **100 ms** (`update()` self-throttles to `AP_MOUNT_VIEWPRO_UPDATE_INTERVAL_MS`), independent of the `AP_Mount` scheduler rate. Note: the `0x23`/`0x24` substitution in `AP_Q30` is a camera *vendor* change (newer units dropped the extended pseudo-colour options; `0x0E`, `0x0F`, `0x21`, `0x22` work, IR_RAINBOW offers Red only) - not evidence of deferral misbehaviour. | `AP_Mount_Viewpro.cpp` | — | **Closure depends on one fact, shared with D7: does KGCS send TC2 only on operator action, or stream it?** On-action &rarr; two messages cannot arrive within 100 ms, race is unreachable, **close with no code change**. Streamed &rarr; apply the ~10-line fix (snapshot sensor + staleness deadline, clear only on success). Still untested: whether the deferral is *needed* at all - that requires removing the prelude and retesting. |
-| D2 | All 7 PNU-KAL ICD messages are id ≥ 50001, so MAVLink **v2 only**. A link set to `SERIALn_PROTOCOL=1` (MAVLink1) silently carries no PNU-KAL telemetry or commands. | `Forced Submodule File/common.xml` | 7 | Assert v2 on the PNU-KAL link, or document as a setup constraint |
-| D3 | The `modules/mavlink` dialect edits are invisible to git — a `submodule update` or fresh clone silently reverts them and the build fails at step 7 with ~21 unknown-type errors. | `Forced Submodule File/ReadMe.txt` | — | Write `Tools/pnu/apply_mavlink_dialect.sh` (idempotent re-apply) |
+| D1 | **IR palette deferral - mechanism hardware-verified; two residual races.** Hardware test confirms the prelude &rarr; 100 ms &rarr; colour sequence works, including alongside `set_camera_source`. Two defects remain but are narrow races that normal operation will not reach: (a) `_image_sensor` is not re-checked at send time - it is assigned *only* from gimbal telemetry (`AP_Mount_Viewpro.cpp:313`; `set_camera_source()` never touches it), so it would have to change inside the 100 ms window; (b) the send result is ignored and the pending colour cleared regardless, which needs a UART txspace failure at that instant. Consequence of either is cosmetic - one dropped palette command the operator re-presses; nothing safety-relevant. The prelude-to-colour gap is always **100 ms** (`update()` self-throttles to `AP_MOUNT_VIEWPRO_UPDATE_INTERVAL_MS`), independent of the `AP_Mount` scheduler rate. Note: the `0x23`/`0x24` substitution in `AP_Q30` is a camera *vendor* change (newer units dropped the extended pseudo-colour options; `0x0E`, `0x0F`, `0x21`, `0x22` work, IR_RAINBOW offers Red only) - not evidence of deferral misbehaviour. | `AP_Mount_Viewpro.cpp` | — | **ANSWERED (2026-09-29): KGCS streams TC2.** Bench test confirmed the camera works with KGCS sending commands both intermittently and constantly, so the streamed case is real and the race is reachable. Per this row's own decision rule that means **apply the ~10-line fix** (snapshot `_image_sensor` + staleness deadline, clear the pending colour only on success) - D1 can no longer be closed as unreachable. Add to the same fix: `IR_operation()` has **no change detection** on the palette commands (unlike zoom, which guards on `prev_EO_zoom_cmd` / `prev_IR_zoom_cmd`), so a *held* `Tracking_CMD` while streaming re-fires `IR_Color_Change()` every cycle and overwrites the pending-colour slot continuously. Confirm from `TC_C.TRAK` whether KGCS holds the palette value or returns it to 0; palette changes currently work, which suggests momentary. Still untested: whether the deferral is *needed* at all - that requires removing the prelude and retesting. |
+| D2 | All 7 PNU-KAL ICD messages are id ≥ 50001, so MAVLink **v2 only**. A link set to `SERIALn_PROTOCOL=1` (MAVLink1) silently carries no PNU-KAL telemetry or commands. | `Forced Submodule File/common.xml` | — | **RESOLVED (2026-09-29) - documented as a setup constraint**, see the header. A runtime warning was designed (gate the four PNU cases in `try_send_message()` on the existing `sending_mavlink1()`, warn once per channel via STATUSTEXT, which is id 253 and so does reach a MAVLink1 GCS) and **rejected as unnecessary**: a MAVLink1 link means *no* PMU messages at all, which is self-evident at the GCS; the port parameter is checked regardless; and PNU's offline preflight procedure already fixes the protocol. No code change. Verified mechanism, so nobody need re-investigate: the failure is a clean drop, not corruption - `mavlink_helpers.h:339` refuses msgid > 255 and counts a parse error, so a misconfigured link also shows a rising parse-error count. Such a channel never self-upgrades either, since the auto-upgrade in `packetReceived()` (`GCS_Common.cpp:1904`) requires the configured protocol to already be MAVLink2 |
+| D3 | The `modules/mavlink` dialect edits are invisible to git — a `submodule update` or fresh clone silently reverts them and the build fails at step 7 with ~21 unknown-type errors. | `Forced Submodule File/ReadMe.txt` | — | **RESOLVED (2026-09-29).** The submodule is now left **completely pristine** - the definitions are staged outside it and the build runs from the staged copy. See the section below |
 | D4 | `OFP_VER_MAIN/SUB/REV` in `GCS.h` and `FW_MAJOR/MINOR/PATCH` in `version.h` are two hand-maintained copies of the same version with nothing enforcing agreement. | `GCS.h`, `version.h` | 4 | **RESOLVED (step 4)** - `static_assert` in `Copter.cpp` (only TU seeing both; `AP_PMUCAN.cpp` cannot include the vehicle `version.h`) |
 | D5 | **OPEN - not started.** 357 of `GCS_Common.cpp`'s 429 added lines are one block appended at EOF — the main recurring merge cost on every future ArduPilot bump, and the only issue here whose cost grows with time rather than staying flat. | `GCS_Common.cpp` | — (was 7) | **Not done.** Step 7 cleared the prerequisite only - the block now exists to be moved; `libraries/GCS_MAVLink/GCS_PNU.cpp` has not been created. Extract the 357-line EOF block there: it is self-contained and touches no `GCS_Common.cpp` statics. **72 lines must stay behind** - the 4 `try_send_message()` cases, 3 `handle_message()` cases, 4 id-map entries and 2 includes - and that is the residual per-bump merge cost. Worth doing *before* the D12 proximity rework, so that rework lands in a file that does not re-conflict on every upstream merge |
 | D6 | `AP_PMUCAN::handleFrame()` performs no DLC validation - each case `memcpy`s from fixed offsets up to `data[7]` whatever `can_rxframe.dlc` says. No out-of-bounds read (`data[]` is fixed 8 bytes), but a short or malformed PMU frame is parsed silently and produces stale values for battery current, RPM, fuel quantity etc. | `AP_PMUCAN.cpp` | — | Confirm expected DLC per PMU message ID in the ICD, then reject or pad short frames |
@@ -51,6 +53,74 @@ grep -rn "PNU-ISSUE" libraries/ ArduCopter/
 | D11 | **Even with correct routing (D10), the MAVLink camera backend cannot cover everything KGCS needs.** Pristine 4.7.1 *does* have a MAVLink camera path (`AP_Camera_MAVLinkCamV2`, `CAM1_TYPE=6`) - it is the *mount* that is gimbal-only. Of `AP_Q30`'s 8 camera functions, 4 work, 2 exist only in the `AP_Camera` base, and 2 have **no path at all**: `get_zoom_times` (the backend never decodes `CAMERA_SETTINGS` msg 260, where `zoomLevel` lives) and `IR_Color_Change` (MAVLink has no standard thermal-palette message). | `AP_Camera_MAVLinkCamV2.cpp` | — | Bench a real VIO first; then decide per function - upstream fix, local fix, or vendor-specific. See details below. |
 | D12 | **TM5 could not distinguish "nothing nearby" from "sensor reporting nothing".** *RESOLVED (step 7), decision provisional - see revisit note below.* The V5.0.8 code ignored the return of `get_horizontal_distances()`, which fills every sector with `dist_max` on failure (`AP_Proximity_Boundary_3D.cpp:434`) and reads back as "no object" - so a dead sensor was byte-identical to open sky. Sector scanning is now gated on `sensor_failed()`, the return value is checked, and `dist_array.valid(i)` excludes sectors that never reported. | `GCS_Common.cpp` | — | **Decided for now: no ICD change** (provisional - PNU will revisit). `Object_Avoidance_Status = 3` ("sensor unhealthy") was considered and **rejected** - it would need a KGCS update, and the failure already reaches KGCS two other ways. TM5 stays all-zero when the sensor is dead; the health signal is the `MAV_SEVERITY_CRITICAL` statustext on the healthy&rarr;failed edge (plus one if avoidance is switched on while already failed) and the `MAV_SYS_STATUS_SENSOR_PROXIMITY` bit, which `GCS_Copter.cpp:67` drives from the *same* `sensor_failed()` predicate - so TM5 and `SYS_STATUS` cannot contradict each other. **Residual:** confirm 10 m / 15 m are the intended operator thresholds (`PNU_OA_ALERT_DISTANCE_CM` / `PNU_OA_WARN_DISTANCE_CM`); they are hard-coded and unrelated to `AVOID_MARGIN` |
 | D13 | **The KGCS camera path hard-depends on `HAL_MOUNT_ENABLED` with no guard.** `AP::mount()` is declared only inside `#if HAL_MOUNT_ENABLED` (`AP_Mount.h`), but `AP_Q30.cpp` calls it 5x with no guard and `AP_Q30.h` has no `#if` at all; `GCS_Common.cpp::send_message_gcs_flcc_cam_status()` and now `UserCode.cpp`'s 10 Hz `MSG_CAM_STATUS` send sit on the same chain. `HAL_MOUNT_ENABLED` defaults to 1 so CubeOrangePlus is unaffected, but it is a `build_options.py` feature - a custom build with MOUNT disabled fails to compile, not gracefully degrade. Contradicts the AGENTS.md rule that a core component must not depend on an optional one. | `AP_Q30.{h,cpp}`, `GCS_Common.cpp`, `UserCode.cpp` | — | Wrap the `AP_Q30` class body and every CAM call site in `#if HAL_MOUNT_ENABLED`, or give `AP_Q30` its own `AP_Q30_ENABLED` flag defaulting to `HAL_MOUNT_ENABLED` and add it to `build_options.py`. Cheap and self-contained; deferred only to keep step 8 to the OA change. Verify with a `HAL_MOUNT_ENABLED=0` build, not by inspection |
+
+
+**PNU-ISSUE D3 - resolved 2026-09-29.** `modules/mavlink` is left **completely pristine**.
+
+*The problem:* the parent repo cannot track submodule file contents, so any edit inside
+`modules/mavlink` is invisible to git and is silently reverted by `git submodule update`,
+a fresh clone or a submodule bump.
+
+*How it used to be:* the 7 PNU messages were appended to the submodule's `common.xml`,
+which meant keeping a full **7579-line copy** of `common.xml` in `Forced Submodule File/`
+and overwriting the upstream file with it - so every ArduPilot bump would have **silently
+reverted upstream's `common.xml` changes**. `cubepilot.xml` also had 5 ids renumbered
+50001-50005 &rarr; 70001-70005 to dodge an id collision.
+
+*How it works now:* nothing inside the submodule is touched. The definitions are staged
+beside it and the build reads the staged copy.
+
+| Piece | Tracked? | Role |
+|---|:--:|---|
+| `Forced Submodule File/pnu_kal.xml` | yes | the 7 message definitions |
+| `Tools/pnu/stage_mavlink_defs.sh` | yes | copies the 19 upstream XMLs + `pnu_kal.xml` into the staging dir, drops `cubepilot.xml`, stamps the source commit |
+| `Tools/pnu/mavlink_defs/` | **no - gitignored** | the staged copy (~944 KB), regenerated, never committed |
+| `wscript` (1 line) | yes | builds from `Tools/pnu/mavlink_defs/all.xml` |
+| `modules/mavlink` | — | **pristine** |
+
+```
+Tools/pnu/stage_mavlink_defs.sh            # stage; safe to re-run
+Tools/pnu/stage_mavlink_defs.sh --check    # exit 1 if missing or stale
+```
+
+`cubepilot.xml` is simply not staged, rather than renumbered: its ids collide with the
+PNU-KAL ICD, nothing in ArduPilot references `CUBEPILOT_*` or `HERELINK_*`, and PNU uses
+no Herelink or CubePilot raw RC. It must be dropped from **both** `all.xml` (the build
+root) and `ardupilotmega.xml`, which includes it directly as well.
+
+**The staging dir must never be committed.** Tracking it would put a ~944 KB duplicate of
+upstream in the repo that rots on every bump - precisely the `common.xml` problem this
+replaced. Only the transform is tracked.
+
+**Re-run the script after any `modules/mavlink` change.** This is the one hazard the
+staged approach introduces: a stale stage still contains the PNU messages, so it builds
+happily against *last month's* upstream definitions with nothing to show for it. The stage
+records the submodule commit in `.source-commit` and `--check` compares it against HEAD,
+which is what catches this. Worth wiring into CI.
+
+*Three failure paths, all reported clearly - each one verified by reproducing it:*
+
+| Failure | What you get |
+|---|---|
+| nothing staged (fresh clone) | waf stops: `Tools/pnu/mavlink_defs/all.xml is missing - run Tools/pnu/stage_mavlink_defs.sh` |
+| stale stage | `--check` exits 1, printing both commits |
+| staged but PNU messages absent | compile stops at `GCS.h`: `PNU-KAL MAVLink dialect missing` |
+
+That last guard has to live in `GCS.h`, not `AP_Q30.h` - `GCS.h` declares the PNU message
+types itself (step 2) and is compiled first, so a guard placed later never fires. With
+`-Wfatal-errors` it is then the only error reported.
+
+The waf-level check is not optional: without it, a missing staging dir fails with
+`TypeError: 'NoneType' object is not iterable` out of waf's node resolution, which says
+nothing about the cause.
+
+*Why not keep the message definitions in the submodule and just script the re-apply?*
+That was implemented first and worked, but it still needed 3 lines inside the submodule,
+which vanish silently on every update. *Why not point `wscript` straight at the submodule's
+`all.xml` plus a PNU root file?* Tested: mavgen resolves the external root correctly, but
+`ardupilotmega.xml` includes `cubepilot.xml` itself, so the id collision returns and cannot
+be avoided without either editing the submodule or renumbering the three colliding PNU ids
+(50001, 50002, 50004), which is an ICD change requiring KGCS work.
 
 **PNU-ISSUE D7 bench matrix** - engine disconnected, watch `Engine_OnOff_Echo` in TM3:
 
@@ -91,13 +161,101 @@ gimbal pitch rate. A comment at `AP_Mount_Backend::set_rate_target()` says so.
 
 `AP_Q30::send_cmd_hold_angle()` sends an all-zero rate, so the sign is irrelevant there.
 
-The limits (`MNT1_PITCH_MIN` / `MNT1_PITCH_MAX`) are applied in ArduPilot
-convention *before* the sign flip, so they keep their documented meaning: set
-them to the gimbal's true mechanical travel, negative = down.
+**The pitch limits are in KGCS convention, not physical.** `set_angle_target()`
+constrains *before* it negates, so `MNT1_PITCH_MIN` / `MNT1_PITCH_MAX` bound the
+**commanded** value, and the achievable physical range is their negation:
+
+```
+MNT1_PITCH_MAX = degrees of DOWN travel allowed   (positive)
+MNT1_PITCH_MIN = -(degrees of UP travel allowed)  (negative)
+```
+
+The stock defaults (`MIN -90`, `MAX 20`) therefore give only 20 deg of look-down and
+90 deg of look-up on a Viewpro - backwards for a camera. Symmetric limits are **not** a
+safe shortcut: the travel is asymmetric, and `MIN -90` commands 90 deg up, past the
+mechanical stop, which saturates the gimbal and raises an internal error.
+
+Measured on the bench (Viewpro, 2026-09-29): up saturates near **60 deg physical**
+(commanded -60), so `MNT1_PITCH_MIN` must stay at or above -60.
+
+**Final values, bench-tested 2026-09-29:**
+
+| Parameter | Value | Gives |
+|---|:--:|---|
+| `MNT1_PITCH_MAX` | **90** | 90 deg **down** - full nadir |
+| `MNT1_PITCH_MIN` | **-45** | 45 deg **up** |
+
+The -45 is a deliberate ~15 deg margin inside the measured 60 deg up stop - do not
+"optimise" it to -60, that is the saturation point where the gimbal raises an internal
+error.
+
+Note the limits apply to the **angle** path only. Viewpro declares
+`NATIVE_ANGLES_AND_RATES_ONLY`, so rate commands go straight to
+`send_target_rates()` and are never constrained - only the gimbal's own firmware
+stops them. The RC path applies the same parameters in *physical* convention with no
+flip, so RC and KGCS disagree unless the limits are symmetric.
 
 Any other gimbal (Gremsy etc.) inherits `false` from the base class and is
 unaffected.
 
+
+
+<Viewpro bench findings - 2026-09-29>
+
+Hardware: **two Viewpro units, old and new, behave differently.** On the *old* camera,
+KGCS rate (TC2 `Control_Mode` 1) pitch saturated after ~4 deg of travel while yaw was
+normal; on the *new* camera the same firmware and parameters work correctly. The
+firmware path is symmetric between the axes - same function, same A1 packet, same
+`x100` scale, only the sign differs (`AP_Mount_Viewpro.cpp:485-486`) - and a diff of the
+whole rate path against `origin/A0_KAL_HD_FC_Based4.6.2` (head `486548e8f3`, "V4.0.8")
+found `AP_Q30::send_cmd_speed()`, the TC2 handler and the rate encoding byte-identical.
+So the fault is in the old gimbal, not in this tree.
+
+**Record the model name and firmware version of both units.**
+`AP_Mount_Viewpro.cpp:275` prints the model as a statustext at boot and line 262 parses
+the firmware version. That string is the only field-identifiable difference between a
+unit that works and one that does not, and it is the same precedent
+`AP_Mount_MAVLink.h:51` uses for branching on vendor/model.
+
+| Function | TC2 trigger | Status |
+|---|---|---|
+| Gimbal angle (`Control_Mode` 2) | `Pitch/Yaw_Angle_CMD` | works; limits as documented above |
+| Gimbal rate (`Control_Mode` 1) | `Pitch/Yaw_Speed_CMD` | works on the new camera; **fails on the old one** |
+| EO / IR / PIP source | `Tracking_CMD` 10-13 | works |
+| IR colour palette | `Tracking_CMD` 14-19 | works - but see **D1**, no change detection |
+| Zoom, EO and IR | `Tracking_CMD` 20-24 | works |
+| Record start / stop | `Shutter_CMD` 1 / 2 | works |
+| Take picture | `Shutter_CMD` 4 | works |
+| Tracking start / stop | `Tracking_CMD` 1 / 2 | works |
+| Focus in / out | `Zoom_Focus_Stop_CMD` 3 / 4 | **confirmed no-op** - camera is always autofocus and KGCS no longer sends it. Left in place: the TC2 field stays in the ICD either way, `CM_C.FOCS` simply reads 0. Do not re-test |
+
+**Tracking status comes from the camera, not from KGCS.** `_last_tracking_status` is
+written in exactly one place - parsing bits 3-4 of the gimbal's `T1_F1_B1_D1` telemetry
+frame (`AP_Mount_Viewpro.cpp:290`). `set_tracking()` only *asks* the camera to start;
+the camera reports `STOPPED` / `SEARCHING` / `TRACKING` / `LOST` back, and each
+transition emits a statustext.
+
+> **Operational consequence, still untested.** `AP_Mount_Viewpro::update()` returns early
+> while the status is `SEARCHING` **or** `TRACKING`, sending the gimbal no angle, rate or
+> hold target at all. Because `SEARCHING` is camera-driven, that freeze can begin with no
+> KGCS action - e.g. the camera re-acquiring after losing a target - and the operator
+> loses gimbal control with only a statustext to explain it. `LOST` is *not* in the freeze
+> condition, so control returns on a lost target. **Test a target-lost / re-acquire cycle
+> and confirm the operator is never stranded without gimbal control.**
+
+**Rate commands expire after 3 s.** 4.7.x added `mnt_target.last_rate_request_ms` and a
+3000 ms timeout that zeroes all three rate axes (`AP_Mount_Backend.cpp:1192`); 4.6.2 had
+no such timeout, so a rate persisted until replaced. This was *not* the cause of the old
+camera's fault, but it is a real behavioural difference from V4.0.8: KGCS must keep
+sending TC2 while a rate is commanded. Confirmed harmless in practice - KGCS streams.
+
+Still to measure: whether `_Max_zoom_EO = 30` / `_Max_zoom_IR = 4` (`AP_Q30.h:89-90`, hard-coded, they
+clamp the absolute-zoom command) match the new camera's real maxima.
+
+**TM2 reports a dead gimbal as perfectly level.** If `get_attitude_euler()` fails,
+`send_message_gcs_flcc_cam_status()` zeroes all angles, so a gimbal that has stopped
+reporting is indistinguishable from one pointing straight ahead - the same pattern as
+**D12**. Decide whether KGCS should time out TM2.
 
 **PNU-ISSUE D10 details** - step 8 is done; this is now free-standing work.
 
