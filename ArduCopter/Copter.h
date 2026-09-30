@@ -505,7 +505,9 @@ private:
 #endif
 
     // Q30 Camera control interface (PNU)
+#if AP_Q30_ENABLED
     AP_Q30 q30;
+#endif
 
 #if AP_AVOIDANCE_ENABLED
     AC_Avoid avoid;

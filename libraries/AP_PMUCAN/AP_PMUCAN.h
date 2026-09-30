@@ -48,6 +48,13 @@
 #define PMUCAN_STS_DLC (8U)
 #define PMUCAN_SHORT_FRAME_WARN_MS (10000U)     // rate limit for the short-frame warning
 
+// PNU-ISSUE(D14) : these live in AP_PMUCAN.cpp and are read by GCS_PNU.cpp and
+// ArduCopter/events.cpp.  Declared here, and included by the defining .cpp, so the
+// compiler checks declaration against definition.  PMU_Ctrl_Echo was previously
+// extern'd by hand in two separate files with nothing tying them together.
+extern mavlink_sys_icd_flcc_gcs_pmu_status_t            PMU_Status;         // PNU : MAVLINK message for PMU status
+extern mavlink_sys_icd_gcs_flcc_pmu_ctrl_echo_t         PMU_Ctrl_Echo;      // PNU : MAVLINK message for PMU command echo
+
 class PMU_CTRL_CMD
 {
 public:

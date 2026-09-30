@@ -180,6 +180,7 @@ BUILD_OPTIONS = [
     Feature('Camera', 'Camera_Mount', 'AP_CAMERA_MOUNT_ENABLED', 'Enable Camera-in-Mount ', 0, 'Camera,MOUNT'),
     Feature('Camera', 'Camera_Relay', 'AP_CAMERA_RELAY_ENABLED', 'Enable Relay camera trigger', 0, 'Camera,RELAY'),
     Feature('Camera', 'Camera_Servo', 'AP_CAMERA_SERVO_ENABLED', 'Enable Servo camera trigger', 0, 'Camera'),
+    Feature('Camera', 'Q30', 'AP_Q30_ENABLED', 'Enable PNU-KAL Q30 camera/gimbal adapter (KGCS TC2)', 1, 'MOUNT'),
     Feature('Camera', 'Camera_Solo', 'AP_CAMERA_SOLOGIMBAL_ENABLED', 'Enable Solo gimbal', 0, 'Camera'),
     Feature('Camera', 'Camera_FOV_Status', 'AP_CAMERA_SEND_FOV_STATUS_ENABLED', 'Enable GCS camera FOV status', 0, 'Camera,MOUNT'),  # noqa: E501
     Feature('Camera', 'Camera_ThermalRange', 'AP_CAMERA_SEND_THERMAL_RANGE_ENABLED', 'Enable GCS camera thermal range', 0, 'Camera,MOUNT'),  # noqa: E501

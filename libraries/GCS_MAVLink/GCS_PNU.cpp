@@ -30,22 +30,12 @@
 #include <AP_Mount/AP_Mount.h>
 #include <AP_Proximity/AP_Proximity.h>
 #include <AC_Avoidance/AC_Avoid.h>
+
+// PNU-ISSUE(D14) : the shared PNU globals are declared by the libraries that define
+// them - AP_Q30.h for the camera state, AP_PMUCAN.h for PMU_Status / PMU_Ctrl_Echo.
+// They used to be extern'd by hand here, unchecked against their definitions.
 #include <AP_Q30/AP_Q30.h>
-
-// PNU-KAL : state shared with the camera adapter (AP_Q30.cpp) and the PMU CAN
-// driver (AP_PMUCAN.cpp), which own the definitions.
-extern int32_t tracking_counter;                                            // PNU : tracking counter for CAM
-extern uint8_t debug_cam_gimbal_cmd;                                        // PNU : gimbal status for logging
-extern uint8_t debug_cam_zoom_cmd;                                          // PNU : zoom status for logging
-extern uint8_t debug_cam_focus_cmd;                                         // PNU : focus status for logging
-extern uint8_t debug_cam_record_cmd;                                        // PNU : record status for logging
-extern uint8_t debug_cam_track_cmd;                                         // PNU : tracking status for logging
-extern uint8_t debug_cam_ir_cmd;                                            // PNU : IR status for logging
-
-extern mavlink_sys_icd_flcc_gcs_cam_attitude_status_t   CAM_ATTITUDE_STATUS;// PNU : MAVLINK message for CAM
-
-extern mavlink_sys_icd_flcc_gcs_pmu_status_t            PMU_Status;         // PNU : MAVLINK message for PMU status
-extern mavlink_sys_icd_gcs_flcc_pmu_ctrl_echo_t         PMU_Ctrl_Echo;      // PNU : MAVLINK message for PMU command echo
+#include <AP_PMUCAN/AP_PMUCAN.h>
 
 // PNU : incoming-message debug for Viewpro IR pseudo-color/palette commands.
 // Set to 1 to report the Tracking_CMD received by handle_gcs_flcc_cam_cmd() to the GCS.
@@ -54,6 +44,10 @@ extern mavlink_sys_icd_gcs_flcc_pmu_ctrl_echo_t         PMU_Ctrl_Echo;      // P
 // PNU : object-avoidance warning thresholds reported to KGCS in TM5, in centimetres
 #define PNU_OA_ALERT_DISTANCE_CM 1000
 #define PNU_OA_WARN_DISTANCE_CM  1500
+
+// PNU-ISSUE(D13) : the two camera handlers below reach the gimbal through AP::mount()
+// and AP::Q30(), neither of which exists when the mount is compiled out.
+#if AP_Q30_ENABLED
 
 // -------------------------------------------------------------------------
 // Send CAM status to GCS (TM2 / msg 51002)
@@ -194,6 +188,8 @@ void GCS_MAVLINK::handle_gcs_flcc_cam_cmd(const mavlink_message_t &msg)
 #endif
 }
 
+
+#endif  // AP_Q30_ENABLED
 
 // -------------------------------------------------------------------------
 // Send PMU status to GCS (TM1 / msg 51001)

@@ -1,5 +1,7 @@
 #include "Copter.h"
 
+#include <AP_PMUCAN/AP_PMUCAN.h>
+
 /*
  *       This event will be called when the failsafe changes
  *       boolean failsafe reflects the current state
@@ -10,7 +12,7 @@
 // ==================================================================================
 // -------------------------------------------------------------------------
 // Define variables for CAM & PMU (KAL)
-extern mavlink_sys_icd_gcs_flcc_pmu_ctrl_echo_t         PMU_Ctrl_Echo;      // MAVLINK Message for PMU Command ECHO (KAL)
+// PNU-ISSUE(D14) : PMU_Ctrl_Echo is declared by AP_PMUCAN.h, beside its definition
 
 bool Copter::failsafe_option(FailsafeOption opt) const
 {

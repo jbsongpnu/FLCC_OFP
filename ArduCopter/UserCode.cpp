@@ -26,7 +26,9 @@ void Copter::userhook_50Hz()
 #ifdef USERHOOK_MEDIUMLOOP
 void Copter::userhook_MediumLoop()
 {
+#if AP_Q30_ENABLED
     gcs().send_message(MSG_CAM_STATUS);                 // PNU : TM2 camera attitude / zoom
+#endif
 
 #if HAL_PROXIMITY_ENABLED && AP_AVOIDANCE_ENABLED
     // PNU : TM5 reports the avoidance level actually in force, not the one KGCS

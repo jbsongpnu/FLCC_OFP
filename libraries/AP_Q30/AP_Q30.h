@@ -15,6 +15,25 @@
 #include <GCS_MAVLink/GCS_MAVLink.h>
 #include <GCS_MAVLink/GCS.h>
 
+#include "AP_Q30_config.h"
+
+#if AP_Q30_ENABLED
+
+// PNU-ISSUE(D14) : these live in AP_Q30.cpp and are read by GCS_PNU.cpp.  Declared
+// here, and included by the defining .cpp, so the compiler checks declaration against
+// definition - a hand-written extern elsewhere would not be checked, and a type change
+// would become silent memory misinterpretation at link time instead of a build error.
+extern int32_t tracking_counter;                                            // PNU : tracking counter for CAM
+extern uint8_t debug_cam_gimbal_cmd;                                        // PNU : gimbal status for logging
+extern uint8_t debug_cam_zoom_cmd;                                          // PNU : zoom status for logging
+extern uint8_t debug_cam_focus_cmd;                                         // PNU : focus status for logging
+extern uint8_t debug_cam_record_cmd;                                        // PNU : record status for logging
+extern uint8_t debug_cam_track_cmd;                                         // PNU : tracking status for logging
+extern uint8_t debug_cam_ir_cmd;                                            // PNU : IR status for logging
+
+extern mavlink_sys_icd_gcs_flcc_cam_cmd_t               PREV_CAM_CMD;       // PNU : previous CAM_CMD
+extern mavlink_sys_icd_flcc_gcs_cam_attitude_status_t   CAM_ATTITUDE_STATUS;// PNU : MAVLINK message for CAM
+
 
 // -------------------------------------------------------------------------
 // Define Parameters for CAM
@@ -96,3 +115,5 @@ private:
 namespace AP {
     AP_Q30 *Q30();
 };
+
+#endif  // AP_Q30_ENABLED

@@ -68,6 +68,7 @@
 #include <AP_LandingGear/AP_LandingGear.h>
 #include <AP_Landing/AP_Landing_config.h>
 #include <AP_Generator/AP_Generator_Loweheiser.h>
+#include <AP_Q30/AP_Q30_config.h>      // PNU-ISSUE(D13) : AP_Q30_ENABLED
 
 #include "MissionItemProtocol_Waypoints.h"
 #include "MissionItemProtocol_Rally.h"
@@ -1205,7 +1206,9 @@ ap_message GCS_MAVLINK::mavlink_id_to_ap_message_id(const uint32_t mavlink_id) c
 #endif
         // PNU-KAL ICD messages
         { MAVLINK_MSG_ID_SYS_ICD_FLCC_GCS_PMU_STATUS, MSG_PMU_STATUS},
+#if AP_Q30_ENABLED
         { MAVLINK_MSG_ID_SYS_ICD_FLCC_GCS_CAM_ATTITUDE_STATUS, MSG_CAM_STATUS},
+#endif
         { MAVLINK_MSG_ID_SYS_ICD_GCS_FLCC_PMU_CTRL_ECHO, MSG_PMU_CTRL_ECHO},
 #if HAL_PROXIMITY_ENABLED && AP_AVOIDANCE_ENABLED
         { MAVLINK_MSG_ID_SYS_ICD_FLCC_GCS_OBJECT_AVOIDANCE_STATUS, MSG_OBJECT_AVOIDANCE_STATUS},
@@ -4699,9 +4702,11 @@ void GCS_MAVLINK::handle_message(const mavlink_message_t &msg)
         handle_gcs_flcc_pmu_ctrl(msg);
         break;
 
+#if AP_Q30_ENABLED
     case MAVLINK_MSG_ID_SYS_ICD_GCS_FLCC_CAM_CMD:
         handle_gcs_flcc_cam_cmd(msg);
         break;
+#endif
 
 #if HAL_PROXIMITY_ENABLED && AP_AVOIDANCE_ENABLED
     case MAVLINK_MSG_ID_SYS_ICD_GCS_FLCC_OBJECT_AVOIDANCE_CMD:
@@ -6824,10 +6829,12 @@ bool GCS_MAVLINK::try_send_message(const enum ap_message id)
         send_message_gcs_flcc_pmu_status();
         break;
 
+#if AP_Q30_ENABLED
     case MSG_CAM_STATUS:
         CHECK_PAYLOAD_SIZE(SYS_ICD_FLCC_GCS_CAM_ATTITUDE_STATUS);
         send_message_gcs_flcc_cam_status();
         break;
+#endif
 
     case MSG_PMU_CTRL_ECHO:
         CHECK_PAYLOAD_SIZE(SYS_ICD_GCS_FLCC_PMU_CTRL_ECHO);
