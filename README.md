@@ -1,7 +1,9 @@
 # Migration Break Point for Future Updates
 - This branch will update Copter-4.7.1 to FLCC V5.0.8 step-by-step to find new commit break points for future updates.
 - All essential works to make migration break points are done and currently reviewing and revising code for PNU-ISSUE
-- IN THIS VERSION : More Updates to organize releasable verion 5.0.11 from 5.0.8  
+- IN THIS VERSION : More Updates to organize releasable verion 5.0.12 from 5.0.8  
+   - Issue 1 is resolved
+- For 5.0.11 version :
    - Issue D6 is resolved 
    - Issue 15 was added during the anlysis of D6, but also resolved
 - For 5.0.10 version :
@@ -45,7 +47,7 @@ grep -rn "PNU-ISSUE" libraries/ ArduCopter/
 
 | ID | Issue | Site | Blocked until | Decision needed |
 |:--:|---|---|:--:|---|
-| D1 | **IR palette deferral - mechanism hardware-verified; two residual races.** Hardware test confirms the prelude &rarr; 100 ms &rarr; colour sequence works, including alongside `set_camera_source`. Two defects remain but are narrow races that normal operation will not reach: (a) `_image_sensor` is not re-checked at send time - it is assigned *only* from gimbal telemetry (`AP_Mount_Viewpro.cpp:313`; `set_camera_source()` never touches it), so it would have to change inside the 100 ms window; (b) the send result is ignored and the pending colour cleared regardless, which needs a UART txspace failure at that instant. Consequence of either is cosmetic - one dropped palette command the operator re-presses; nothing safety-relevant. The prelude-to-colour gap is always **100 ms** (`update()` self-throttles to `AP_MOUNT_VIEWPRO_UPDATE_INTERVAL_MS`), independent of the `AP_Mount` scheduler rate. Note: the `0x23`/`0x24` substitution in `AP_Q30` is a camera *vendor* change (newer units dropped the extended pseudo-colour options; `0x0E`, `0x0F`, `0x21`, `0x22` work, IR_RAINBOW offers Red only) - not evidence of deferral misbehaviour. | `AP_Mount_Viewpro.cpp` | — | **ANSWERED (2026-09-29): KGCS streams TC2.** Bench test confirmed the camera works with KGCS sending commands both intermittently and constantly, so the streamed case is real and the race is reachable. Per this row's own decision rule that means **apply the ~10-line fix** (snapshot `_image_sensor` + staleness deadline, clear the pending colour only on success) - D1 can no longer be closed as unreachable. Add to the same fix: `IR_operation()` has **no change detection** on the palette commands (unlike zoom, which guards on `prev_EO_zoom_cmd` / `prev_IR_zoom_cmd`), so a *held* `Tracking_CMD` while streaming re-fires `IR_Color_Change()` every cycle and overwrites the pending-colour slot continuously. Confirm from `TC_C.TRAK` whether KGCS holds the palette value or returns it to 0; palette changes currently work, which suggests momentary. Still untested: whether the deferral is *needed* at all - that requires removing the prelude and retesting. |
+| D1 | **RESOLVED (2026-09-30).** IR palette deferral: for colour codes >= `IR_COLOR_1` the driver sends an `IR_RAINBOW` prelude and defers the colour itself to a later `update()` tick, because the gimbal MCU services at most one C1 command per its own scheduler cycle. The mechanism was hardware-verified; three races remained. | `AP_Mount_Viewpro.{h,cpp}` | — | Bench test confirmed **KGCS streams TC2**, so the races were reachable and this row's own rule required the fix. Applied: (a) the display is **captured at defer time** into `_palette_pending_sensor`, so the colour reaches the sensor it was meant for even if gimbal telemetry changes `_image_sensor` inside the window; (b) the pending colour is **cleared only on a successful send**, so a momentarily full UART retries next tick instead of dropping the command; (c) a **400 ms deadline** bounds those retries so a stale colour is never sent late; (d) a duplicate request for the palette already in flight no longer restarts the sequence - relevant precisely because KGCS streams. Also fixed while here: `_palette_pending_color` had **no initialiser** in a heap-allocated class with an inherited constructor, so a non-zero value at boot would have made the first `update()` send a garbage `CameraCommand` to the gimbal; all three members now carry initialisers, with a comment saying they must keep them. **Still untested:** whether the deferral is needed at all - that requires removing the prelude and retesting on hardware |
 | D2 | All 7 PNU-KAL ICD messages are id ≥ 50001, so MAVLink **v2 only**. A link set to `SERIALn_PROTOCOL=1` (MAVLink1) silently carries no PNU-KAL telemetry or commands. | `Forced Submodule File/common.xml` | — | **RESOLVED (2026-09-29) - documented as a setup constraint**, see the header. A runtime warning was designed (gate the four PNU cases in `try_send_message()` on the existing `sending_mavlink1()`, warn once per channel via STATUSTEXT, which is id 253 and so does reach a MAVLink1 GCS) and **rejected as unnecessary**: a MAVLink1 link means *no* PMU messages at all, which is self-evident at the GCS; the port parameter is checked regardless; and PNU's offline preflight procedure already fixes the protocol. No code change. Verified mechanism, so nobody need re-investigate: the failure is a clean drop, not corruption - `mavlink_helpers.h:339` refuses msgid > 255 and counts a parse error, so a misconfigured link also shows a rising parse-error count. Such a channel never self-upgrades either, since the auto-upgrade in `packetReceived()` (`GCS_Common.cpp:1904`) requires the configured protocol to already be MAVLink2 |
 | D3 | The `modules/mavlink` dialect edits are invisible to git — a `submodule update` or fresh clone silently reverts them and the build fails at step 7 with ~21 unknown-type errors. | `Forced Submodule File/ReadMe.txt` | — | **RESOLVED (2026-09-29).** The submodule is now left **completely pristine** - the definitions are staged outside it and the build runs from the staged copy. See the section below |
 | D4 | `OFP_VER_MAIN/SUB/REV` in `GCS.h` and `FW_MAJOR/MINOR/PATCH` in `version.h` are two hand-maintained copies of the same version with nothing enforcing agreement. | `GCS.h`, `version.h` | 4 | **RESOLVED (step 4)** - `static_assert` in `Copter.cpp` (only TU seeing both; `AP_PMUCAN.cpp` cannot include the vehicle `version.h`) |
@@ -141,6 +143,23 @@ alongside the `TM1x` ones would be the natural place, since `AP_PMUCAN` does no 
 all today) or delete them. `_rtr_tx_err` and `_cmd_tx_err` are the two with real diagnostic
 value - they count CAN send failures, which is exactly what you would want when chasing an
 intermittent PMU link.
+
+
+**PNU-ISSUE D1 follow-up - `IR_operation()` has no change detection.** `AP_Q30::IR_operation()`
+fires `IR_Color_Change()` on every TC2 whose `Tracking_CMD` names a palette, unlike zoom which
+guards on `prev_EO_zoom_cmd` / `prev_IR_zoom_cmd`. With KGCS streaming, a **held** palette value
+therefore re-requests it ~10x a second.
+
+The D1 fix absorbs the harm - a duplicate request for the palette already in flight now returns
+early instead of restarting the prelude - so this is traffic, not a defect.
+
+**Adding change detection was considered and deliberately NOT done.** If KGCS *holds* the value,
+change detection would suppress a re-press of the **same** palette, which is exactly the recovery
+action D1's original note assumed the operator would take. The safe fix is the retry logic now in
+place, not suppression. Before revisiting, settle the fact: **does KGCS hold `Tracking_CMD` at the
+palette value, or return it to 0 after the button press?** `TC_C.TRAK` shows it directly - a held
+value is a constant run, a momentary one a single sample. Palette changes work today, which
+suggests momentary.
 
 **PNU-ISSUE D7 bench matrix** - engine disconnected, watch `Engine_OnOff_Echo` in TM3:
 

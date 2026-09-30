@@ -430,7 +430,13 @@ private:
     TrackingStatus _last_tracking_status;           // last tracking status received from gimbal (used to notify users)
     ImageSensor _image_sensor;                      // user selected image sensor (aka camera lens)
     float _zoom_times;                              // zoom times received from gimbal
-    uint8_t _palette_pending_color;                 // PNU : deferred palette code, sent on next update() tick after IR_RAINBOW prelude (0 = none pending)
+    // PNU-ISSUE(D1) : these three MUST keep their initialisers.  The class uses an
+    // inherited constructor and the backend is heap-allocated, so an uninitialised
+    // _palette_pending_color would be indeterminate - a non-zero value at boot would
+    // make the first update() send a garbage CameraCommand to the gimbal.
+    uint8_t _palette_pending_color = 0;             // PNU : deferred palette code, sent on a later update() tick after the IR_RAINBOW prelude (0 = none pending)
+    ImageSensor _palette_pending_sensor = ImageSensor::NO_ACTION;   // PNU-ISSUE(D1) : display captured when the palette was deferred, so the colour reaches the sensor it was meant for
+    uint32_t _palette_pending_ms = 0;               // PNU-ISSUE(D1) : system time the palette was deferred, for the staleness deadline
     uint32_t _firmware_version;                     // firmware version from gimbal
     bool _got_firmware_version;                     // true once we have received the firmware version
     char _model_name[11] {};                        // model name received from gimbal, always null-terminated

@@ -7,7 +7,7 @@
 #include "ap_version.h"
 
 // PNU : This is a custom code modified by PNU Drone
-#define THISFIRMWARE "PNU_OFP V5.0.11"
+#define THISFIRMWARE "PNU_OFP V5.0.12"
 
 // NOTE: the 5.0.x series is carried here as DEV builds for the duration of the
 // Copter-4.7.1 -> FLCC step-by-step migration.  The official release after
@@ -23,11 +23,11 @@
 // must stay in step with the three defines below (static_assert in Copter.cpp, D4).
 
 // the following line is parsed by the autotest scripts
-#define FIRMWARE_VERSION 5,0,11,FIRMWARE_VERSION_TYPE_DEV
+#define FIRMWARE_VERSION 5,0,12,FIRMWARE_VERSION_TYPE_DEV
 
 #define FW_MAJOR 5
 #define FW_MINOR 0
-#define FW_PATCH 11
+#define FW_PATCH 12
 #define FW_TYPE FIRMWARE_VERSION_TYPE_DEV
 
 #include <AP_Common/AP_FWVersionDefine.h>

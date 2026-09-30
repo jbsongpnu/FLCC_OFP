@@ -23,6 +23,10 @@ extern const AP_HAL::HAL& hal;
 #define AP_MOUNT_VIEWPRO_EO_ZOOM_SPEED     0x07    // hard-coded zoom speed (fast)
 #define AP_MOUNT_VIEWPRO_IR_ZOOM_SPEED     1 
 #define AP_MOUNT_VIEWPRO_ZOOM_MAX       30      // PNU : hard-coded absolute zoom times max
+// PNU-ISSUE(D1) : a deferred IR palette is normally sent one update() tick after its
+// prelude (100 ms).  Allow a couple of retries if the UART is momentarily full, then
+// give up rather than send a colour the operator asked for long ago.
+#define AP_MOUNT_VIEWPRO_PALETTE_TIMEOUT_MS 400
 #define AP_MOUNT_VIEWPRO_DEG_TO_OUTPUT  (65536.0 / 360.0)   // scalar to convert degrees to the viewpro angle scaling
 #define AP_MOUNT_VIEWPRO_OUTPUT_TO_DEG  (360.0 / 65536.0)   // scalar to convert viewpro angle scaling to degrees
 
@@ -66,29 +70,33 @@ void AP_Mount_Viewpro::update()
         send_comm_config_cmd(CommConfigCmd::QUERY_FIRMWARE_VER);
     }
 
-    // PNU-ISSUE(D1) mechanism hardware-verified; two residual races remain, both
-    //   cosmetic (a dropped palette command the operator re-presses):
-    //   (a) _image_sensor is not re-checked here - it is assigned ONLY from gimbal
-    //       telemetry (line ~313; set_camera_source() never touches it), so it would
-    //       have to change inside the 100 ms window to bite.
-    //   (b) the send result is ignored and _palette_pending_color is cleared anyway,
-    //       which needs a UART txspace failure at this instant.
-    //   The prelude-to-colour gap is always 100 ms: update() self-throttles to
-    //   AP_MOUNT_VIEWPRO_UPDATE_INTERVAL_MS, independent of the AP_Mount task rate.
-    //   Closure depends on whether KGCS sends TC2 on operator action (races
-    //   unreachable - close as-is) or streams it (apply the fix). See README.
-    // PNU : send any deferred IR-palette packet from the previous tick. The
-    // prelude (IR_RAINBOW) was sent last tick; the gimbal MCU only services
-    // one C1 command per its own scheduler cycle, so we wait one update()
-    // before transmitting the actual color code.
+    // PNU : send any deferred IR-palette packet from a previous tick.  The prelude
+    // (IR_RAINBOW) went out when the command arrived; the gimbal MCU only services
+    // one C1 command per its own scheduler cycle, so the colour waits one update().
+    // PNU-ISSUE(D1) RESOLVED: KGCS streams TC2, so the races below are reachable.
+    //   - the colour goes to the display captured at defer time, not whatever
+    //     _image_sensor holds now (it is assigned from gimbal telemetry, so it can
+    //     change inside the window)
+    //   - the pending colour is cleared only on a successful send, so a full UART
+    //     retries on the next tick instead of dropping the command
+    //   - a deadline bounds those retries, so a stale colour is never sent late
     if (_palette_pending_color != 0) {
-        send_camera_command(_image_sensor, (CameraCommand)_palette_pending_color, 0);
+        if (now_ms - _palette_pending_ms > AP_MOUNT_VIEWPRO_PALETTE_TIMEOUT_MS) {
 #if AP_MOUNT_VIEWPRO_IR_DEBUG
-        GCS_SEND_TEXT(MAV_SEVERITY_INFO,
-                      "%s IR_Color deferred TX op=0x%02X",
-                      send_text_prefix, (unsigned)_palette_pending_color);
+            GCS_SEND_TEXT(MAV_SEVERITY_WARNING,
+                          "%s IR_Color deferred TX timed out op=0x%02X",
+                          send_text_prefix, (unsigned)_palette_pending_color);
 #endif
-        _palette_pending_color = 0;
+            _palette_pending_color = 0;
+        } else if (send_camera_command(_palette_pending_sensor,
+                                       (CameraCommand)_palette_pending_color, 0)) {
+#if AP_MOUNT_VIEWPRO_IR_DEBUG
+            GCS_SEND_TEXT(MAV_SEVERITY_INFO,
+                          "%s IR_Color deferred TX op=0x%02X",
+                          send_text_prefix, (unsigned)_palette_pending_color);
+#endif
+            _palette_pending_color = 0;
+        }
     }
 
     // send handshake
@@ -873,10 +881,19 @@ bool AP_Mount_Viewpro::IR_Color_Change(uint8_t color)
     // its own scheduler cycle, so back-to-back sends get the second packet
     // silently dropped. White-hot (0x0E) and black-hot (0x0F) need no prelude.
     if (color >= (uint8_t)CameraCommand::IR_COLOR_1) {
+        // PNU-ISSUE(D1) : KGCS streams TC2, so the same palette can arrive again
+        // while one is still deferred.  Re-sending the prelude would restart the
+        // sequence for no reason - the pending one is already on its way.
+        if ((_palette_pending_color == color) && (_palette_pending_sensor == _image_sensor)) {
+            return true;
+        }
         if (!send_camera_command(_image_sensor, CameraCommand::IR_RAINBOW, 0)) {
             return false;
         }
-        _palette_pending_color = color;
+        // PNU-ISSUE(D1) : capture the display now; update() sends to this one
+        _palette_pending_color  = color;
+        _palette_pending_sensor = _image_sensor;
+        _palette_pending_ms     = AP_HAL::millis();
         return true;
     }
 
