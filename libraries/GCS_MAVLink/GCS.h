@@ -37,11 +37,14 @@
 // PNU : FLCC OFP version reported to the PMU over CAN and to the GCS in TM1
 // (AP_PMUCAN.cpp -> PMU_Status.Version_FLCC_*, int8_t each). Base ArduPilot is 4.7.1.
 // Keep these in step with ArduCopter/version.h FW_MAJOR/FW_MINOR/FW_PATCH.
-// NOTE: write these as plain decimal - a leading zero makes the literal octal,
-// so 08 / 09 will not compile.
+// NOTE: write every component as plain decimal, with NO leading zero.  A leading zero
+// makes a C integer literal octal: 08 and 09 are not valid octal and fail to compile,
+// while 00-07 compile but only work by coincidence.  So for any value below 10 write
+// 8, not 08.
+// The same rule applies to FW_MAJOR/FW_MINOR/FW_PATCH in ArduCopter/version.h.
 #define OFP_VER_MAIN        5
 #define OFP_VER_SUB         0
-#define OFP_VER_REV         9
+#define OFP_VER_REV         10
 
 #ifndef HAL_GCS_ALLOW_PARAM_SET_DEFAULT
 #define HAL_GCS_ALLOW_PARAM_SET_DEFAULT 1
