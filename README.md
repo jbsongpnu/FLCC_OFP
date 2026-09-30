@@ -1,7 +1,9 @@
 # Migration Break Point for Future Updates
 - This branch will update Copter-4.7.1 to FLCC V5.0.8 step-by-step to find new commit break points for future updates.
 - All essential works to make migration break points are done and currently reviewing and revising code for PNU-ISSUE
-- IN THIS VERSION : More Updates to organize releasable verion 5.0.12 from 5.0.8  
+- IN THIS VERSION : More Updates to organize releasable verion 5.0.13 from 5.0.8  
+   - Issue 7 is resolved 
+- For 5.0.12 version :
    - Issue 1 is resolved
 - For 5.0.11 version :
    - Issue D6 is resolved 
@@ -53,7 +55,7 @@ grep -rn "PNU-ISSUE" libraries/ ArduCopter/
 | D4 | `OFP_VER_MAIN/SUB/REV` in `GCS.h` and `FW_MAJOR/MINOR/PATCH` in `version.h` are two hand-maintained copies of the same version with nothing enforcing agreement. | `GCS.h`, `version.h` | 4 | **RESOLVED (step 4)** - `static_assert` in `Copter.cpp` (only TU seeing both; `AP_PMUCAN.cpp` cannot include the vehicle `version.h`) |
 | D5 | **RESOLVED (2026-09-30).** The 356-line block appended at `GCS_Common.cpp`'s EOF was the main recurring merge cost on every ArduPilot bump, and the only issue here whose cost grew with time. It now lives in `libraries/GCS_MAVLink/GCS_PNU.cpp`. | `GCS_Common.cpp`, `GCS_PNU.cpp` | — | Done. `GCS_Common.cpp` vs pristine 4.7.1 went from **429 added lines in 7 hunks** to **45 in 3** - better than the 72 estimated, because the two includes and the extern/macro block moved out too. The three survivors are unavoidable: they insert into upstream's `mavlink_id_to_ap_message_id()` map, `handle_message()` and `try_send_message()` switches. Moved code is **byte-identical** - no logic touched. Costs **+136 bytes** of flash, since the handlers are no longer in the same translation unit as their callers |
 | D6 | **RESOLVED (2026-09-30).** `AP_PMUCAN::handleFrame()` performed no DLC validation - every case `memcpy`d from fixed offsets up to `data[7]` whatever `can_rxframe.dlc` said. No out-of-bounds read (`data[]` is a fixed 8 bytes), but a short or malformed PMU frame was parsed silently and yielded stale values for battery current, RPM, fuel quantity etc. | `AP_PMUCAN.cpp` | — | **ICD confirms DLC 8 for all five status messages** (BATSTS, ENGSTS, AUX1STS, AUX2STS, VERSTS), which also confirms every field the code reads is present. **TX confirmed too**: 4 for all five commands (BATCTRL, ENGONOFF, ENGMANUAL, ENGPCL, ENGCHK), matching `PMUCAN_CMD_DLC`; all five route through the single `pmucan_cmd()` path, and the driver has only two TX paths in total. RTR is N/A in the ICD, so `pmucan_rtr()`'s 8 is unconstrained. No TX change needed. Frames shorter than `PMUCAN_STS_DLC` are now rejected before parsing, counted in `_short_frame_cnt`, and reported to the GCS as `PMUCAN: short frame 0x<id> dlc <n> (<count> dropped)`, rate limited to one message per 10 s with the first always reported. Unknown ids now return early rather than falling through the switch. **Still open - see D15** (byte order) and the note below on the write-only counters |
-| D7 | **Engine ON/OFF interlock is satisfied by inactivity.** `engineonoffstate()` counts to 10 at ~10 Hz, but `_pmu_ctrl_cmd`/`_pmu_ctrl_cmd_prv` are sticky between TC1 messages. If KGCS sends TC1 only on operator action, two messages (e.g. 3 then 2) freeze a valid pair and the counter climbs unattended - **engine STARTS after ~1 s of silence**. If KGCS streams TC1 with a held value, `prv == cmd` resets every tick and the **engine can never be commanded OFF**. Also rate-dependent (pairs overwritten above ~10 Hz) and loss-sensitive (a dropped TC1 resets progress). | `AP_PMUCAN.cpp` | — | Bench-test the matrix below, then re-specify the interlock (edge-latched count, or an explicit hold-duration) |
+| D7 | **RESOLVED (2026-09-30) - one defect fixed, the rest analysed and accepted.** The engine ON/OFF interlock's counters are not a count of operator alternations: the pair they inspect only changes when a new TC1 arrives, but `engineonoffstate()` runs at ~10 Hz regardless, so a frozen valid pair keeps incrementing. They are a ~100 ms tick timer - threshold 10 means *~1.0 s after the first valid alternating pair*. | `AP_PMUCAN.cpp` | — | **Fixed:** the state no longer advances on a failed CAN send. It previously set `_engineonoffmode` unconditionally, so a send failure left the FC believing the engine was running while the PMU had never been told - and KGCS blocks Start from that point, leaving the operator only Stop to resolve a divergence they could not see. On failure the state now holds and the still-valid pair retries on the next tick. **Accepted, with the reasoning recorded at the code site:** the two-messages-plus-1 s shortcut is sound *only because KGCS never sends TC1 unsolicited*; threshold 10 is deliberate and must not be raised back to 14; loss tolerance and rate immunity both follow from the timer behaviour. See the KGCS behaviour and residuals below |
 | D8 | **Mount scheduler rate vs. the Viewpro self-throttle.** (a) *RESOLVED (step 5)* - msg 285 suppression is now an opt-in backend capability (`suppress_gimbal_device_attitude_status()`), so only Viewpro suppresses it; every other gimbal keeps standard MAVLink behaviour. (b) *RESOLVED (step 5)* - V5.0.8 lowered the `AP_Mount` task 50&rarr;10 Hz; **deliberately reverted to 50 Hz**. `AP_Mount_Viewpro::update()` self-throttles to `AP_MOUNT_VIEWPRO_UPDATE_INTERVAL_MS` (100 ms, upstream), so gimbal traffic is 10 Hz at *either* scheduler rate - the scheduler does not control it. At 10 Hz the scheduler period **equals** that throttle interval, so any late tick defers the update a full period (200 ms &rarr; 5 Hz bursts); 50 Hz oversamples it 5x (worst case 120 ms). 50 Hz also keeps `AP_Mount_Backend::update()` - servo retract and `update_poi_lock_target()`, which run *before* the throttle - at full rate. | `Copter.cpp` | — | Done. To reduce gimbal traffic, raise `AP_MOUNT_VIEWPRO_UPDATE_INTERVAL_MS`, not the scheduler rate |
 | D9 | **PMU failsafe: no-PMU case is correct; one gap fixed, one open.** Both "no PMU" paths correctly avoid a false trigger (`PMUCAN_Fail` stays 2 when the driver runs with no PMU; stays 0 from static init when `CAN_Dn_PROTOCOL` is not 15). (a) *RESOLVED (step 6)* - `failsafe.pmucan` was set but never cleared, so the failsafe could fire at most once per power cycle. It now clears on recovery with `ERROR_RESOLVED`, matching `failsafe.terrain` / `.deadreckon` / `.ekf`. The mode change is deliberately **not** undone, matching upstream precedent. (b) **OPEN** - once the PMU has been seen and then lost, state is 1 (`COMMUNICATION_ERROR`) with no path back to 2 and no disable parameter, so **emergency takeoff after a PMU dropout is blocked**. Worse, PMUCAN has *no prearm check* (`AP_Arming.cpp:1354` is a bare `break`), so prearm passes silently, arming succeeds, and `should_disarm_on_failsafe()` disarms ~100 ms later with no prior warning. | `events.cpp`, `AP_Arming.cpp` | — | Design agreed, **dedicated commit after the migration** - it changes flight-safety behaviour and should not be folded into a migration step. No new parameter. See design below. |
 | D10 | **`AP_Q30` routes every camera function through `AP::mount()`, never `AP::camera()`.** Valid for Viewpro (one serial protocol carries gimbal + camera), but on any other mount all ~27 camera calls fall through to the base class and silently do nothing, and `get_zoom_times()` returns a fabricated `0.0f`. Dormant if the camera is driven by standard MAVLink2 instead of KGCS TC2. | `AP_Q30.cpp`, `UserCode.cpp` | 8 | Decide whether KGCS TC2 must drive non-Viewpro cameras; if so, route camera calls via `AP::camera()` - but see **D11**, the destination cannot do everything. See details below. |
@@ -161,17 +163,47 @@ palette value, or return it to 0 after the button press?** `TC_C.TRAK` shows it 
 value is a constant run, a momentary one a single sample. Palette changes work today, which
 suggests momentary.
 
-**PNU-ISSUE D7 bench matrix** - engine disconnected, watch `Engine_OnOff_Echo` in TM3:
+**PNU-ISSUE D7 - KGCS behaviour and accepted residuals.**
 
-| # | TC1 pattern from KGCS | Expected if interlock is sound | Actual defect it exposes |
-|:-:|---|---|---|
-| 1 | Two messages (`Engine_OnOff` 3 then 2), then stop sending | no engine command | engine ON after ~1 s of silence |
-| 2 | Stream at 10 Hz with `Engine_OnOff` held at 2 | engine ON after the hold | counter resets every tick, never fires |
-| 3 | Alternate 2/3 at 5 Hz | engine ON after 10 toggles | fires after ~5 toggles (each pair sampled twice) |
-| 4 | Alternate 2/3 at 20 Hz | engine ON after 10 toggles | needs >10 toggles (pairs overwritten unsampled) |
+KGCS is a closed project, so the following is its *specified* behaviour supplied by PNU
+(2026-09-30), not a bench measurement. A bench matrix is impractical for the same reason.
 
-Repeat 1-4 with 4/5 in place of 2/3 to cover the ON&rarr;OFF direction; case 2 there is the
-serious one (engine cannot be stopped).
+| | |
+|---|---|
+| When TC1 is sent | **only while a button is pressed** - never unsolicited |
+| Start gesture | `Engine_OnOff` alternating **2/3 for 14 messages**, then stops |
+| Stop gesture | `Engine_OnOff` alternating **4/5 for 14 messages**, then stops |
+| Burst rate | constant, **~10 Hz, never above 11 Hz** |
+| After a start | KGCS **blocks its Start button**; only Stop remains available |
+
+*Why the timing works out.* The burst lasts ~1.4 s; the threshold of 10 fires at ~1.0 s,
+around message 10 of 14. At the original threshold of 14 it landed at ~1.4 s - exactly
+where the burst ends - which raced the FC's ~10 Hz sample clock against KGCS's ~10 Hz send
+clock and left the outcome to drift. **Do not raise the threshold back to 14.**
+
+*Why message loss does not matter.* A frozen pair keeps counting through a dropout, so a
+lost TC1 neither aborts nor delays the gesture. This is the same mechanism as the timer
+behaviour - it is not independent robustness.
+
+*Why the ingest rate is not a problem.* TC1 at <=11 Hz against `TXspin()`'s 50 Hz sampling
+means every message is seen at the sequence check; no alternation is discarded.
+
+**Residuals, accepted rather than fixed** (deliberately not raised as separate PNU-ISSUEs):
+
+- **The interlock is satisfied by two messages plus ~1 s of silence**, not by ten
+  alternations. It is sound only because KGCS never sends TC1 unsolicited. That contract
+  lives in a closed project and is not enforced anywhere in the firmware.
+- **`handle_gcs_flcc_pmu_ctrl()` does not check the sender.** Any MAVLink source on any
+  channel - a second GCS, a test tool, a log replay - can supply engine-start authority,
+  against an effective bar of two messages and a second.
+- **`_cmd_tx_err` is write-only.** The send-result fix now depends on it for diagnosis, so
+  it is the strongest candidate in the D6 "PMU counters are write-only" note.
+
+*If this is ever revisited*, the sound form is to count alternations on arrival, treat a
+repeated value as **hold** rather than reset (so a dropped TC1 neither advances nor aborts),
+and reset on staleness. 14 messages give 13 alternations against a threshold of 10, so up to
+3 may be lost. It needs no KGCS change and is testable without KGCS or the engine: pymavlink
+with `pnu_kal.xml` can emit TC1 bursts at any rate while you watch `Engine_OnOff_Echo` in TM3.
 
 
 **Viewpro pitch reversal is intentional - do not "fix" it.**

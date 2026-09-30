@@ -699,33 +699,59 @@ int AP_PMUCAN::pmucan_cmd(uint32_t can_id, uint32_t data_cmd)
 // -------------------------------------------------------------------------
 // engineonoffstate : two-state engine interlock from toggling command value
 // -------------------------------------------------------------------------
-// PNU-ISSUE(D7) blocked-until: KGCS TC1 transmit behaviour / bench test.
-//   The engine ON/OFF interlock below counts to 10 at ~10 Hz, but the pair it
-//   inspects (_pmu_ctrl_cmd / _pmu_ctrl_cmd_prv) only changes when a new TC1
-//   arrives - it is STICKY between messages.  Two consequences, and which one
-//   applies depends entirely on how KGCS sends TC1:
-//     - TC1 sent only on operator action: two messages (e.g. 3 then 2) leave a
-//       valid pair frozen, the counter then climbs unattended and the engine
-//       STARTS after ~1 s of silence.  Inactivity completes the interlock.
-//     - TC1 streamed with a held value: prv == cmd hits the reset branch every
-//       time, the counter never passes 1, and the engine can never be commanded
-//       OFF.  Failure to stop is the more serious direction.
-//   Also rate-dependent (pairs are overwritten above ~10 Hz) and loss-sensitive
-//   (a dropped TC1 mid-sequence resets progress).  See README "Deferred Issues"
-//   for the 4-case bench matrix.  Test with the engine disconnected.
+// PNU-ISSUE(D7) : KGCS transmit behaviour is now known (2026-09-30, from the
+//   KGCS side - it is a closed project, so this is its specified behaviour
+//   rather than a bench measurement):
+//     - TC1 is sent ONLY while a button is pressed, never unsolicited.
+//     - Start sends Engine_OnOff alternating 2/3 for 14 messages, then stops.
+//       Stop sends 4/5 the same way.  KGCS blocks Start once started.
+//     - The burst rate is constant, ~10 Hz and never above 11 Hz.
+//
+//   READ THIS BEFORE CHANGING THE COUNTERS BELOW.  _engineoncnt / _engineoffcnt
+//   are NOT a count of operator alternations.  The pair they inspect
+//   (_pmu_ctrl_cmd / _pmu_ctrl_cmd_prv) only changes when a new TC1 arrives, but
+//   this function is called at ~10 Hz regardless, so a frozen valid pair keeps
+//   incrementing.  The counters are therefore a ~100 ms tick timer: the
+//   threshold of 10 means "~1.0 s after the first valid alternating pair".
+//   Consequences, all deliberate and accepted:
+//     - Two messages plus ~1 s would satisfy the interlock; the other 12 are not
+//       required.  This is SOUND ONLY BECAUSE KGCS never sends TC1 unsolicited.
+//       If that ever changes, or another MAVLink sender appears on the link,
+//       revisit this - handle_gcs_flcc_pmu_ctrl() does not check the sender.
+//     - The threshold is 10, not 14, on purpose.  At 14 the trigger lands at
+//       ~1.4 s, exactly when the burst ends, racing the FC's sample clock
+//       against KGCS's send clock.  At 10 it fires ~1.0 s in, around message 10
+//       of 14, with ~0.4 s of margin.  Do not raise it back.
+//     - Message loss is tolerated for the same reason the timer works: a frozen
+//       pair keeps counting through a dropout.
+//     - Ingest is not rate-limited in practice: TC1 at <=11 Hz against TXspin's
+//       50 Hz sampling means no alternation is missed at the sequence check.
+//   The one real defect here has been fixed - see the send-result check below.
 void AP_PMUCAN::engineonoffstate(void)
 {
     if (_engineonoffmode==0U)	// OFF STATE
     {
         if(_engineoncnt>=10)        // transition to ON STATE
         {
-            _engineonoffmode    = 1U;                               // ON
-            _engineoncnt        = 0U;
+            // PNU-ISSUE(D7) : only believe the engine is running once the frame
+            // actually went out.  This used to advance unconditionally, leaving
+            // the FC in ON while the PMU had never been told - and KGCS blocks
+            // its Start button from that point, so the operator was left with
+            // only Stop to resolve a state divergence they could not see.
             if(pmucan_cmd(_cmd_id[CMD_ID::CMD_ID_ENGONOFF], 1U)>0)  // ON(1)
             {
+                _engineonoffmode    = 1U;                           // ON
+                _engineoncnt        = 0U;
                 PMU_Ctrl_Echo.Engine_OnOff_Echo = 1;
+                engineonmode();
             }
-            engineonmode();
+            else
+            {
+                // send failed: stay OFF and leave the counter where it is, so
+                // the next tick retries while the command pair is still valid.
+                // pmucan_cmd() has already counted the failure in _cmd_tx_err.
+                engineoffmode();
+            }
         }
         else                        //during in OFF STATE
         {
@@ -736,13 +762,19 @@ void AP_PMUCAN::engineonoffstate(void)
     {
         if(_engineoffcnt>=10)       //transition to OFF STATE
         {
-            _engineonoffmode    = 0U;                               // OFF
-            _engineoffcnt       = 0U;
+            // PNU-ISSUE(D7) : as above - a failed stop must not read as stopped
             if(pmucan_cmd(_cmd_id[CMD_ID::CMD_ID_ENGONOFF], 0U)>0)  // OFF(0)
             {
+                _engineonoffmode    = 0U;                           // OFF
+                _engineoffcnt       = 0U;
                 PMU_Ctrl_Echo.Engine_OnOff_Echo = 0;
+                engineoffmode();
             }
-            engineoffmode();
+            else
+            {
+                // send failed: stay ON and retry next tick
+                engineonmode();
+            }
         }
         else                        // during in ON STATE
         {
