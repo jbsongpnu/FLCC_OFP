@@ -37,7 +37,16 @@
 #define PMUCAN_MAVLINK_INTERVAL     (10U)       // 10Hz  10ms*10=100ms
 #define PMUCAN_ONRUNNING_INTERVAL   (100U)      // 1Hz   10ms*100=1000ms
 
+// PNU-ISSUE(D6) : ICD-confirmed DLCs.
+//   TX  - 4 for all five commands (BATCTRL, ENGONOFF, ENGMANUAL, ENGPCL, ENGCHK),
+//         which all go out through pmucan_cmd().
+//   RX  - 8 for all five status messages (BATSTS, ENGSTS, AUX1STS, AUX2STS,
+//         VERSTS).  Shorter frames are rejected rather than parsed from the same
+//         fixed offsets.
+//   RTR - the ICD gives no DLC (N/A), so pmucan_rtr()'s 8 is unconstrained.
 #define PMUCAN_CMD_DLC (4U)
+#define PMUCAN_STS_DLC (8U)
+#define PMUCAN_SHORT_FRAME_WARN_MS (10000U)     // rate limit for the short-frame warning
 
 class PMU_CTRL_CMD
 {
@@ -86,6 +95,7 @@ public:
     void engineonmode(void);
     void engineoffmode(void);
     void handleFrame(const AP_HAL::CANFrame& can_rxframe);
+    void report_short_frame(uint32_t frame_id, uint8_t dlc);    // PNU-ISSUE(D6)
     int pmucan_cmd(uint32_t can_id, uint32_t data_cmd);
     int pmucan_rtr(uint32_t can_id);
     /**
@@ -147,6 +157,8 @@ private:
 	uint32_t _cmd_tx_cnt;
 	uint32_t _rtr_tx_err;
 	uint32_t _cmd_tx_err;
+	uint32_t _short_frame_cnt;                  // PNU-ISSUE(D6) : PMU status frames dropped for short DLC
+	uint32_t _last_short_frame_warn_ms;         // PNU-ISSUE(D6) : rate limit for the warning above
 
     uint32_t _engineonoffmode;                                      // 0: OFF, 1: ON
 	uint32_t _engineoncnt;

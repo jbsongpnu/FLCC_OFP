@@ -51,6 +51,8 @@ AP_PMUCAN::AP_PMUCAN()
     _cmd_tx_cnt             = 0;
     _rtr_tx_err             = 0;
     _cmd_tx_err             = 0;
+    _short_frame_cnt            = 0;
+    _last_short_frame_warn_ms   = 0;
 
     _rtr_idx                = 0;
     _cmd_idx                = CMD_ID::CMD_ID_BATCTRL;       // _cmd_idx=0;
@@ -390,12 +392,14 @@ void AP_PMUCAN::RXdrain(AP_HAL::CANFrame& frame, AP_HAL::CANIface::CanIOFlags& f
 // -------------------------------------------------------------------------
 // handleFrame : processes 1 CAN frame data
 // -------------------------------------------------------------------------
-// PNU-ISSUE(D6) blocked-until: PMU ICD confirmation / bench test.
-//   No DLC validation below: every case memcpy's from fixed offsets up to
-//   data[7] regardless of can_rxframe.dlc.  data[] is a fixed 8-byte array so
-//   there is no out-of-bounds read, but a short or malformed PMU frame is
-//   parsed silently and yields stale bytes as battery current, RPM, fuel
-//   quantity etc.  See README "Deferred Issues".
+// PNU-ISSUE(D6) RESOLVED: the PMU ICD specifies DLC 8 for all five status
+//   messages, so anything shorter is rejected below rather than parsed from the
+//   same fixed offsets - which previously yielded stale bytes as battery
+//   current, RPM, fuel quantity etc.  Drops are counted and reported.
+// PNU-ISSUE(D15) RESOLVED: the PMU ICD specifies little-endian (LSB first), which
+//   matches the STM32, so every field below is read by memcpy straight into a
+//   native integer with no byte swap.  Correct as written - do not "fix" it with
+//   be16toh/be32toh.
 void AP_PMUCAN::handleFrame(const AP_HAL::CANFrame& can_rxframe)
 {
     uint8_t     uint8_temp  = 0U;
@@ -405,7 +409,28 @@ void AP_PMUCAN::handleFrame(const AP_HAL::CANFrame& can_rxframe)
     int8_t  int8_temp  = 0U;
     int16_t int16_temp = 0U;
 
-    switch(can_rxframe.id&can_rxframe.MaskExtID)
+    const uint32_t frame_id = can_rxframe.id & can_rxframe.MaskExtID;
+
+    // PNU-ISSUE(D6) : every field parsed below sits within the ICD's 8-byte
+    // payload, so a short frame means the tail bytes are not ours to read.
+    switch(frame_id)
+    {
+        case PMU_BATSTS:
+        case PMU_ENGSTS:
+        case PMU_AUX1STS:
+        case PMU_AUX2STS:
+        case PMU_VERSTS:
+            if (can_rxframe.dlc < PMUCAN_STS_DLC) {
+                report_short_frame(frame_id, can_rxframe.dlc);
+                return;
+            }
+            break;
+
+        default:
+            return;                                     // not a PMU status frame
+    }
+
+    switch(frame_id)
     {
         case PMU_BATSTS:
             // Parse Battery Status - Not Used
@@ -476,6 +501,9 @@ void AP_PMUCAN::handleFrame(const AP_HAL::CANFrame& can_rxframe)
         case PMU_AUX2STS:
 
             // Parse Engine Operating Time(hour) - 24-bit field.
+            // PNU-ISSUE(D15) : the zeroing is load-bearing.  LSB-first means the
+            // three bytes land in the low three of the uint32, so the top byte
+            // must already be 0 - it is never written by the memcpy below.
             uint32_temp = 0U;
             memcpy(&uint32_temp, &can_rxframe.data[0], 3);
             PMU_Status.Engine_Hour_Count = uint32_temp;
@@ -516,6 +544,26 @@ void AP_PMUCAN::handleFrame(const AP_HAL::CANFrame& can_rxframe)
 
             break;
     }
+}
+
+// -------------------------------------------------------------------------
+// report_short_frame : PNU-ISSUE(D6) count and report a short PMU status frame
+// -------------------------------------------------------------------------
+//   Rate limited, because a misbehaving PMU would otherwise emit one message
+//   per frame at the poll rate.  The first occurrence always reports.
+void AP_PMUCAN::report_short_frame(uint32_t frame_id, uint8_t dlc)
+{
+    _short_frame_cnt++;
+
+    const uint32_t now_ms = AP_HAL::millis();
+    if ((_short_frame_cnt > 1) &&
+        ((now_ms - _last_short_frame_warn_ms) < PMUCAN_SHORT_FRAME_WARN_MS)) {
+        return;
+    }
+    _last_short_frame_warn_ms = now_ms;
+
+    GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "PMUCAN: short frame 0x%lX dlc %u (%lu dropped)",
+                  (unsigned long)frame_id, (unsigned)dlc, (unsigned long)_short_frame_cnt);
 }
 
 
@@ -618,6 +666,8 @@ int AP_PMUCAN::pmucan_cmd(uint32_t can_id, uint32_t data_cmd)
     uint8_t can_data[8] = {0};
     uint8_t msgdlc      = PMUCAN_CMD_DLC;
 
+    // PNU-ISSUE(D15) : host and PMU are both LSB-first, so the uint32 packs
+    // straight into the frame with no byte swap.
     memcpy(can_data, &data_cmd, msgdlc);
 
     AP_HAL::CANFrame out_frame;
