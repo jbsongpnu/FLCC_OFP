@@ -538,13 +538,18 @@ void Copter::do_failsafe_action(FailsafeAction action, ModeReason reason){
 // -------------------------------------------------------------------------
 // failsafe_pmucan_check : PMU Failsafe Action
 // -------------------------------------------------------------------------
-// PNU-ISSUE(D9) see README Deferred Issues. (a) RESOLVED - failsafe.pmucan now
-//   clears on recovery below, matching failsafe.terrain / .deadreckon.
-//   (b) OPEN - this cannot tell "PMU lost in flight" from "armed without one",
-//       so an emergency launch after a PMU dropout is disarmed ~100 ms after
-//       arming, with no prearm warning. Design agreed (arm-time healthy latch +
-//       a Check::SYSTEM prearm check, no new parameter) - see README D9(b).
-//       Deliberately left for its own commit: it changes flight-safety behaviour.
+// PNU-ISSUE(D9) see README Deferred Issues. Both parts RESOLVED.
+//   (a) failsafe.pmucan clears on recovery below, matching failsafe.terrain /
+//       .deadreckon, so it can trigger again on a later flight.
+//   (b) this could not tell "PMU lost in flight" from "armed without one", so an
+//       emergency launch after a PMU dropout was disarmed ~100 ms after arming
+//       with no prearm warning.  Two changes, no new parameter:
+//         - AP_Arming_Copter::pmucan_checks() warns before arming when the PMU is
+//           unhealthy, as a Check::SYSTEM so ARMING_SKIPCHK bit 13 bypasses it.
+//         - AP_Arming_Copter::arm() latches failsafe.pmucan_armed_healthy, and
+//           the check below does nothing unless the PMU was healthy at arming.
+//       Net effect: losing the PMU in flight still triggers the failsafe; arming
+//       deliberately without one flies on unmolested.
 void Copter::failsafe_pmucan_check()
 {
     // Check PMU Failsafe Condition
@@ -566,6 +571,14 @@ void Copter::failsafe_pmucan_check()
 
     // Check Condition : Already Failfe or Not Arming
     if(failsafe.pmucan||!motors->armed())
+    {
+        return;
+    }
+
+    // PNU-ISSUE(D9b) : the PMU was already unhealthy when the operator armed, so
+    // they launched without one on purpose - there is nothing here to protect and
+    // disarming them ~100 ms into an emergency takeoff would be actively harmful.
+    if(!failsafe.pmucan_armed_healthy)
     {
         return;
     }

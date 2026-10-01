@@ -1,5 +1,7 @@
 #include "Copter.h"
 
+#include <AP_PMUCAN/AP_PMUCAN.h>   // PNU-ISSUE(D9b) : PMU_Ctrl_Echo
+
 #pragma GCC diagnostic push
 #if defined(__clang_major__) && __clang_major__ >= 14
 #pragma GCC diagnostic ignored "-Wbitwise-instead-of-logical"
@@ -14,6 +16,31 @@ bool AP_Arming_Copter::pre_arm_checks(bool display_failure)
 
 // perform pre-arm checks
 //  return true if the checks pass successfully
+// PNU-ISSUE(D9b) : warn before arming when the PMU is not healthy.
+//   This lives here rather than in AP_Arming::can_checks(), where the D9(b)
+//   design originally placed it: AP_PMUCAN is listed only in ArduCopter/wscript,
+//   so referencing PMU_Ctrl_Echo from the shared library would fail to link for
+//   Plane, Rover and Sub.
+//   Check::SYSTEM means this is bypassable via ARMING_SKIPCHK bit 13 (System,
+//   decimal 8192), the documented operator override for an emergency launch - so
+//   no new parameter is needed.  NOTE the 4.7 rename and inverted sense: the old
+//   ARMING_CHECK cleared a bit to skip a check, ARMING_SKIPCHK SETS one.  Bit 13
+//   skips every System check, not only this one.  Arming anyway leaves pmucan_armed_healthy clear, and the
+//   in-flight failsafe then stays out of the way.
+bool AP_Arming_Copter::pmucan_checks(bool display_failure)
+{
+    // PMUCAN_Fail: 0 healthy, 1 lost after being seen, 2 never seen.
+    // 2 is also the state when no PMU is fitted at all, which is why this is a
+    // warning rather than a hard block.
+    if (PMU_Ctrl_Echo.PMUCAN_Fail == 0) {
+        return true;
+    }
+
+    check_failed(Check::SYSTEM, display_failure, "PMU not healthy (state %u)",
+                 (unsigned)PMU_Ctrl_Echo.PMUCAN_Fail);
+    return false;
+}
+
 bool AP_Arming_Copter::run_pre_arm_checks(bool display_failure)
 {
     // exit immediately if already armed
@@ -74,7 +101,8 @@ bool AP_Arming_Copter::run_pre_arm_checks(bool display_failure)
     }
 
     // bitwise & ensures all checks are run
-    return parameter_checks(display_failure)
+    return pmucan_checks(display_failure)   // PNU
+        & parameter_checks(display_failure) // PNU
         & oa_checks(display_failure)
         & gcs_failsafe_check(display_failure)
         & winch_checks(display_failure)
@@ -775,6 +803,11 @@ bool AP_Arming_Copter::arm(const AP_Arming::Method method, const bool do_arming_
 
     // Log time stamp of arming event
     copter.arm_time_ms = millis();
+
+    // PNU-ISSUE(D9b) : latch whether the PMU was healthy as we armed.  The PMU
+    // failsafe must protect against losing the PMU in flight, not against an
+    // operator who deliberately launched without one - see failsafe_pmucan_check().
+    copter.failsafe.pmucan_armed_healthy = (PMU_Ctrl_Echo.PMUCAN_Fail == 0);
 
     // Start the arming delay
     copter.ap.in_arming_delay = true;

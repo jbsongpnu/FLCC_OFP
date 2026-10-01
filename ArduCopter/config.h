@@ -52,6 +52,16 @@
  # define FRAME_CONFIG   MULTICOPTER_FRAME
 #endif
 
+// PNU : this firmware targets one airframe - a multirotor with the PMU/engine stack.
+// Nothing in the PNU code is frame-dependent, so "./waf heli" would otherwise build and
+// produce a flashable arducopter-heli binary with the wrong motor output and swashplate
+// handling for this aircraft.  Fail loudly instead.  Remove this guard deliberately, with
+// the PMU, mount and failsafe behaviour re-validated, if a helicopter airframe is ever
+// adopted.  See README "Working Notes".
+#if FRAME_CONFIG == HELI_FRAME
+ #error "PNU-KAL FLCC does not support the helicopter frame. Build with './waf copter', not './waf heli'."
+#endif
+
 /////////////////////////////////////////////////////////////////////////////////
 // TradHeli defaults
 #if FRAME_CONFIG == HELI_FRAME

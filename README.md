@@ -1,7 +1,11 @@
 # Migration Break Point for Future Updates
 - This branch will update Copter-4.7.1 to FLCC V5.0.8 step-by-step to find new commit break points for future updates.
 - All essential works to make migration break points are done and currently reviewing and revising code for PNU-ISSUE
-- IN THIS VERSION : More Updates to organize releasable verion 5.0.14 from 5.0.8  
+- IN THIS VERSION : More Updates to organize releasable verion 5.0.15 from 5.0.8  
+   - Issue 9(b) is resolved : All issues except 10/11 are now resolved
+   - Issue 10 and 11 is decided to be resolved after 5.1.0.
+   - Building as "heli" model is blocked due to fatal errors it may cause 
+- For 5.0.14 version :  
    - Issues 13 and 14 are resolved together
 - For 5.0.13 version :
    - Issue 7 is resolved 
@@ -18,6 +22,7 @@
    - Issue D3 is resolved : Do not go back to previous version. This change is critical. See notes.
    - Viewpro related instructions are added as "bench findings" in this README.md
 - PNU-KAL Specific options  
+   - **WARNING :** Do not use heli model. Only multicopter frames are supported  
    - CAN Driver Option for PMU : CAN_D1_PROTOCOL = 15  
    - KGCS telemetry port : SERIALx_PROTOCOL = 2 (MAVLink2) - **never 1**. Every PNU-KAL ICD message is id >= 50001, which MAVLink1 cannot encode, so a port left on 1 carries no PMU/CAM telemetry and accepts no TC commands at all. See PNU-ISSUE D2  
 - Viewpro Mount Specific options  
@@ -54,13 +59,13 @@ grep -rn "PNU-ISSUE" libraries/ ArduCopter/
 | D1 | **RESOLVED (2026-09-30).** IR palette deferral: for colour codes >= `IR_COLOR_1` the driver sends an `IR_RAINBOW` prelude and defers the colour itself to a later `update()` tick, because the gimbal MCU services at most one C1 command per its own scheduler cycle. The mechanism was hardware-verified; three races remained. | `AP_Mount_Viewpro.{h,cpp}` | — | Bench test confirmed **KGCS streams TC2**, so the races were reachable and this row's own rule required the fix. Applied: (a) the display is **captured at defer time** into `_palette_pending_sensor`, so the colour reaches the sensor it was meant for even if gimbal telemetry changes `_image_sensor` inside the window; (b) the pending colour is **cleared only on a successful send**, so a momentarily full UART retries next tick instead of dropping the command; (c) a **400 ms deadline** bounds those retries so a stale colour is never sent late; (d) a duplicate request for the palette already in flight no longer restarts the sequence - relevant precisely because KGCS streams. Also fixed while here: `_palette_pending_color` had **no initialiser** in a heap-allocated class with an inherited constructor, so a non-zero value at boot would have made the first `update()` send a garbage `CameraCommand` to the gimbal; all three members now carry initialisers, with a comment saying they must keep them. **Still untested:** whether the deferral is needed at all - that requires removing the prelude and retesting on hardware |
 | D2 | All 7 PNU-KAL ICD messages are id ≥ 50001, so MAVLink **v2 only**. A link set to `SERIALn_PROTOCOL=1` (MAVLink1) silently carries no PNU-KAL telemetry or commands. | `Forced Submodule File/common.xml` | — | **RESOLVED (2026-09-29) - documented as a setup constraint**, see the header. A runtime warning was designed (gate the four PNU cases in `try_send_message()` on the existing `sending_mavlink1()`, warn once per channel via STATUSTEXT, which is id 253 and so does reach a MAVLink1 GCS) and **rejected as unnecessary**: a MAVLink1 link means *no* PMU messages at all, which is self-evident at the GCS; the port parameter is checked regardless; and PNU's offline preflight procedure already fixes the protocol. No code change. Verified mechanism, so nobody need re-investigate: the failure is a clean drop, not corruption - `mavlink_helpers.h:339` refuses msgid > 255 and counts a parse error, so a misconfigured link also shows a rising parse-error count. Such a channel never self-upgrades either, since the auto-upgrade in `packetReceived()` (`GCS_Common.cpp:1904`) requires the configured protocol to already be MAVLink2 |
 | D3 | The `modules/mavlink` dialect edits are invisible to git — a `submodule update` or fresh clone silently reverts them and the build fails at step 7 with ~21 unknown-type errors. | `Forced Submodule File/ReadMe.txt` | — | **RESOLVED (2026-09-29).** The submodule is now left **completely pristine** - the definitions are staged outside it and the build runs from the staged copy. See the section below |
-| D4 | `OFP_VER_MAIN/SUB/REV` in `GCS.h` and `FW_MAJOR/MINOR/PATCH` in `version.h` are two hand-maintained copies of the same version with nothing enforcing agreement. | `GCS.h`, `version.h` | 4 | **RESOLVED (step 4)** - `static_assert` in `Copter.cpp` (only TU seeing both; `AP_PMUCAN.cpp` cannot include the vehicle `version.h`) |
+| D4 | `OFP_VER_MAIN/SUB/REV` in `GCS.h` and `FW_MAJOR/MINOR/PATCH` in `version.h` are two hand-maintained copies of the same version with nothing enforcing agreement. | `GCS.h`, `version.h` | — (was 4) | **RESOLVED (step 4)** - `static_assert` in `Copter.cpp` (only TU seeing both; `AP_PMUCAN.cpp` cannot include the vehicle `version.h`) |
 | D5 | **RESOLVED (2026-09-30).** The 356-line block appended at `GCS_Common.cpp`'s EOF was the main recurring merge cost on every ArduPilot bump, and the only issue here whose cost grew with time. It now lives in `libraries/GCS_MAVLink/GCS_PNU.cpp`. | `GCS_Common.cpp`, `GCS_PNU.cpp` | — | Done. `GCS_Common.cpp` vs pristine 4.7.1 went from **429 added lines in 7 hunks** to **45 in 3** - better than the 72 estimated, because the two includes and the extern/macro block moved out too. The three survivors are unavoidable: they insert into upstream's `mavlink_id_to_ap_message_id()` map, `handle_message()` and `try_send_message()` switches. Moved code is **byte-identical** - no logic touched. Costs **+136 bytes** of flash, since the handlers are no longer in the same translation unit as their callers |
 | D6 | **RESOLVED (2026-09-30).** `AP_PMUCAN::handleFrame()` performed no DLC validation - every case `memcpy`d from fixed offsets up to `data[7]` whatever `can_rxframe.dlc` said. No out-of-bounds read (`data[]` is a fixed 8 bytes), but a short or malformed PMU frame was parsed silently and yielded stale values for battery current, RPM, fuel quantity etc. | `AP_PMUCAN.cpp` | — | **ICD confirms DLC 8 for all five status messages** (BATSTS, ENGSTS, AUX1STS, AUX2STS, VERSTS), which also confirms every field the code reads is present. **TX confirmed too**: 4 for all five commands (BATCTRL, ENGONOFF, ENGMANUAL, ENGPCL, ENGCHK), matching `PMUCAN_CMD_DLC`; all five route through the single `pmucan_cmd()` path, and the driver has only two TX paths in total. RTR is N/A in the ICD, so `pmucan_rtr()`'s 8 is unconstrained. No TX change needed. Frames shorter than `PMUCAN_STS_DLC` are now rejected before parsing, counted in `_short_frame_cnt`, and reported to the GCS as `PMUCAN: short frame 0x<id> dlc <n> (<count> dropped)`, rate limited to one message per 10 s with the first always reported. Unknown ids now return early rather than falling through the switch. **Still open - see D15** (byte order) and the note below on the write-only counters |
 | D7 | **RESOLVED (2026-09-30) - one defect fixed, the rest analysed and accepted.** The engine ON/OFF interlock's counters are not a count of operator alternations: the pair they inspect only changes when a new TC1 arrives, but `engineonoffstate()` runs at ~10 Hz regardless, so a frozen valid pair keeps incrementing. They are a ~100 ms tick timer - threshold 10 means *~1.0 s after the first valid alternating pair*. | `AP_PMUCAN.cpp` | — | **Fixed:** the state no longer advances on a failed CAN send. It previously set `_engineonoffmode` unconditionally, so a send failure left the FC believing the engine was running while the PMU had never been told - and KGCS blocks Start from that point, leaving the operator only Stop to resolve a divergence they could not see. On failure the state now holds and the still-valid pair retries on the next tick. **Accepted, with the reasoning recorded at the code site:** the two-messages-plus-1 s shortcut is sound *only because KGCS never sends TC1 unsolicited*; threshold 10 is deliberate and must not be raised back to 14; loss tolerance and rate immunity both follow from the timer behaviour. See the KGCS behaviour and residuals below |
 | D8 | **Mount scheduler rate vs. the Viewpro self-throttle.** (a) *RESOLVED (step 5)* - msg 285 suppression is now an opt-in backend capability (`suppress_gimbal_device_attitude_status()`), so only Viewpro suppresses it; every other gimbal keeps standard MAVLink behaviour. (b) *RESOLVED (step 5)* - V5.0.8 lowered the `AP_Mount` task 50&rarr;10 Hz; **deliberately reverted to 50 Hz**. `AP_Mount_Viewpro::update()` self-throttles to `AP_MOUNT_VIEWPRO_UPDATE_INTERVAL_MS` (100 ms, upstream), so gimbal traffic is 10 Hz at *either* scheduler rate - the scheduler does not control it. At 10 Hz the scheduler period **equals** that throttle interval, so any late tick defers the update a full period (200 ms &rarr; 5 Hz bursts); 50 Hz oversamples it 5x (worst case 120 ms). 50 Hz also keeps `AP_Mount_Backend::update()` - servo retract and `update_poi_lock_target()`, which run *before* the throttle - at full rate. | `Copter.cpp` | — | Done. To reduce gimbal traffic, raise `AP_MOUNT_VIEWPRO_UPDATE_INTERVAL_MS`, not the scheduler rate |
-| D9 | **PMU failsafe: no-PMU case is correct; one gap fixed, one open.** Both "no PMU" paths correctly avoid a false trigger (`PMUCAN_Fail` stays 2 when the driver runs with no PMU; stays 0 from static init when `CAN_Dn_PROTOCOL` is not 15). (a) *RESOLVED (step 6)* - `failsafe.pmucan` was set but never cleared, so the failsafe could fire at most once per power cycle. It now clears on recovery with `ERROR_RESOLVED`, matching `failsafe.terrain` / `.deadreckon` / `.ekf`. The mode change is deliberately **not** undone, matching upstream precedent. (b) **OPEN** - once the PMU has been seen and then lost, state is 1 (`COMMUNICATION_ERROR`) with no path back to 2 and no disable parameter, so **emergency takeoff after a PMU dropout is blocked**. Worse, PMUCAN has *no prearm check* (`AP_Arming.cpp:1354` is a bare `break`), so prearm passes silently, arming succeeds, and `should_disarm_on_failsafe()` disarms ~100 ms later with no prior warning. | `events.cpp`, `AP_Arming.cpp` | — | Design agreed, **dedicated commit after the migration** - it changes flight-safety behaviour and should not be folded into a migration step. No new parameter. See design below. |
-| D10 | **`AP_Q30` routes every camera function through `AP::mount()`, never `AP::camera()`.** Valid for Viewpro (one serial protocol carries gimbal + camera), but on any other mount all ~27 camera calls fall through to the base class and silently do nothing, and `get_zoom_times()` returns a fabricated `0.0f`. Dormant if the camera is driven by standard MAVLink2 instead of KGCS TC2. | `AP_Q30.cpp`, `UserCode.cpp` | 8 | Decide whether KGCS TC2 must drive non-Viewpro cameras; if so, route camera calls via `AP::camera()` - but see **D11**, the destination cannot do everything. See details below. |
+| D9 | **RESOLVED (2026-09-30) - both parts.** Both "no PMU" paths correctly avoid a false trigger (`PMUCAN_Fail` stays 2 when the driver runs with no PMU; stays 0 from static init when `CAN_Dn_PROTOCOL` is not 15). (a) *step 6* - `failsafe.pmucan` was set but never cleared, so the failsafe could fire at most once per power cycle. It now clears on recovery with `ERROR_RESOLVED`, matching `failsafe.terrain` / `.deadreckon` / `.ekf`. The mode change is deliberately **not** undone, matching upstream precedent. (b) the failsafe could not tell "PMU lost in flight" from "armed without one", so an emergency launch after a PMU dropout was disarmed ~100 ms after arming, with no prearm warning. | `events.cpp`, `AP_Arming_Copter.{h,cpp}`, `Copter.h` | — | **(b) implemented as designed, no new parameter.** `AP_Arming_Copter::arm()` latches `failsafe.pmucan_armed_healthy = (PMUCAN_Fail == 0)`, and `failsafe_pmucan_check()` returns early unless it is set - so losing the PMU in flight still triggers the failsafe, while arming deliberately without one flies on unmolested. `AP_Arming_Copter::pmucan_checks()` warns before arming as a `Check::SYSTEM`, bypassable via `ARMING_SKIPCHK` bit 13 (System, decimal 8192). **One deviation from the written design:** it lives in `AP_Arming_Copter`, not `AP_Arming::can_checks()` - `AP_PMUCAN` is listed only in `ArduCopter/wscript`, so referencing `PMU_Ctrl_Echo` from the shared library would fail to link for Plane, Rover and Sub |
+| D10 | **`AP_Q30` routes every camera function through `AP::mount()`, never `AP::camera()`.** Valid for Viewpro (one serial protocol carries gimbal + camera), but on any other mount all ~27 camera calls fall through to the base class and silently do nothing, and `get_zoom_times()` returns a fabricated `0.0f`. Dormant if the camera is driven by standard MAVLink2 instead of KGCS TC2. | `AP_Q30.cpp`, `UserCode.cpp` | — (was 8; step 8 applied). **Now blocked on the ACTION ON PNU answers below**, not on any step | Decide whether KGCS TC2 must drive non-Viewpro cameras; if so, route camera calls via `AP::camera()` - but see **D11**, the destination cannot do everything. See details below. |
 | D11 | **Even with correct routing (D10), the MAVLink camera backend cannot cover everything KGCS needs.** Pristine 4.7.1 *does* have a MAVLink camera path (`AP_Camera_MAVLinkCamV2`, `CAM1_TYPE=6`) - it is the *mount* that is gimbal-only. Of `AP_Q30`'s 8 camera functions, 4 work, 2 exist only in the `AP_Camera` base, and 2 have **no path at all**: `get_zoom_times` (the backend never decodes `CAMERA_SETTINGS` msg 260, where `zoomLevel` lives) and `IR_Color_Change` (MAVLink has no standard thermal-palette message). | `AP_Camera_MAVLinkCamV2.cpp` | — | Bench a real VIO first; then decide per function - upstream fix, local fix, or vendor-specific. See details below. |
 | D12 | **TM5 could not distinguish "nothing nearby" from "sensor reporting nothing".** *RESOLVED (step 7), decision provisional - see revisit note below.* The V5.0.8 code ignored the return of `get_horizontal_distances()`, which fills every sector with `dist_max` on failure (`AP_Proximity_Boundary_3D.cpp:434`) and reads back as "no object" - so a dead sensor was byte-identical to open sky. Sector scanning is now gated on `sensor_failed()`, the return value is checked, and `dist_array.valid(i)` excludes sectors that never reported. | `GCS_Common.cpp` | — | **Decided for now: no ICD change** (provisional - PNU will revisit). `Object_Avoidance_Status = 3` ("sensor unhealthy") was considered and **rejected** - it would need a KGCS update, and the failure already reaches KGCS two other ways. TM5 stays all-zero when the sensor is dead; the health signal is the `MAV_SEVERITY_CRITICAL` statustext on the healthy&rarr;failed edge (plus one if avoidance is switched on while already failed) and the `MAV_SYS_STATUS_SENSOR_PROXIMITY` bit, which `GCS_Copter.cpp:67` drives from the *same* `sensor_failed()` predicate - so TM5 and `SYS_STATUS` cannot contradict each other. **Residual:** confirm 10 m / 15 m are the intended operator thresholds (`PNU_OA_ALERT_DISTANCE_CM` / `PNU_OA_WARN_DISTANCE_CM`); they are hard-coded and unrelated to `AVOID_MARGIN` |
 | D13 | **RESOLVED (2026-09-30).** The KGCS camera path hard-depended on `HAL_MOUNT_ENABLED` with no guard: `AP::mount()` is declared only inside `#if HAL_MOUNT_ENABLED`, but `AP_Q30` called it unguarded and `AP_Q30.h` had no `#if` at all, so a MOUNT-disabled build failed to compile rather than degrading. | `AP_Q30_config.h`, `AP_Q30.{h,cpp}`, `GCS_PNU.cpp`, `GCS_Common.cpp`, `Copter.h`, `UserCode.cpp`, `build_options.py` | — | New `AP_Q30_ENABLED` flag in `AP_Q30/AP_Q30_config.h`, defaulting to `HAL_MOUNT_ENABLED`, guards the library and all six call sites, and is registered in `build_options.py` (`Camera / Q30`, depends on `MOUNT`) so the custom build server can drop it. **Verified by building with `--define HAL_MOUNT_ENABLED=0`**: previously a compile failure, now succeeds at 1,653,036 B (67 KB smaller). The normal build is byte-identical at 1,720,608 B, so the guards cost nothing when enabled |
@@ -458,8 +463,9 @@ The two with no path:
 That answers most of the unknowns above in minutes. `AP_Mount_MAVLink.h:51` already shows the
 in-tree precedent for branching on `vendor_name` / `model_name` (the AVTA/CM41 case).
 
-**Suggested sequencing:** finish steps 6-8, cut 5.1.0 with the deferred issues resolved, then
-take Gremsy support as its own piece of work starting from that bench session.
+**Suggested sequencing:** steps 6-8 are done and the deferred issues are resolved apart from
+D10 and D11, so the next milestone is cutting 5.1.0 (OFFICIAL, not DEV). Take Gremsy support
+as its own piece of work afterwards, starting from that bench session.
 
 > **ACTION ON PNU - blocking D10 and D11.**
 > PNU must establish with Gremsy, and deliver to this project, exactly which camera
@@ -480,64 +486,32 @@ take Gremsy support as its own piece of work starting from that bench session.
 > Until this is delivered, D10 and D11 stay open and no Gremsy camera work should start.
 
 
-**PNU-ISSUE D9(b) design** - PMU failsafe cannot distinguish "lost in flight" from
-"never had one". Agreed approach, to be implemented as its own commit after the migration.
-`FS_PMU_ENABLE` was considered and **rejected** - no new parameter.
-
-*Core change - only latch if the PMU was healthy at arming.* A failsafe should protect
-against losing a resource in flight, not against starting without one:
-
-```cpp
-// on arm (Copter::arm_motors() or alongside existing failsafe init - find a clean
-// hook rather than edge-detecting motors->armed() inside failsafe_pmucan_check())
-failsafe.pmucan_armed_healthy = (PMU_Ctrl_Echo.PMUCAN_Fail == 0);
-
-// in failsafe_pmucan_check(), after the ==2 / ==0 early returns
-if (!failsafe.pmucan_armed_healthy) {
-    return;     // armed deliberately without a healthy PMU - nothing to protect
-}
-```
-
-One extra bit in the existing `failsafe` struct. No parameter.
-
-*Prearm check - for the warning, not the block.* `can_checks()` is called unconditionally
-from the aggregate at `AP_Arming.cpp:1722` and does not gate on a bit itself, so use
-`check_failed(Check::SYSTEM, ...)` (the `AP_Arming.cpp:354` idiom). That makes it bypassable
-via the standard `ARMING_CHECK` bit 13 - ArduPilot's documented operator override, so no new
-parameter is needed for the emergency case. Replaces the bare `break` at `AP_Arming.cpp:1354`.
+**PNU-ISSUE D9(b) - implemented 2026-09-30.** `FS_PMU_ENABLE` was considered and
+**rejected**; no new parameter was added.
 
 | Scenario | Prearm | In flight |
 |---|---|---|
-| PMU healthy, arm, PMU dies | passes | latch healthy -> failsafe fires |
-| PMU dead, emergency launch | fails "PMU not healthy"; operator clears `ARMING_CHECK` bit 13 or force-arms | latch unhealthy -> no failsafe, flight proceeds |
-| No PMU configured at all | `get_pmucan()` returns nullptr -> passes | `PMUCAN_Fail == 0` from static init -> early return |
+| PMU healthy, arm, PMU dies | passes | latch set &rarr; failsafe fires as before |
+| PMU dead, emergency launch | fails `"PMU not healthy (state n)"`; operator sets `ARMING_SKIPCHK` = 8192 or force-arms | latch clear &rarr; no failsafe, flight proceeds |
+| No PMU configured at all | `PMUCAN_Fail == 0` from static init &rarr; passes | `== 0` early return, unchanged |
 
-*Why a prearm check alone is not enough:* even after bypassing prearm, the current code
-fires the failsafe ~100 ms after arming and `should_disarm_on_failsafe()` disarms on the
-ground. Without the arm-time latch the operator trades a confusing disarm for a refusal
-plus the same disarm.
+`failsafe.pmucan_armed_healthy` is one bit in the existing `failsafe` struct, written in
+`AP_Arming_Copter::arm()` beside `arm_time_ms`. `Copter` is a global, so the bit is
+zero-initialised and the failsafe is inert until something arms.
 
+The prearm check uses `Check::SYSTEM`, so **`ARMING_SKIPCHK` bit 13** (System, decimal
+8192) bypasses it - ArduPilot's documented operator override - which is what makes the
+emergency case work without a new parameter. **`ARMING_CHECK` no longer exists in 4.7:**
+it was replaced by `ARMING_SKIPCHK` with the *inverted* sense - you SET a bit to skip a
+check, where the old parameter had you clear one. A migration at `AP_Arming.cpp:230`
+converts existing values on first boot, so only hand-entered parameters are affected.
+Bit 13 skips **all** System checks, not just this one - inherent to `Check::SYSTEM`, and
+the trade D9(b) accepted when it rejected a dedicated parameter. It reports states 1 (lost after being seen) and 2 (never seen); 2 is also the
+state with no PMU fitted, which is why this warns rather than blocks.
 
-
-**PNU-ISSUE D12 revisit note.** The step-7 resolution is **provisional**. PNU plans to
-change the proximity sensor *and* KGCS, with major rework of the proximity-related
-functions, so the D12 decision should be re-opened once the migration break points are
-established and that rework is scoped - not before.
-
-What to re-examine then, and why each may flip:
-
-| Item | Why it may change |
-|---|---|
-| "no ICD change" | Rejected only because it needed a KGCS update. If KGCS is being changed anyway, `Object_Avoidance_Status = 3` ("sensor unhealthy") becomes nearly free and is the honest encoding |
-| statustext as the health signal | A workaround for an unchangeable KGCS. Once KGCS is in scope, in-band health in TM5 is better than a message the operator can scroll past |
-| `sensor_failed()` as the predicate | Chosen to match `MAV_SYS_STATUS_SENSOR_PROXIMITY` (`GCS_Copter.cpp:67`). A different sensor may need per-instance or per-sector health instead of one aggregate bool |
-| 10 m / 15 m thresholds | Hard-coded, unrelated to `AVOID_MARGIN`, and tuned for TeraRanger Tower Evo's 0.5-60 m range. A sensor with a different range almost certainly needs different numbers, or parameters instead of `#define`s |
-| 8 fixed sectors | TM5's `Object_Existence` is one bit per `PROXIMITY_MAX_DIRECTION` sector. A sensor with different angular coverage may not map onto 8 sectors at all |
-
-What **not** to undo in the meantime: the checked `get_horizontal_distances()` return,
-the `dist_array.valid(i)` per-sector guard and the `sensor_failed()` gate are correctness
-fixes independent of the encoding question. They stop a dead sensor reading as a clear
-scene whatever TM5 ends up looking like.
+*Why not `AP_Arming::can_checks()` as originally designed:* `AP_PMUCAN` appears only in
+`ArduCopter/wscript`. Referencing `PMU_Ctrl_Echo` from the shared `AP_Arming` library would
+fail to link for Plane, Rover and Sub. The check belongs to the vehicle that has the PMU.
 
 ---
 
@@ -545,6 +519,29 @@ scene whatever TM5 ends up looking like.
 
 **Board / build.** CubeOrangePlus, `-Werror` is ON. `./waf copter` must finish with
 **zero warnings and zero errors**; anything else is a regression. Check after every change.
+
+**`./waf heli` is blocked on purpose.** Nothing in the PNU code is frame-dependent, so the
+heli target would otherwise build happily and produce a flashable `arducopter-heli` binary
+with the wrong motor output and swashplate handling for this airframe. A `#error` in
+`ArduCopter/config.h`, right after `FRAME_CONFIG` resolves, stops it with an explanatory
+message. Remove it deliberately - and re-validate the PMU, mount and failsafe behaviour -
+if a helicopter airframe is ever adopted.
+
+**Only Copter builds; Plane, Rover and Sub do not link.** Two shared libraries reference
+PNU-only code that only `ArduCopter/wscript` lists:
+
+| Library | Undefined symbols |
+|---|---|
+| `AP_CANManager.cpp` | `AP_PMUCAN::AP_PMUCAN()` - the PMUCAN case in the driver factory |
+| `GCS_MAVLink/GCS_PNU.cpp` | `AP::Q30()`, `AP_Q30::*`, `CAM_ATTITUDE_STATUS`, `debug_cam_*` |
+
+This dates from **step 4** (`ee4f54c95f`, the `AP_CANManager` PMUCAN case) and **step 7**
+(the GCS handlers, moved into `GCS_PNU.cpp` by D5) - it is not a regression from any later
+work. It does not matter for this project, which ships Copter only, and the other vehicles
+live on their own branches. Recorded so nobody mistakes it for something they broke.
+Fixing it would mean an `AP_PMUCAN_ENABLED`-style flag on both libraries, the same shape as
+D13's `AP_Q30_ENABLED` - worth doing only if a non-Copter vehicle is ever needed from this
+branch. Deliberately **not** raised as a PNU-ISSUE.
 
 **Never stage anything.** Staging and committing are done manually after review.
 This matters mechanically: `git checkout <tree> -- <path>` writes to the index.
@@ -565,8 +562,8 @@ If it shows deletions, apply targeted edits only.
 | File | Would be lost |
 |---|---|
 | `ArduCopter/Copter.cpp` | 3x `static_assert(OFP_VER... == FW_...)` (step 4, D4); mount task kept at **50 Hz** (D8) |
-| `ArduCopter/Copter.h` | `AP_Q30 q30` member; `failsafe.pmucan` bit |
-| `libraries/AP_PMUCAN/*` | the whole step-4 cleanup; 4 vendored `pmucan_*.hpp` were **deleted** |
+| `ArduCopter/Copter.h` | `AP_Q30 q30` member behind `#if AP_Q30_ENABLED` (D13); `failsafe.pmucan` and `failsafe.pmucan_armed_healthy` bits (D9) |
+| `libraries/AP_PMUCAN/*` | the whole step-4 cleanup; 4 vendored `pmucan_*.hpp` were **deleted**; DLC validation (D6), endianness comments (D15), global declarations (D14), engine-interlock send check (D7) |
 | `libraries/AP_Mount/AP_Mount_Backend.{h,cpp}` | `pitch_target_is_reversed()`, `suppress_gimbal_device_attitude_status()` (D8a) |
 | `libraries/AP_Mount/AP_Mount_Viewpro.{h,cpp}` | both overrides; D1 markers |
 | `libraries/AP_SerialManager/AP_SerialManager.h` | IOMCU renumber deliberately **not** applied |
@@ -575,8 +572,12 @@ If it shows deletions, apply targeted edits only.
 | `libraries/GCS_MAVLink/GCS_PNU.cpp` | PNU-only file; the step-7 defect fixes and `#if` guards live here |
 | `libraries/AP_Q30/AP_Q30.{h,cpp}` | `send_cmd_speed()` negates pitch at the call site (see the pitch-reversal table); `AP_Q30_ENABLED` guard and the D14 global declarations |
 | `ArduCopter/UserCode.cpp` | `#if HAL_PROXIMITY_ENABLED && AP_AVOIDANCE_ENABLED` guard around the OA block |
-| `ArduCopter/events.cpp` | D9(a) recovery-clear fix; `LOGGER_WRITE_ERROR` portability fix |
-| `ArduCopter/version.h` | 5.0.8 **DEV** + the 5.1.0 release note |
+| `ArduCopter/events.cpp` | D9(a) recovery-clear fix and D9(b) arm-time latch gate; `LOGGER_WRITE_ERROR` portability fix |
+| `ArduCopter/AP_Arming_Copter.{h,cpp}` | `pmucan_checks()` prearm warning and the arm-time healthy latch (D9b) |
+| `libraries/GCS_MAVLink/GCS.h` | `OFP_VER_*`; the D3 dialect `#error` guard; the D12 `prev_prx_failed` latch; PNU handler declarations |
+| `libraries/AP_Q30/AP_Q30_config.h` | PNU-only file - the `AP_Q30_ENABLED` flag (D13) |
+| `Tools/scripts/build_options.py` | the `Camera / Q30` build option (D13) |
+| `ArduCopter/version.h` | the current 5.0.x **DEV** version + the 5.1.0 release note |
 | `README.md` | this file - never taken from the snapshot |
 
 Most other deviations are KAL -> PNU / PNU-KAL comment renames, which are cosmetic but still
@@ -591,7 +592,7 @@ make a wholesale copy a regression.
 | Mount task kept at 50 Hz | `AP_Mount_Viewpro::update()` self-throttles to 100 ms, so gimbal traffic is 10 Hz either way; at a 10 Hz task rate the period *equals* the throttle and late ticks cause 5 Hz bursts. See D8 |
 | msg 285 suppression made opt-in | V5.0.8 suppressed it for every gimbal, not just Viewpro. See D8 |
 | `version.h` is DEV, not OFFICIAL | migration in progress; release will be 5.1.0 |
-| `GCS.h` dead CAM macros removed, `OFP_VER_*` corrected to 5/0/8 | were stale/unused; guarded by `static_assert` in `Copter.cpp` |
+| `GCS.h` dead CAM macros removed, `OFP_VER_*` tracked against `version.h` | were stale/unused; guarded by `static_assert` in `Copter.cpp` |
 | `AP_PMUCAN` fixes | dropped-frame at RX budget, dead branch, `&`->`&&`, `RXdrain()` extraction, named constants, ctor init, `TXspin` void. See git log |
 | `send_proximity()` upward-distance block **not** commented out | V5.0.8 wrapped it in `/* Currently, no upward sensor */`. `AP_Proximity::get_upward_distance()` already returns false when no backend supplies one (`AP_Proximity.cpp:498`), and TeraRanger Tower Evo is not one of the backends that does - so the comment-out is a no-op here and a silent regression for `AP_Proximity_RangeFinder` / `_MAV` / scripting users. Not applied |
 | OA sender/handler guarded `#if HAL_PROXIMITY_ENABLED && AP_AVOIDANCE_ENABLED` | `GCS_Common.cpp` is core; `AC_Avoid` and `AP_Proximity` are optional. Step 8's `UserCode.cpp` caller needs the same guard - without it a proximity-disabled build hits the `try_send_message()` default case, which spams "Sending unknown message" and panics in SITL |
@@ -600,7 +601,8 @@ make a wholesale copy a regression.
 | step 8: `copter.avoid.` &rarr; `avoid.` | inside a `Copter` member function; `copter.` is the global instance and redundant |
 | step 8: tabs &rarr; 4 spaces in the added lines | V5.0.8 mixed tabs and spaces in both hunks |
 
-**Step 7 defects fixed while applying `GCS_Common.cpp`.** All are in the V5.0.8 block; none
+**Step 7 defects fixed while applying the V5.0.8 GCS block.** The block itself now lives in
+`GCS_PNU.cpp` (D5); these fixes travelled with it. None
 change the wire format of any ICD message except where stated.
 
 | Defect | Fix |
@@ -652,8 +654,12 @@ grep -rn "PNU-NOT-APPLIED" libraries/ ArduCopter/
 **Open question for the NMEA decision:** is any serial port on the aircraft set to
 `SERIALn_PROTOCOL = 20` (NMEAOutput)? If not, this is dead code and the issue closes.
 
-**Remaining work:** all 8 numbered steps are applied, and both free-floaters are closed as
-not-applied. Left over: the open issues D1, D2, D3, D5, D6, D7, D9(b), D10, D11, D12 (provisional) and D13.
+**Remaining work:** all 8 numbered steps are applied, both free-floaters are closed as
+not-applied, and **13 of the 15 issues are resolved**. Left open: **D10** and **D11**, both
+blocked on the ACTION ON PNU answers above - nothing in this repo will unblock them.
+Residuals recorded against resolved issues: D1 (is the prelude needed at all?), D6 (the PMU
+counters are still write-only), D7 (accepted interlock residuals), D12 (confirm the 10 m /
+15 m thresholds).
 
 **Open issues** are the `PNU-ISSUE` table above; code markers carry the same ids.
 List them with:

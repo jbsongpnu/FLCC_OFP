@@ -415,6 +415,10 @@ private:
         uint8_t adsb                : 1; // true if an adsb related failsafe has occurred
         uint8_t deadreckon          : 1; // true if a dead reckoning failsafe has triggered
         uint8_t pmucan              : 1; // PMU failsafe has triggered (PNU)
+        uint8_t pmucan_armed_healthy: 1; // PNU-ISSUE(D9b) : PMU was healthy at the moment of arming.
+                                         // The PMU failsafe protects against LOSING the PMU in flight,
+                                         // not against deliberately launching without one, so it only
+                                         // latches when this is set.  Written in AP_Arming_Copter::arm().
     } failsafe;
 
     bool any_failsafe_triggered() const {
