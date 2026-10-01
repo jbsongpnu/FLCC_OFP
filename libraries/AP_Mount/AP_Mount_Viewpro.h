@@ -105,7 +105,7 @@ public:
     bool set_rangefinder_enable(bool enable) override;
 
     // PNU : Get zoom times
-    float get_zoom_times(uint8_t instance) override;
+    bool get_zoom_times(uint8_t instance, float &zoom_times) override;
 
     // PNU : Viewpro takes pitch angle targets with the opposite sign to ArduPilot
     bool pitch_target_is_reversed() const override { return true; }
@@ -429,7 +429,12 @@ private:
     bool _last_lock;                                // last lock mode sent to gimbal
     TrackingStatus _last_tracking_status;           // last tracking status received from gimbal (used to notify users)
     ImageSensor _image_sensor;                      // user selected image sensor (aka camera lens)
-    float _zoom_times;                              // zoom times received from gimbal
+    // PNU-ISSUE(D10) : _zoom_times MUST keep its initialiser, for the same reason as the
+    // three D1 members below - inherited constructor, heap-allocated backend, so without
+    // one it is indeterminate until the first gimbal report, not 0.  It was read in that
+    // state by TM2 and by AP_Q30::IR_operation().  0 doubles as the "not yet reported"
+    // marker: EO and IR zoom are both >= 1x, so is_positive() is the validity test.
+    float _zoom_times = 0;                          // zoom times received from gimbal (0 = none received yet)
     // PNU-ISSUE(D1) : these three MUST keep their initialisers.  The class uses an
     // inherited constructor and the backend is heap-allocated, so an uninitialised
     // _palette_pending_color would be indeterminate - a non-zero value at boot would

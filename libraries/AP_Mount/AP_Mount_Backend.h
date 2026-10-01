@@ -69,8 +69,11 @@ public:
     // yaw is in body-frame.
     virtual bool get_attitude_quaternion(Quaternion& att_quat) = 0;
 
-    // PNU : Get zoom times
-    virtual float get_zoom_times(uint8_t instance) { return 0.0f; }
+    // PNU-ISSUE(D10) : get zoom times.  Returns false if this backend cannot report
+    // zoom, leaving zoom_times untouched.  It must not fabricate a value: a backend
+    // with no zoom telemetry used to return 0.0f, which a caller could not tell from a
+    // camera genuinely reporting 0x, and which reached KGCS as a real TM2 reading.
+    virtual bool get_zoom_times(uint8_t instance, float &zoom_times) { return false; }
 
     // get angular velocity of mount. Only available on some backends
     virtual bool get_angular_velocity(Vector3f& rates) { return false; }

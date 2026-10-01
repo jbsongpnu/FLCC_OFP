@@ -44,7 +44,7 @@
 // The same rule applies to FW_MAJOR/FW_MINOR/FW_PATCH in ArduCopter/version.h.
 #define OFP_VER_MAIN        5
 #define OFP_VER_SUB         1
-#define OFP_VER_REV         0
+#define OFP_VER_REV         1
 
 #ifndef HAL_GCS_ALLOW_PARAM_SET_DEFAULT
 #define HAL_GCS_ALLOW_PARAM_SET_DEFAULT 1
@@ -1259,6 +1259,7 @@ public:
     mavlink_sys_icd_flcc_gcs_object_avoidance_status_t	OA_Status;							// PNU : MAVLINK Message sent to GCS for Object Avoidance Status
     uint8_t prev_Ctrl_OA_Mode = 4;
     bool prev_prx_failed;                                                                   // PNU : latches the proximity healthy/failed edge for the TM5 warning (D12)
+    bool prev_zoom_unavailable = false;                                                     // PNU : latches the TM2 zoom available/unavailable edge (D10).  false at boot, so the first unavailable report past the grace period is an edge and is announced
 
     void update_send();
     void update_receive();

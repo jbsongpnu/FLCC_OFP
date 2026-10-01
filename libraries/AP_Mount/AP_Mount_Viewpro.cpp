@@ -1077,9 +1077,16 @@ bool AP_Mount_Viewpro::set_rangefinder_enable(bool enable)
 }
 
 // PNU : Get zoom times - JBSong
-float AP_Mount_Viewpro::get_zoom_times(uint8_t instance)
+// PNU-ISSUE(D10) : false until the gimbal has actually reported a zoom level, so a
+// caller never mistakes "no telemetry yet" for a real reading.  Both EO and IR zoom
+// are >= 1x, so the 0 the member is initialised to cannot collide with a real value.
+bool AP_Mount_Viewpro::get_zoom_times(uint8_t instance, float &zoom_times)
 {
-    return _zoom_times;
+    if (!is_positive(_zoom_times)) {
+        return false;
+    }
+    zoom_times = _zoom_times;
+    return true;
 }
 
 #endif // HAL_MOUNT_VIEWPRO_ENABLED

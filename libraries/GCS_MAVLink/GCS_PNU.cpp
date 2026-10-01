@@ -41,6 +41,10 @@
 // Set to 1 to report the Tracking_CMD received by handle_gcs_flcc_cam_cmd() to the GCS.
 #define GCS_VIEWPRO_IR_DEBUG 0
 
+// PNU-ISSUE(D10) : how long after boot TM2 waits before deciding the mount cannot
+// report zoom, in milliseconds.  Covers the gimbal's startup telemetry delay.
+#define PNU_CAM_ZOOM_GRACE_MS 10000
+
 // PNU : object-avoidance warning thresholds reported to KGCS in TM5, in centimetres
 #define PNU_OA_ALERT_DISTANCE_CM 1000
 #define PNU_OA_WARN_DISTANCE_CM  1500
@@ -59,6 +63,15 @@ void GCS_MAVLINK::send_message_gcs_flcc_cam_status() const
         return;
     }
 
+    // PNU-ISSUE(D10) : with no gimbal configured every field below is zero, so TM2 would
+    // stream a perfectly level, 0x-zoom camera at 10 Hz to every connected GCS - the same
+    // "nothing fitted looks like nothing wrong" shape as TM5 in D12.  Note this gates on
+    // a mount being configured, NOT on the mount supporting zoom: TM2 is mostly gimbal
+    // attitude, which a Gremsy reports correctly even though it answers no camera call.
+    if (mount->get_mount_type(0) == AP_Mount::Type::None) {
+        return;
+    }
+
     float roll = 0, pitch = 0, yaw = 0;
     if (mount->get_attitude_euler(0, roll, pitch, yaw)) {
         CAM_ATTITUDE_STATUS.Roll_REL_ANG = CAM_ATTITUDE_STATUS.Roll_IMU_ANG = roll * 10;
@@ -72,7 +85,29 @@ void GCS_MAVLINK::send_message_gcs_flcc_cam_status() const
         CAM_ATTITUDE_STATUS.Yaw_REL_ANG = CAM_ATTITUDE_STATUS.Yaw_IMU_ANG = 0;
     }
 
-    CAM_ATTITUDE_STATUS.Zoom_POS_FB = (int8_t)mount->get_zoom_times(0);
+    // PNU-ISSUE(D10) : the wire format is deliberately unchanged.  Zoom_POS_FB has no
+    // "unknown" encoding, so a mount that cannot report zoom still sends 0 - adding one
+    // is an ICD change needing KGCS work, the same decision taken for TM5 in D12.  What
+    // changes is that 0 is now sent because the value is unknown, not because a
+    // fabricated 0.0f was mistaken for a reading, and the operator is told once on the
+    // edge rather than left to infer it from a camera that appears stuck at 0x.
+    float zoom_times = 0;
+    const bool zoom_known = mount->get_zoom_times(0, zoom_times);
+    CAM_ATTITUDE_STATUS.Zoom_POS_FB = zoom_known ? (int8_t)zoom_times : 0;
+
+    // A working Viewpro reports zoom only once the gimbal's first telemetry frame
+    // arrives, so evaluating the edge from boot would warn on every startup and then
+    // immediately recover.  Past the grace period, still-unavailable means the mount
+    // genuinely does not report zoom, which is the condition worth announcing.
+    const bool zoom_unavailable = !zoom_known && (AP_HAL::millis() > PNU_CAM_ZOOM_GRACE_MS);
+    if (zoom_unavailable != gcs().prev_zoom_unavailable) {
+        gcs().prev_zoom_unavailable = zoom_unavailable;
+        if (zoom_unavailable) {
+            GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "CAM: zoom not reported, TM2 sends 0");
+        } else {
+            GCS_SEND_TEXT(MAV_SEVERITY_INFO, "CAM: zoom reporting active");
+        }
+    }
 
     mavlink_msg_sys_icd_flcc_gcs_cam_attitude_status_send(
             chan,

@@ -7,14 +7,14 @@
 #include "ap_version.h"
 
 // PNU : This is a custom code modified by PNU Drone
-#define THISFIRMWARE "PNU_OFP V5.1.0"
+#define THISFIRMWARE "PNU_OFP V5.1.1"
 
-// NOTE: 5.1.0 is the OFFICIAL release closing the Copter-4.7.1 -> FLCC migration.
-// It carries the V5.0.8 feature set plus the fixes for the issues found while
-// migrating it - 13 of the 15 PNU-ISSUEs are resolved; D10 and D11 (KGCS camera
-// routing for non-Viewpro mounts) are deliberately deferred past this release and
-// are blocked on the Gremsy capability answers.  The 5.0.x series that preceded
-// this was carried as DEV builds for the duration of the migration.
+// NOTE: 5.1.1 is a DEV build on top of the 5.1.0 OFFICIAL release, which closed the
+// Copter-4.7.1 -> FLCC migration.  It carries the D10 Stage 1 work: every fabricated
+// camera value is removed and every declined camera command is now reported, so the
+// D10 symptom is visible on a non-Viewpro mount instead of silent.  Routing itself is
+// unchanged - the D10 decision and all of D11 remain blocked on the Gremsy capability
+// answers (README, "ACTION ON PNU").  It becomes OFFICIAL when that work lands.
 // See README "Deferred Issues", PNU-ISSUE Dn.
 
 // NOTE: write every component as plain decimal, with NO leading zero.  A leading zero
@@ -25,12 +25,12 @@
 // must stay in step with the three defines below (static_assert in Copter.cpp, D4).
 
 // the following line is parsed by the autotest scripts
-#define FIRMWARE_VERSION 5,1,0,FIRMWARE_VERSION_TYPE_OFFICIAL
+#define FIRMWARE_VERSION 5,1,1,FIRMWARE_VERSION_TYPE_DEV
 
 #define FW_MAJOR 5
 #define FW_MINOR 1
-#define FW_PATCH 0
-#define FW_TYPE FIRMWARE_VERSION_TYPE_OFFICIAL
+#define FW_PATCH 1
+#define FW_TYPE FIRMWARE_VERSION_TYPE_DEV
 
 #include <AP_Common/AP_FWVersionDefine.h>
 #include <AP_CheckFirmware/AP_CheckFirmwareDefine.h>

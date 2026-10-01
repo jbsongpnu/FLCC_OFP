@@ -242,8 +242,8 @@ public:
     // returns true on success
     bool get_attitude_euler(uint8_t instance, float& roll_deg, float& pitch_deg, float& yaw_bf_deg);
 
-    // Get zoom times - JBSong
-    float get_zoom_times(uint8_t instance);
+    // PNU : Get zoom times
+    bool get_zoom_times(uint8_t instance, float &zoom_times);
 
     // run pre-arm check.  returns false on failure and fills in failure_msg
     // any failure_msg returned will not include a prefix

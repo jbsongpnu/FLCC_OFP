@@ -1,8 +1,17 @@
-# PNU-KAL FLCC OFP 
-- This branch is now moving on to development branch : see 5.0.8 ~ 5.0.15 for Migration Break Point for Future Updates
-- PNU-ISSUE 10 & 11 still remains : For Gremsy camera and general camera mount library structure
-- IN THIS VERSION :  Release of 5.1.0 Official Version  => TAG PNU-KAL-FLCC-5.1.0
+# PNU-KAL FLCC OFP Development Version
+- This branch currently developing PNU-KAL FLCC OFP after official version (TAG) PNU-KAL-FLCC-5.1.0 (this is same code as 5.0.15 dev)  
+- PNU-ISSUE 10 & 11 still remains : For Gremsy camera and general camera mount library structure  
+- IN THIS VERSION : V5.1.1 working with issues 10 and 11 - Stage 1 
+   - Stage 1 applied : (see below); the routing decision itself stays blocked on the ACTION ON PNU answers  
+   - README.md notes are updated to indicate dev version  
+***
+Residuals recorded against resolved issues
 
+- D1 — is the IR prelude needed at all? Requires removing it and retesting on hardware.  
+- D6 — five PMU counters are still write-only; decide to surface (a PMUC log msg) or delete. _rtr_tx_err / _cmd_tx_err have the real diagnostic value.  
+- D7 — accepted interlock residuals (no sender check on handle_gcs_flcc_pmu_ctrl(); the 2-messages-plus-1s shortcut rests on a KGCS contract not enforced in firmware).  
+- D12 — confirm 10 m / 15 m are the intended operator thresholds.
+- Untested, from the bench notes: the Viewpro SEARCHING/TRACKING freeze (operator can lose gimbal control with no KGCS action), and whether _Max_zoom_EO = 30 / _Max_zoom_IR = 4 match the new camera.  
 ***
 - For 5.0.15 version :
    - Issue 9(b) is resolved : All issues except 10/11 are now resolved
@@ -31,8 +40,9 @@
 - Viewpro Mount Specific options  
    - MNT1_TYPE = 11 (Viewpro) / CAM1_TYPE = 4 (Mount) / SERIALx_BAUD = 115 (115,200 bps) / SERIALx_PROTOCOL = 8 (Viewpro)  
 - Gremsy Mount Specific options
-   - **WARNING :** Gremsy is not supported yet : planned after 5.1.0  
+   - **WARNING :** Gremsy is not supported yet
    - MNT1_TYPE = 6 (MAVLink-Gremsy) / CAM1_TYPE = 6 (MAVLinkCAMV2) / SERIALx_BAUD = 115 (115,200 bps) / SERIALx_PROTOCOL = 2 (MAVLink2)   
+   - For more information with Gremsy camera, see online manual at https://docs.gremsy.com/payloads/vio
 
 <Planned Commit Breaks and Migration Steps>
 
@@ -69,7 +79,7 @@ grep -rn "PNU-ISSUE" libraries/ ArduCopter/
 | D7 | **RESOLVED (2026-09-30) - one defect fixed, the rest analysed and accepted.** The engine ON/OFF interlock's counters are not a count of operator alternations: the pair they inspect only changes when a new TC1 arrives, but `engineonoffstate()` runs at ~10 Hz regardless, so a frozen valid pair keeps incrementing. They are a ~100 ms tick timer - threshold 10 means *~1.0 s after the first valid alternating pair*. | `AP_PMUCAN.cpp` | — | **Fixed:** the state no longer advances on a failed CAN send. It previously set `_engineonoffmode` unconditionally, so a send failure left the FC believing the engine was running while the PMU had never been told - and KGCS blocks Start from that point, leaving the operator only Stop to resolve a divergence they could not see. On failure the state now holds and the still-valid pair retries on the next tick. **Accepted, with the reasoning recorded at the code site:** the two-messages-plus-1 s shortcut is sound *only because KGCS never sends TC1 unsolicited*; threshold 10 is deliberate and must not be raised back to 14; loss tolerance and rate immunity both follow from the timer behaviour. See the KGCS behaviour and residuals below |
 | D8 | **Mount scheduler rate vs. the Viewpro self-throttle.** (a) *RESOLVED (step 5)* - msg 285 suppression is now an opt-in backend capability (`suppress_gimbal_device_attitude_status()`), so only Viewpro suppresses it; every other gimbal keeps standard MAVLink behaviour. (b) *RESOLVED (step 5)* - V5.0.8 lowered the `AP_Mount` task 50&rarr;10 Hz; **deliberately reverted to 50 Hz**. `AP_Mount_Viewpro::update()` self-throttles to `AP_MOUNT_VIEWPRO_UPDATE_INTERVAL_MS` (100 ms, upstream), so gimbal traffic is 10 Hz at *either* scheduler rate - the scheduler does not control it. At 10 Hz the scheduler period **equals** that throttle interval, so any late tick defers the update a full period (200 ms &rarr; 5 Hz bursts); 50 Hz oversamples it 5x (worst case 120 ms). 50 Hz also keeps `AP_Mount_Backend::update()` - servo retract and `update_poi_lock_target()`, which run *before* the throttle - at full rate. | `Copter.cpp` | — | Done. To reduce gimbal traffic, raise `AP_MOUNT_VIEWPRO_UPDATE_INTERVAL_MS`, not the scheduler rate |
 | D9 | **RESOLVED (2026-09-30) - both parts.** Both "no PMU" paths correctly avoid a false trigger (`PMUCAN_Fail` stays 2 when the driver runs with no PMU; stays 0 from static init when `CAN_Dn_PROTOCOL` is not 15). (a) *step 6* - `failsafe.pmucan` was set but never cleared, so the failsafe could fire at most once per power cycle. It now clears on recovery with `ERROR_RESOLVED`, matching `failsafe.terrain` / `.deadreckon` / `.ekf`. The mode change is deliberately **not** undone, matching upstream precedent. (b) the failsafe could not tell "PMU lost in flight" from "armed without one", so an emergency launch after a PMU dropout was disarmed ~100 ms after arming, with no prearm warning. | `events.cpp`, `AP_Arming_Copter.{h,cpp}`, `Copter.h` | — | **(b) implemented as designed, no new parameter.** `AP_Arming_Copter::arm()` latches `failsafe.pmucan_armed_healthy = (PMUCAN_Fail == 0)`, and `failsafe_pmucan_check()` returns early unless it is set - so losing the PMU in flight still triggers the failsafe, while arming deliberately without one flies on unmolested. `AP_Arming_Copter::pmucan_checks()` warns before arming as a `Check::SYSTEM`, bypassable via `ARMING_SKIPCHK` bit 13 (System, decimal 8192). **One deviation from the written design:** it lives in `AP_Arming_Copter`, not `AP_Arming::can_checks()` - `AP_PMUCAN` is listed only in `ArduCopter/wscript`, so referencing `PMU_Ctrl_Echo` from the shared library would fail to link for Plane, Rover and Sub |
-| D10 | **`AP_Q30` routes every camera function through `AP::mount()`, never `AP::camera()`.** Valid for Viewpro (one serial protocol carries gimbal + camera), but on any other mount all ~27 camera calls fall through to the base class and silently do nothing, and `get_zoom_times()` returns a fabricated `0.0f`. Dormant if the camera is driven by standard MAVLink2 instead of KGCS TC2. | `AP_Q30.cpp`, `UserCode.cpp` | — (was 8; step 8 applied). **Now blocked on the ACTION ON PNU answers below**, not on any step | Decide whether KGCS TC2 must drive non-Viewpro cameras; if so, route camera calls via `AP::camera()` - but see **D11**, the destination cannot do everything. See details below. |
+| D10 | **`AP_Q30` routes every camera function through `AP::mount()`, never `AP::camera()`.** Valid for Viewpro (one serial protocol carries gimbal + camera), but on any other mount all 27 camera calls fall through to the base class and do nothing. **Stage 1 applied 2026-10-01** - they no longer do it *silently*, and `get_zoom_times()` no longer fabricates `0.0f`. Dormant if the camera is driven by standard MAVLink2 instead of KGCS TC2. | `AP_Q30.{h,cpp}`, `AP_Mount*.{h,cpp}`, `GCS_PNU.cpp`, `GCS.h` | — (was 8; step 8 applied). **The routing decision is blocked on the ACTION ON PNU answers below**, not on any step | Decide whether KGCS TC2 must drive non-Viewpro cameras; if so, route camera calls via `AP::camera()` - but see **D11**, the destination cannot do everything. See details below. |
 | D11 | **Even with correct routing (D10), the MAVLink camera backend cannot cover everything KGCS needs.** Pristine 4.7.1 *does* have a MAVLink camera path (`AP_Camera_MAVLinkCamV2`, `CAM1_TYPE=6`) - it is the *mount* that is gimbal-only. Of `AP_Q30`'s 8 camera functions, 4 work, 2 exist only in the `AP_Camera` base, and 2 have **no path at all**: `get_zoom_times` (the backend never decodes `CAMERA_SETTINGS` msg 260, where `zoomLevel` lives) and `IR_Color_Change` (MAVLink has no standard thermal-palette message). | `AP_Camera_MAVLinkCamV2.cpp` | — | Bench a real VIO first; then decide per function - upstream fix, local fix, or vendor-specific. See details below. |
 | D12 | **TM5 could not distinguish "nothing nearby" from "sensor reporting nothing".** *RESOLVED (step 7), decision provisional - see revisit note below.* The V5.0.8 code ignored the return of `get_horizontal_distances()`, which fills every sector with `dist_max` on failure (`AP_Proximity_Boundary_3D.cpp:434`) and reads back as "no object" - so a dead sensor was byte-identical to open sky. Sector scanning is now gated on `sensor_failed()`, the return value is checked, and `dist_array.valid(i)` excludes sectors that never reported. | `GCS_Common.cpp` | — | **Decided for now: no ICD change** (provisional - PNU will revisit). `Object_Avoidance_Status = 3` ("sensor unhealthy") was considered and **rejected** - it would need a KGCS update, and the failure already reaches KGCS two other ways. TM5 stays all-zero when the sensor is dead; the health signal is the `MAV_SEVERITY_CRITICAL` statustext on the healthy&rarr;failed edge (plus one if avoidance is switched on while already failed) and the `MAV_SYS_STATUS_SENSOR_PROXIMITY` bit, which `GCS_Copter.cpp:67` drives from the *same* `sensor_failed()` predicate - so TM5 and `SYS_STATUS` cannot contradict each other. **Residual:** confirm 10 m / 15 m are the intended operator thresholds (`PNU_OA_ALERT_DISTANCE_CM` / `PNU_OA_WARN_DISTANCE_CM`); they are hard-coded and unrelated to `AVOID_MARGIN` |
 | D13 | **RESOLVED (2026-09-30).** The KGCS camera path hard-depended on `HAL_MOUNT_ENABLED` with no guard: `AP::mount()` is declared only inside `#if HAL_MOUNT_ENABLED`, but `AP_Q30` called it unguarded and `AP_Q30.h` had no `#if` at all, so a MOUNT-disabled build failed to compile rather than degrading. | `AP_Q30_config.h`, `AP_Q30.{h,cpp}`, `GCS_PNU.cpp`, `GCS_Common.cpp`, `Copter.h`, `UserCode.cpp`, `build_options.py` | — | New `AP_Q30_ENABLED` flag in `AP_Q30/AP_Q30_config.h`, defaulting to `HAL_MOUNT_ENABLED`, guards the library and all six call sites, and is registered in `build_options.py` (`Camera / Q30`, depends on `MOUNT`) so the custom build server can drop it. **Verified by building with `--define HAL_MOUNT_ENABLED=0`**: previously a compile failure, now succeeds at 1,653,036 B (67 KB smaller). The normal build is byte-identical at 1,720,608 B, so the guards cost nothing when enabled |
@@ -350,22 +360,28 @@ genuinely gimbal operations:
 | 91 | `set_rate_target()` | gimbal |
 | 137 | `set_rate_target(0,0,0,0)` | gimbal |
 
-The other ~27 are camera operations addressed to the mount object: `set_zoom` x7,
+The other 27 are camera operations addressed to the mount object: `set_zoom` x7,
 `IR_Color_Change` x6, `set_camera_source` x4, `set_focus` x2, `record_video` x2,
 `set_tracking` x2, `get_zoom_times` x2, `take_picture`.
 
 On a non-Viewpro mount (Gremsy is `AP_Mount_MAVLink`, which implements none of them)
-every call hits the base-class default, and **`AP_Q30` checks no return value** - there
-is not one `if (mount->...)` guard in the file:
+every call hits the base-class default. **Before Stage 1, `AP_Q30` checked no return
+value** - there was not one `if (mount->...)` guard in the file. All 27 are checked now,
+which changes what the operator is told, not where the calls go:
 
 | Method | Base-class return on a Gremsy |
 |---|---|
 | `set_zoom` / `record_video` / `take_picture` / `set_tracking` / `set_camera_source` / `IR_Color_Change` | `false` |
 | `set_focus` | `SetFocusResult::UNSUPPORTED` |
-| `get_zoom_times` | **`0.0f`** - a fabricated value, not an error |
+| `get_zoom_times` | was **`0.0f`** - a fabricated value, not an error. **Stage 1 changed the signature to `bool get_zoom_times(uint8_t, float&)`**, so the base now returns `false` and writes nothing |
 
-Result: gimbal pointing works, every camera command silently does nothing, and KGCS is
-told zoom is 0x. No error, no warning, no build failure.
+Result *before* Stage 1: gimbal pointing works, every camera command silently does
+nothing, and KGCS is told zoom is 0x. No error, no warning, no build failure.
+
+**After Stage 1 the behaviour is unchanged but no longer silent** - each declined call
+is reported to the operator as `CAM: mount rejected <what> (<n> failed)`, and TM2 no
+longer passes off "no zoom information" as a reading of 0x. The routing itself is
+untouched: this makes the D10 symptom visible, it does not fix D10.
 
 **Scope - when this does and does not matter:**
 
@@ -376,11 +392,18 @@ told zoom is 0x. No error, no warning, no build failure.
   is `handle_gcs_flcc_cam_cmd()` (`GCS_Common.cpp`), reached only by msg 50002 (TC2).
 - *KGCS TC2 driving a non-Viewpro camera* is the case that breaks.
 
-**Related residual - now LIVE as of step 8:** `UserCode.cpp::userhook_MediumLoop()` sends
-`MSG_CAM_STATUS` unconditionally at 10 Hz. `send_message_gcs_flcc_cam_status()` guards
-`AP::mount() == nullptr` but not whether the mount supports zoom - so with a Gremsy it
-emits a 10 Hz TM2 stream reporting zoom 0x to every connected GCS. Gate it on the mount
-actually supporting zoom, or on TC2 having been seen recently.
+**Related residual - RESOLVED (Stage 1, 2026-10-01).** `UserCode.cpp::userhook_MediumLoop()`
+sends `MSG_CAM_STATUS` unconditionally at 10 Hz, and `send_message_gcs_flcc_cam_status()`
+guarded only `AP::mount() == nullptr` - so with a Gremsy it emitted a 10 Hz TM2 stream
+reporting zoom 0x to every connected GCS.
+
+Gating it *on the mount supporting zoom*, as this note originally suggested, would have
+been **wrong**: TM2 is mostly gimbal attitude, which `AP_Mount_MAVLink` reports perfectly
+well on a Gremsy even though it answers no camera call. Suppressing the whole message
+would have thrown away working attitude telemetry to hide one bad field. Applied instead:
+the sender returns early when `get_mount_type(0) == Type::None` - no gimbal configured, so
+every field would be zero - and the zoom field is now reported honestly on its own (see
+the TM2 entry in the Stage 1 table below). `UserCode.cpp` is unchanged.
 
 **If camera routing is added:** units differ across the boundary. `AP_Mount_Viewpro::set_zoom(PCT)`
 was modified to take zoom *times* (`zoom_value * 10`), while `AP_Camera_MAVLinkCamV2::set_zoom(PCT)`
@@ -395,13 +418,14 @@ A staged plan, cheapest first:
 | Stage | What | Blocked on |
 |:--:|---|---|
 | 0 | Ask PNU: **must KGCS TC2 drive non-Viewpro cameras at all?** If no, D10 closes by rejecting TC2 camera commands on a non-Viewpro mount and gating the TM2 stream - roughly 20 lines, no refactor | one question to PNU |
-| 1 | Stop fabricating values: give `get_zoom_times()` an error signal, and check the ~26 unchecked camera return values | nothing |
+| 1 | **APPLIED 2026-10-01.** Stop fabricating values: give `get_zoom_times()` an error signal, and check the 27 unchecked camera return values | nothing |
 | 2 | Dual-dispatch in `AP_Q30` - try `AP::mount()`, fall back to `AP::camera()` | stage 0 answer |
 | 3 | The two functions with no `AP_Camera` path at all | **D11** / the PNU action item |
 
-**Stage 1 was prototyped on 2026-09-28 and reverted** - it is correct but touches 8 files
-and ~26 call sites, which is too broad to carry alongside the migration. Deferred, not
-rejected. Findings worth keeping, so they need not be rediscovered:
+**Stage 1 was prototyped on 2026-09-28 and reverted**, because it touches 8 files and ~26
+call sites, which was too broad to carry alongside the migration. **That objection expired
+when the migration closed at 5.1.0, and Stage 1 was applied on 2026-10-01** - see the table
+below. The findings from the prototype, all re-verified against the tree before the work:
 
 - **`AP_Mount` and `AP_Camera` are signature-compatible for 6 of the 8 camera functions** -
   same names, same `ZoomType` / `FocusType` / `TrackingType` / `SetFocusResult` enums, same
@@ -410,20 +434,68 @@ rejected. Findings worth keeping, so they need not be rediscovered:
 - `get_zoom_times()` has only **three callers in the whole tree** (`AP_Q30.cpp` x2,
   `GCS_Common.cpp` x1), so changing its signature is cheap.
 - `AP_Mount::get_zoom_times()` contains `return false;` inside a `float` function - a second
-  fabricated `0.0f`, on the no-backend path.
+  fabricated `0.0f`, on the no-backend path. **Fixed in Stage 1** - the function now returns
+  `bool`, so that line is correct rather than accidental.
 - `AP_Mount_Viewpro::_zoom_times` has **no initialiser** and the class uses an inherited
-  constructor, so before the first gimbal report it is *indeterminate*, not 0. Any
-  "is this value real?" test must account for that. EO and IR zoom are both >= 1x, so
-  `is_positive()` is a usable validity test once it is initialised.
-- There is **not one `if (mount->...)` in `AP_Q30.cpp`** - 26 camera calls, no return checked.
+  constructor, so before the first gimbal report it is *indeterminate*, not 0. **Fixed in
+  Stage 1**, which also adopted the `is_positive()` validity test suggested here: EO and IR
+  zoom are both >= 1x, so the 0 it is now initialised to cannot collide with a real reading.
+  This is the same defect class as D1's `_palette_pending_color`, and it was sitting two
+  lines above the comment D1 left saying those members must keep their initialisers.
+- There is **not one `if (mount->...)` in `AP_Q30.cpp`** - 27 camera calls, no return checked.
+  **Fixed in Stage 1**: all 27 are checked and report through one rate-limited helper. The
+  three gimbal calls need no check - `set_angle_target()` and `set_rate_target()` return `void`.
 - TM2's `Zoom_POS_FB` has no "unknown" encoding, exactly like TM5 in D12, so a zoom-truth fix
   cannot change what goes on the wire without an ICD decision.
 - `EO_zoom_pct` is constrained to `[1, _Max_zoom_EO]` with `_Max_zoom_EO = 30.0`: it carries
   zoom **times** while being passed as `ZoomType::PCT`, and only works because
   `AP_Mount_Viewpro::set_zoom()` was modified to reinterpret PCT as times. **This is the trap
   in Stage 2** - forwarding it to `AP_Camera_MAVLinkCamV2::set_zoom(PCT)`, which honours the
-  MAVLink 0-100 % contract, turns 10x into 10 %, zoomed out instead of in. Rename the
-  variable and convert at the boundary as a separate commit before any routing change.
+  MAVLink 0-100 % contract, turns 10x into 10 %, zoomed out instead of in. **Renamed to
+  `EO_zoom_times` in Stage 1**, with the conversion requirement spelled out at the
+  declaration. The rename is cosmetic; **the conversion itself is still Stage 2 work** and
+  has deliberately not been written, because which direction it converts depends on the
+  routing decision that is still blocked.
+
+**Stage 1 as applied, 2026-10-01.** Seven changes across six files. Nothing here changes
+routing, so Viewpro behaviour is unchanged except where a value was previously fabricated.
+
+| # | Change | Where |
+|:-:|---|---|
+| 1 | `get_zoom_times()` becomes `bool get_zoom_times(uint8_t, float&)` - the ArduPilot out-param idiom its sibling `get_attitude_euler()` already uses. The base class returns `false` and writes nothing instead of fabricating `0.0f` | `AP_Mount_Backend.h`, `AP_Mount.{h,cpp}` |
+| 2 | `_zoom_times` gains its missing initialiser; the Viewpro override returns `false` until the gimbal has actually reported | `AP_Mount_Viewpro.{h,cpp}` |
+| 3 | All 27 camera calls check their return and report via one rate-limited helper, `report_cam_unsupported()` | `AP_Q30.{h,cpp}` |
+| 4 | TM2 reports zoom honestly. **The wire format is unchanged** - 0 still goes out, because `Zoom_POS_FB` has no "unknown" encoding and adding one is an ICD change, exactly the call D12 made for TM5 | `GCS_PNU.cpp`, `GCS.h` |
+| 5 | TM2 is suppressed entirely when no gimbal is configured (`get_mount_type(0) == Type::None`), where every field would be zero | `GCS_PNU.cpp` |
+| 6 | `EO_zoom_pct` renamed `EO_zoom_times` with the PCT-means-times trap documented at the declaration | `AP_Q30.cpp` |
+| 7 | `_current_zoom_EO` / `_current_zoom_IR` hold their last known value when zoom is unavailable, instead of being overwritten with a fabricated 0 | `AP_Q30.cpp` |
+
+*Design points worth not re-deriving:*
+
+- **The rate limit is not optional.** KGCS streams TC2 at ~10 Hz, so on a mount without
+  camera support *every* call fails on *every* tick. One message per 10 s with the first
+  always reported - the same shape, and the same interval, as D6's PMU short-frame message.
+- **One shared limiter, not one per function,** deliberately. On a non-Viewpro essentially
+  every camera call fails, so the operator needs to learn "this mount does not do camera
+  commands", not receive an itemised list. The first message names the first thing to fail,
+  which is enough to diagnose; the counter shows it is persistent.
+- **The zoom readback in `IR_operation()` reports nothing on failure,** on purpose. It runs
+  at the TC2 rate and TM2 already announces the same condition once, on the edge. Two
+  reports of one fact would just be noise.
+- **TM2's zoom warning has a 10 s grace period** (`PNU_CAM_ZOOM_GRACE_MS`). A working
+  Viewpro reports zoom only after its first telemetry frame, so an edge evaluated from boot
+  would warn on *every* startup and then immediately recover. Past the grace period,
+  still-unavailable means the mount genuinely does not report zoom.
+- **`_current_zoom_EO` / `_current_zoom_IR` are write-only** - assigned in `IR_operation()`
+  and read nowhere in the tree, the same situation as the D6 PMU counters. Kept rather than
+  deleted, so the keep-or-remove call stays with PNU. If they are ever read, note they are
+  `uint8_t` holding a `float` zoom.
+
+*Verified:* `./waf copter` clean, zero warnings, **1,721,424 B** (was 1,720,608 B, so Stage 1
+costs **+816 bytes** - the warning strings and the checks). The D13 invariant still holds:
+`--define HAL_MOUNT_ENABLED=0` builds at 1,653,156 B. **Not bench-tested** - no hardware was
+connected, so the Viewpro no-regression claim is a build-and-reasoning claim only, and the
+one behavioural change a Viewpro operator should see is the absence of any new message.
 
 **PNU-ISSUE D11 details** - capability gap behind D10. Resume with Gremsy hardware.
 
@@ -568,20 +640,21 @@ If it shows deletions, apply targeted edits only.
 | `ArduCopter/Copter.cpp` | 3x `static_assert(OFP_VER... == FW_...)` (step 4, D4); mount task kept at **50 Hz** (D8) |
 | `ArduCopter/Copter.h` | `AP_Q30 q30` member behind `#if AP_Q30_ENABLED` (D13); `failsafe.pmucan` and `failsafe.pmucan_armed_healthy` bits (D9) |
 | `libraries/AP_PMUCAN/*` | the whole step-4 cleanup; 4 vendored `pmucan_*.hpp` were **deleted**; DLC validation (D6), endianness comments (D15), global declarations (D14), engine-interlock send check (D7) |
-| `libraries/AP_Mount/AP_Mount_Backend.{h,cpp}` | `pitch_target_is_reversed()`, `suppress_gimbal_device_attitude_status()` (D8a) |
-| `libraries/AP_Mount/AP_Mount_Viewpro.{h,cpp}` | both overrides; D1 markers |
+| `libraries/AP_Mount/AP_Mount_Backend.{h,cpp}` | `pitch_target_is_reversed()`, `suppress_gimbal_device_attitude_status()` (D8a); the `get_zoom_times()` out-param signature (D10 Stage 1) |
+| `libraries/AP_Mount/AP_Mount.{h,cpp}` | the `get_zoom_times()` out-param signature (D10 Stage 1) |
+| `libraries/AP_Mount/AP_Mount_Viewpro.{h,cpp}` | both overrides; D1 markers; `_zoom_times` initialiser and the `get_zoom_times()` validity test (D10 Stage 1) |
 | `libraries/AP_SerialManager/AP_SerialManager.h` | IOMCU renumber deliberately **not** applied |
 | `libraries/AP_OSD/AP_OSD_ParamSetting.cpp` | `"Q30"` padding deliberately **not** applied |
 | `libraries/GCS_MAVLink/GCS_Common.cpp` | upward-proximity block deliberately **not** commented out; the handler bodies live in `GCS_PNU.cpp`, only 3 hooks remain here (D5) |
-| `libraries/GCS_MAVLink/GCS_PNU.cpp` | PNU-only file; the step-7 defect fixes and `#if` guards live here |
-| `libraries/AP_Q30/AP_Q30.{h,cpp}` | `send_cmd_speed()` negates pitch at the call site (see the pitch-reversal table); `AP_Q30_ENABLED` guard and the D14 global declarations |
+| `libraries/GCS_MAVLink/GCS_PNU.cpp` | PNU-only file; the step-7 defect fixes and `#if` guards live here; the D10 Stage 1 TM2 zoom-truth and no-gimbal gate |
+| `libraries/AP_Q30/AP_Q30.{h,cpp}` | `send_cmd_speed()` negates pitch at the call site (see the pitch-reversal table); `AP_Q30_ENABLED` guard and the D14 global declarations; the 27 return checks and `report_cam_unsupported()` (D10 Stage 1) |
 | `ArduCopter/UserCode.cpp` | `#if HAL_PROXIMITY_ENABLED && AP_AVOIDANCE_ENABLED` guard around the OA block |
 | `ArduCopter/events.cpp` | D9(a) recovery-clear fix and D9(b) arm-time latch gate; `LOGGER_WRITE_ERROR` portability fix |
 | `ArduCopter/AP_Arming_Copter.{h,cpp}` | `pmucan_checks()` prearm warning and the arm-time healthy latch (D9b) |
-| `libraries/GCS_MAVLink/GCS.h` | `OFP_VER_*`; the D3 dialect `#error` guard; the D12 `prev_prx_failed` latch; PNU handler declarations |
+| `libraries/GCS_MAVLink/GCS.h` | `OFP_VER_*`; the D3 dialect `#error` guard; the D12 `prev_prx_failed` latch; the D10 `prev_zoom_unavailable` latch; PNU handler declarations |
 | `libraries/AP_Q30/AP_Q30_config.h` | PNU-only file - the `AP_Q30_ENABLED` flag (D13) |
 | `Tools/scripts/build_options.py` | the `Camera / Q30` build option (D13) |
-| `ArduCopter/version.h` | **5.1.0 OFFICIAL** and the release note describing what it closes |
+| `ArduCopter/version.h` | **5.1.1 DEV** and the release note describing what it carries |
 | `README.md` | this file - never taken from the snapshot |
 
 Most other deviations are KAL -> PNU / PNU-KAL comment renames, which are cosmetic but still
@@ -595,7 +668,7 @@ make a wholesale copy a regression.
 | 4 `pmucan_*.hpp` deleted (1163 lines) | vendored libuavcan v0; only 3 constants were used, all identical in `AP_HAL::CANFrame` / `CANIface` |
 | Mount task kept at 50 Hz | `AP_Mount_Viewpro::update()` self-throttles to 100 ms, so gimbal traffic is 10 Hz either way; at a 10 Hz task rate the period *equals* the throttle and late ticks cause 5 Hz bursts. See D8 |
 | msg 285 suppression made opt-in | V5.0.8 suppressed it for every gimbal, not just Viewpro. See D8 |
-| `version.h` is **5.1.0 OFFICIAL** | the migration is complete; the 5.0.x series that preceded it was carried as DEV builds while it was in progress |
+| `version.h` is **5.1.1 DEV** | 5.1.0 OFFICIAL closed the migration; 5.1.1 carries the post-release D10 Stage 1 work and goes OFFICIAL when D10/D11 land |
 | `GCS.h` dead CAM macros removed, `OFP_VER_*` tracked against `version.h` | were stale/unused; guarded by `static_assert` in `Copter.cpp` |
 | `AP_PMUCAN` fixes | dropped-frame at RX budget, dead branch, `&`->`&&`, `RXdrain()` extraction, named constants, ctor init, `TXspin` void. See git log |
 | `send_proximity()` upward-distance block **not** commented out | V5.0.8 wrapped it in `/* Currently, no upward sensor */`. `AP_Proximity::get_upward_distance()` already returns false when no backend supplies one (`AP_Proximity.cpp:498`), and TeraRanger Tower Evo is not one of the backends that does - so the comment-out is a no-op here and a silent regression for `AP_Proximity_RangeFinder` / `_MAV` / scripting users. Not applied |
@@ -659,11 +732,25 @@ grep -rn "PNU-NOT-APPLIED" libraries/ ArduCopter/
 `SERIALn_PROTOCOL = 20` (NMEAOutput)? If not, this is dead code and the issue closes.
 
 **Remaining work:** all 8 numbered steps are applied, both free-floaters are closed as
-not-applied, and **13 of the 15 issues are resolved**. Left open: **D10** and **D11**, both
-blocked on the ACTION ON PNU answers above - nothing in this repo will unblock them.
+not-applied, and **13 of the 15 issues are resolved**. Left open: **D10** and **D11**.
+
+**D10 Stage 1 is applied (2026-10-01)** - every fabricated camera value is gone and every
+declined camera command is now reported. **The D10 routing decision and all of D11 remain
+blocked on the ACTION ON PNU answers above**, and nothing in this repo will unblock them.
+Stage 1 deliberately did not touch routing: it makes the symptom visible so that a Gremsy
+bench session produces a diagnosis instead of silence.
+
+What is left on D10/D11, in order:
+
+| | Work | Blocked on |
+|:--:|---|---|
+| Stage 2 | Dual-dispatch in `AP_Q30` - try `AP::mount()`, fall back to `AP::camera()`. **Convert `EO_zoom_times` at the boundary first** (renamed but not converted) | the ACTION ON PNU answers |
+| Stage 3 | The two functions with no `AP_Camera` path - `get_zoom_times` (needs `CAMERA_SETTINGS` msg 260 decoding; **check ArduPilot master first**) and `IR_Color_Change` (no MAVLink standard; vendor-specific) | D11 / a VIO on the bench |
+
 Residuals recorded against resolved issues: D1 (is the prelude needed at all?), D6 (the PMU
 counters are still write-only), D7 (accepted interlock residuals), D12 (confirm the 10 m /
-15 m thresholds).
+15 m thresholds). New from Stage 1: `_current_zoom_EO` / `_current_zoom_IR` are write-only,
+the same keep-or-delete question as D6's counters.
 
 **Open issues** are the `PNU-ISSUE` table above; code markers carry the same ids.
 List them with:

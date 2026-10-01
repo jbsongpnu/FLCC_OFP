@@ -104,9 +104,23 @@ private:
     // Removed : uint8_t get_cam_speed_byte_l(int16_t speed);                                        // Encode speed to lower byte (KAL)
     // Removed : uint8_t get_cam_speed_byte_h(int16_t speed);                                        // Encode speed to upper byte (KAL)
 
+    // PNU-ISSUE(D10) : report a camera command the mount declined.  Every camera call in
+    // this file used to ignore its return value, so on any mount that is not a Viewpro the
+    // whole KGCS camera path did nothing at all and said nothing about it.  Rate limited
+    // because KGCS streams TC2 at ~10 Hz, so an unsupported command fails on every tick -
+    // the first failure is always reported, as for the D6 PMU short-frame message.
+    void report_cam_unsupported(const char *what);
+
+    uint32_t _cam_unsupported_cnt = 0;      // total camera commands the mount declined
+    uint32_t _cam_unsupported_last_ms = 0;  // system time the last report was sent
+
     uint8_t _primary_EOIR_source = 1;   //Main video source in PIP - 1: EO 2: IR
     float _Max_zoom_EO = 30.0;  //Maximum zoom level of EO
     float _Max_zoom_IR = 4.0;   //Maximum zoom level of IR
+    // PNU-ISSUE(D10) : these two are write-only - assigned below and read nowhere in the
+    // tree, the same situation as the D6 PMU counters.  Kept rather than deleted so the
+    // keep-or-remove decision stays with PNU; they now hold their last known value when
+    // the mount cannot report zoom, instead of being overwritten with a fabricated 0.
     uint8_t _current_zoom_EO = 1;
     uint8_t _current_zoom_IR = 1;
 
