@@ -1,7 +1,10 @@
-# Migration Break Point for Future Updates
-- This branch will update Copter-4.7.1 to FLCC V5.0.8 step-by-step to find new commit break points for future updates.
-- All essential works to make migration break points are done and currently reviewing and revising code for PNU-ISSUE
-- IN THIS VERSION : More Updates to organize releasable verion 5.0.15 from 5.0.8  
+# PNU-KAL FLCC OFP 
+- This branch is now moving on to development branch : see 5.0.8 ~ 5.0.15 for Migration Break Point for Future Updates
+- PNU-ISSUE 10 & 11 still remains : For Gremsy camera and general camera mount library structure
+- IN THIS VERSION :  Release of 5.1.0 Official Version  => TAG PNU-KAL-FLCC-5.1.0
+
+***
+- For 5.0.15 version :
    - Issue 9(b) is resolved : All issues except 10/11 are now resolved
    - Issue 10 and 11 is decided to be resolved after 5.1.0.
    - Building as "heli" model is blocked due to fatal errors it may cause 
@@ -27,7 +30,8 @@
    - KGCS telemetry port : SERIALx_PROTOCOL = 2 (MAVLink2) - **never 1**. Every PNU-KAL ICD message is id >= 50001, which MAVLink1 cannot encode, so a port left on 1 carries no PMU/CAM telemetry and accepts no TC commands at all. See PNU-ISSUE D2  
 - Viewpro Mount Specific options  
    - MNT1_TYPE = 11 (Viewpro) / CAM1_TYPE = 4 (Mount) / SERIALx_BAUD = 115 (115,200 bps) / SERIALx_PROTOCOL = 8 (Viewpro)  
-- Gremsy Mount Specific options  
+- Gremsy Mount Specific options
+   - **WARNING :** Gremsy is not supported yet : planned after 5.1.0  
    - MNT1_TYPE = 6 (MAVLink-Gremsy) / CAM1_TYPE = 6 (MAVLinkCAMV2) / SERIALx_BAUD = 115 (115,200 bps) / SERIALx_PROTOCOL = 2 (MAVLink2)   
 
 <Planned Commit Breaks and Migration Steps>
@@ -463,9 +467,9 @@ The two with no path:
 That answers most of the unknowns above in minutes. `AP_Mount_MAVLink.h:51` already shows the
 in-tree precedent for branching on `vendor_name` / `model_name` (the AVTA/CM41 case).
 
-**Suggested sequencing:** steps 6-8 are done and the deferred issues are resolved apart from
-D10 and D11, so the next milestone is cutting 5.1.0 (OFFICIAL, not DEV). Take Gremsy support
-as its own piece of work afterwards, starting from that bench session.
+**Suggested sequencing:** done - the migration closed at **5.1.0 OFFICIAL**, with every issue
+resolved except D10 and D11. Gremsy support is the next piece of work, and it starts with the
+bench session described above, not with code.
 
 > **ACTION ON PNU - blocking D10 and D11.**
 > PNU must establish with Gremsy, and deliver to this project, exactly which camera
@@ -577,7 +581,7 @@ If it shows deletions, apply targeted edits only.
 | `libraries/GCS_MAVLink/GCS.h` | `OFP_VER_*`; the D3 dialect `#error` guard; the D12 `prev_prx_failed` latch; PNU handler declarations |
 | `libraries/AP_Q30/AP_Q30_config.h` | PNU-only file - the `AP_Q30_ENABLED` flag (D13) |
 | `Tools/scripts/build_options.py` | the `Camera / Q30` build option (D13) |
-| `ArduCopter/version.h` | the current 5.0.x **DEV** version + the 5.1.0 release note |
+| `ArduCopter/version.h` | **5.1.0 OFFICIAL** and the release note describing what it closes |
 | `README.md` | this file - never taken from the snapshot |
 
 Most other deviations are KAL -> PNU / PNU-KAL comment renames, which are cosmetic but still
@@ -591,7 +595,7 @@ make a wholesale copy a regression.
 | 4 `pmucan_*.hpp` deleted (1163 lines) | vendored libuavcan v0; only 3 constants were used, all identical in `AP_HAL::CANFrame` / `CANIface` |
 | Mount task kept at 50 Hz | `AP_Mount_Viewpro::update()` self-throttles to 100 ms, so gimbal traffic is 10 Hz either way; at a 10 Hz task rate the period *equals* the throttle and late ticks cause 5 Hz bursts. See D8 |
 | msg 285 suppression made opt-in | V5.0.8 suppressed it for every gimbal, not just Viewpro. See D8 |
-| `version.h` is DEV, not OFFICIAL | migration in progress; release will be 5.1.0 |
+| `version.h` is **5.1.0 OFFICIAL** | the migration is complete; the 5.0.x series that preceded it was carried as DEV builds while it was in progress |
 | `GCS.h` dead CAM macros removed, `OFP_VER_*` tracked against `version.h` | were stale/unused; guarded by `static_assert` in `Copter.cpp` |
 | `AP_PMUCAN` fixes | dropped-frame at RX budget, dead branch, `&`->`&&`, `RXdrain()` extraction, named constants, ctor init, `TXspin` void. See git log |
 | `send_proximity()` upward-distance block **not** commented out | V5.0.8 wrapped it in `/* Currently, no upward sensor */`. `AP_Proximity::get_upward_distance()` already returns false when no backend supplies one (`AP_Proximity.cpp:498`), and TeraRanger Tower Evo is not one of the backends that does - so the comment-out is a no-op here and a silent regression for `AP_Proximity_RangeFinder` / `_MAV` / scripting users. Not applied |
