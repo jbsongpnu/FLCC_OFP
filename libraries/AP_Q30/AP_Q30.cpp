@@ -2,6 +2,7 @@
 
 #if AP_Q30_ENABLED
 #include <AP_Mount/AP_Mount.h>
+#include <AP_Camera/AP_Camera.h>
 
 //  ==================================================================================
 //  PNU-KAL OFP Firmware version
@@ -65,6 +66,24 @@ void AP_Q30::report_cam_unsupported(const char *what)
 
     GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "CAM: mount rejected %s (%u failed)",
                   what, (unsigned)_cam_unsupported_cnt);
+}
+
+// -------------------------------------------------------------------------
+// PNU-ISSUE(D10) : select the EO/IR video source, guarded for builds without it
+// -------------------------------------------------------------------------
+bool AP_Q30::set_video_source(AP_Camera::CameraSource primary, AP_Camera::CameraSource secondary)
+{
+#if AP_CAMERA_SET_CAMERA_SOURCE_ENABLED
+    AP_Camera *camera = AP::camera();
+    if (camera == nullptr) {
+        return false;
+    }
+    return camera->set_camera_source(0, primary, secondary);
+#else
+    (void)primary;
+    (void)secondary;
+    return false;
+#endif
 }
 
 // -------------------------------------------------------------------------
@@ -185,8 +204,14 @@ void AP_Q30::send_cmd_hold_angle(void)
 // -------------------------------------------------------------------------
 void AP_Q30::no_control_mode_operation(mavlink_sys_icd_gcs_flcc_cam_cmd_t cam_cmd)
 {
-    AP_Mount *mount = AP::mount();
-    if (mount == nullptr) {
+    // PNU-ISSUE(D10) : every call in this function is a CAMERA operation, so it goes
+    // through AP::camera() rather than AP::mount().  With CAM1_TYPE=4 (Mount) that
+    // forwards straight back to the mount, so a Viewpro behaves exactly as before; with
+    // CAM1_TYPE=6 (MAVLinkCamV2) it reaches a camera the mount cannot address at all,
+    // which is the Gremsy case.  CAM1_TYPE now has to be set correctly for the KGCS
+    // camera path to work - see README "Dual-GCS compatibility strategy".
+    AP_Camera *camera = AP::camera();
+    if (camera == nullptr) {
         return;
     }
 
@@ -194,10 +219,10 @@ void AP_Q30::no_control_mode_operation(mavlink_sys_icd_gcs_flcc_cam_cmd_t cam_cm
     {
         // Stop //19.5.20 수정
         case 0:
-            if (!mount->set_zoom(0, ZoomType::RATE, 0)) {
+            if (!camera->set_zoom(0, ZoomType::RATE, 0)) {
                 report_cam_unsupported("zoom stop");
             }
-            //Focus also stops. So, same as :  mount->set_focus(0, FocusType::RATE, 0);
+            //Focus also stops. So, same as :  camera->set_focus(0, FocusType::RATE, 0);
 
             debug_cam_zoom_cmd = 3U; //debug //0: not sent, 1: IN, 2: OUT, 3: STOP
             debug_cam_focus_cmd = 3U; //debug //0: not sent, 1: IN, 2: OUT, 3: STOP
@@ -205,7 +230,7 @@ void AP_Q30::no_control_mode_operation(mavlink_sys_icd_gcs_flcc_cam_cmd_t cam_cm
 
         // Zoom In
         case 1:
-            if (!mount->set_zoom(0, ZoomType::RATE, 1)) {
+            if (!camera->set_zoom(0, ZoomType::RATE, 1)) {
                 report_cam_unsupported("zoom in");
             }
             debug_cam_zoom_cmd = 1U; //debug //0: not sent, 1: IN, 2: OUT, 3: STOP
@@ -213,7 +238,7 @@ void AP_Q30::no_control_mode_operation(mavlink_sys_icd_gcs_flcc_cam_cmd_t cam_cm
 
         // Zoom Out
         case 2:
-            if (!mount->set_zoom(0, ZoomType::RATE, -1)) {
+            if (!camera->set_zoom(0, ZoomType::RATE, -1)) {
                 report_cam_unsupported("zoom out");
             }
             debug_cam_zoom_cmd = 2U; //debug //0: not sent, 1: IN, 2: OUT, 3: STOP
@@ -221,7 +246,7 @@ void AP_Q30::no_control_mode_operation(mavlink_sys_icd_gcs_flcc_cam_cmd_t cam_cm
 
         // Focus In
         case 3:
-            if (mount->set_focus(0, FocusType::RATE, 1) != SetFocusResult::ACCEPTED) {
+            if (camera->set_focus(0, FocusType::RATE, 1) != SetFocusResult::ACCEPTED) {
                 report_cam_unsupported("focus in");
             }
             debug_cam_focus_cmd = 1U; //debug //0: not sent, 1: IN, 2: OUT, 3: STOP
@@ -229,7 +254,7 @@ void AP_Q30::no_control_mode_operation(mavlink_sys_icd_gcs_flcc_cam_cmd_t cam_cm
 
         // Focus Out
         case 4:
-            if (mount->set_focus(0, FocusType::RATE, -1) != SetFocusResult::ACCEPTED) {
+            if (camera->set_focus(0, FocusType::RATE, -1) != SetFocusResult::ACCEPTED) {
                 report_cam_unsupported("focus out");
             }
             debug_cam_focus_cmd = 2U; //debug //0: not sent, 1: IN, 2: OUT, 3: STOP
@@ -247,7 +272,7 @@ void AP_Q30::no_control_mode_operation(mavlink_sys_icd_gcs_flcc_cam_cmd_t cam_cm
         {
         // Record Start
         case 1:
-            if (!mount->record_video(0, 1)) {
+            if (!camera->record_video(0, 1)) {
                 report_cam_unsupported("record start");
             }
             debug_cam_record_cmd = 1U; //debug //0: not sent, 1: start, 2: stop, 3: shutter
@@ -255,7 +280,7 @@ void AP_Q30::no_control_mode_operation(mavlink_sys_icd_gcs_flcc_cam_cmd_t cam_cm
 
         // Record Stop
         case 2:
-            if (!mount->record_video(0, 0)) {
+            if (!camera->record_video(0, 0)) {
                 report_cam_unsupported("record stop");
             }
             debug_cam_record_cmd = 2U; //debug //0: not sent, 1: start, 2: stop, 3: shutter
@@ -263,7 +288,7 @@ void AP_Q30::no_control_mode_operation(mavlink_sys_icd_gcs_flcc_cam_cmd_t cam_cm
 
         // Shutter
         case 4:
-            if (!mount->take_picture(0)) {
+            if (!camera->take_picture(0)) {
                 report_cam_unsupported("take picture");
             }
             debug_cam_record_cmd = 3U; //debug //0: not sent, 1: start, 2: stop, 3: shutter
@@ -278,7 +303,7 @@ void AP_Q30::no_control_mode_operation(mavlink_sys_icd_gcs_flcc_cam_cmd_t cam_cm
     if(cam_cmd.Tracking_CMD==1U)        //start
     {
         //check do_aux_function_camera_image_tracking() in RC_Channel.cpp for usage
-        if (!mount->set_tracking(0, TrackingType::TRK_POINT, Vector2f{0.5, 0.5}, Vector2f{})) {
+        if (!camera->set_tracking(0, TrackingType::TRK_POINT, Vector2f{0.5, 0.5}, Vector2f{})) {
             report_cam_unsupported("tracking start");
         }
         debug_cam_track_cmd = 1U; //debug //0: not sent, 1: start, 2: stop
@@ -286,7 +311,7 @@ void AP_Q30::no_control_mode_operation(mavlink_sys_icd_gcs_flcc_cam_cmd_t cam_cm
     else if(cam_cmd.Tracking_CMD==2U)   //stop
     {
         //check do_aux_function_camera_image_tracking() in RC_Channel.cpp for usage
-        if (!mount->set_tracking(0, TrackingType::TRK_NONE, Vector2f{0.5, 0.5}, Vector2f{})) {
+        if (!camera->set_tracking(0, TrackingType::TRK_NONE, Vector2f{0.5, 0.5}, Vector2f{})) {
             report_cam_unsupported("tracking stop");
         }
         debug_cam_track_cmd = 2U; //debug //0: not sent, 1: start, 2: stop
@@ -308,15 +333,23 @@ void AP_Q30::IR_operation(mavlink_sys_icd_gcs_flcc_cam_cmd_t cam_cmd)
     // so routing this value there unconverted would turn 10x into 10 %, zooming out.
     // Convert at the boundary before any such routing change.
     static uint8_t EO_zoom_times = 1;
+
+    // PNU-ISSUE(D10) : this function needs BOTH handles.  Zoom and video-source are
+    // camera operations and go through AP::camera().  get_zoom_times() and
+    // IR_Color_Change() have no AP_Camera equivalent at all - they exist only on
+    // AP_Mount_Viewpro - so they stay on AP::mount() and simply do nothing on any other
+    // gimbal.  On a Gremsy the palette is a C_T_PALETTE extended parameter that KGCS
+    // sets directly on the payload; see README "Standard Control for Gremsy VIO".
     AP_Mount *mount = AP::mount();
-    if (mount == nullptr) {
+    AP_Camera *camera = AP::camera();
+    if ((mount == nullptr) || (camera == nullptr)) {
         return;
     }
     
     // Control Window Combination
     if(cam_cmd.Tracking_CMD==10)                // EO FULL & IR PIP
     {
-        if (!mount->set_camera_source(0, 1, 2)) {
+        if (!set_video_source(AP_Camera::CameraSource::RGB, AP_Camera::CameraSource::IR)) {
             report_cam_unsupported("video source");
         }
         _primary_EOIR_source = 1;
@@ -324,7 +357,7 @@ void AP_Q30::IR_operation(mavlink_sys_icd_gcs_flcc_cam_cmd_t cam_cmd)
     }
     else if(cam_cmd.Tracking_CMD==11)           // IR FULL
     {
-        if (!mount->set_camera_source(0, 2, 0)) {
+        if (!set_video_source(AP_Camera::CameraSource::IR, AP_Camera::CameraSource::DEFAULT)) {
             report_cam_unsupported("video source");
         }
         _primary_EOIR_source = 2;
@@ -332,7 +365,7 @@ void AP_Q30::IR_operation(mavlink_sys_icd_gcs_flcc_cam_cmd_t cam_cmd)
     }
     else if(cam_cmd.Tracking_CMD==12)           // IR FULL & EO PIP
     {
-        if (!mount->set_camera_source(0, 2, 1)) {
+        if (!set_video_source(AP_Camera::CameraSource::IR, AP_Camera::CameraSource::RGB)) {
             report_cam_unsupported("video source");
         }
         _primary_EOIR_source = 2;
@@ -340,7 +373,7 @@ void AP_Q30::IR_operation(mavlink_sys_icd_gcs_flcc_cam_cmd_t cam_cmd)
     }
     else if(cam_cmd.Tracking_CMD==13U)          // EO FULL
     {
-        if (!mount->set_camera_source(0, 1, 0)) {
+        if (!set_video_source(AP_Camera::CameraSource::RGB, AP_Camera::CameraSource::DEFAULT)) {
             report_cam_unsupported("video source");
         }
         _primary_EOIR_source = 1;
@@ -447,20 +480,20 @@ void AP_Q30::IR_operation(mavlink_sys_icd_gcs_flcc_cam_cmd_t cam_cmd)
             {
                 EO_zoom_times = 1;
             }
-            if (!mount->set_zoom(0, ZoomType::PCT, EO_zoom_times)) {
+            if (!camera->set_zoom(0, ZoomType::PCT, EO_zoom_times)) {
                 report_cam_unsupported("zoom level");
             }
             prev_EO_zoom_cmd = cam_cmd.Tracking_CMD;
         } else if (_primary_EOIR_source == 2) { //This case will lead to zoom IR
             if (cam_cmd.Tracking_CMD > prev_IR_zoom_cmd) 
             {
-                if (!mount->set_zoom(0, ZoomType::RATE, 1.0)) {
+                if (!camera->set_zoom(0, ZoomType::RATE, 1.0)) {
                     report_cam_unsupported("IR zoom in");
                 }
             }
             else if(cam_cmd.Tracking_CMD < prev_IR_zoom_cmd) 
             {
-                if (!mount->set_zoom(0, ZoomType::RATE, -1.0)) {
+                if (!camera->set_zoom(0, ZoomType::RATE, -1.0)) {
                     report_cam_unsupported("IR zoom out");
                 }
             } 
@@ -468,13 +501,13 @@ void AP_Q30::IR_operation(mavlink_sys_icd_gcs_flcc_cam_cmd_t cam_cmd)
             {
                 if (cam_cmd.Tracking_CMD == 21)  //same as ((prev_IR_zoom_cmd == 21) && (cam_cmd.Tracking_CMD == 21)
                 {
-                    if (!mount->set_zoom(0, ZoomType::RATE, -1.0)) {
+                    if (!camera->set_zoom(0, ZoomType::RATE, -1.0)) {
                         report_cam_unsupported("IR zoom out");
                     }
                 }
                 else if (cam_cmd.Tracking_CMD == 24)
                 {
-                    if (!mount->set_zoom(0, ZoomType::RATE, 1.0)) {
+                    if (!camera->set_zoom(0, ZoomType::RATE, 1.0)) {
                         report_cam_unsupported("IR zoom in");
                     }
                 }

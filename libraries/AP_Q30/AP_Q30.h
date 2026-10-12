@@ -14,6 +14,7 @@
 #include <AP_Common/AP_Common.h>
 #include <GCS_MAVLink/GCS_MAVLink.h>
 #include <GCS_MAVLink/GCS.h>
+#include <AP_Camera/AP_Camera.h>
 
 #include "AP_Q30_config.h"
 
@@ -110,6 +111,13 @@ private:
     // because KGCS streams TC2 at ~10 Hz, so an unsupported command fails on every tick -
     // the first failure is always reported, as for the D6 PMU short-frame message.
     void report_cam_unsupported(const char *what);
+
+    // PNU-ISSUE(D10) : wraps AP_Camera::set_camera_source(), which only exists when
+    // AP_CAMERA_SET_CAMERA_SOURCE_ENABLED is set - and that resolves to
+    // SIYI || XACTI || VIEWPRO, so a Gremsy-only build would not have it.  Wrapping it
+    // once here keeps the #if out of the four call sites.  Returns false when the
+    // feature is compiled out, which the caller reports as an unsupported command.
+    bool set_video_source(AP_Camera::CameraSource primary, AP_Camera::CameraSource secondary);
 
     uint32_t _cam_unsupported_cnt = 0;      // total camera commands the mount declined
     uint32_t _cam_unsupported_last_ms = 0;  // system time the last report was sent

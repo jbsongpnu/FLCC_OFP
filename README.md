@@ -1,8 +1,15 @@
 # PNU-KAL FLCC OFP Development Version
 - This branch currently developing PNU-KAL FLCC OFP after official version (TAG) PNU-KAL-FLCC-5.1.0 (this is same code as 5.0.15 dev)  
 - PNU-ISSUE 10 & 11 still remains : For Gremsy camera and general camera mount library structure  
-- IN THIS VERSION : V5.1.2 working with issues 10 and 11 - analysis and groundwork, NOT Stage 2 (the D10 dual-dispatch routing is still blocked)  
-   - The ACTION ON PNU regarding Gremsy protocol is **partly** answered and recorded in README.md along with analysis on this issue. IR palette, EO/IR source and camera component ID are answered; `CAMERA_CAP_FLAGS` and the vendor/model strings are still open, and still block D10 routing and D11  
+- IN THIS VERSION : V5.1.3 working with issues 10 and 11 - **D10 Stage 2a applied : camera calls routed through `AP::camera()`**  
+   - The six camera functions (zoom, focus, record, picture, tracking, video source) now go through `AP::camera()` instead of `AP::mount()`, so **`CAM1_TYPE` selects the destination** - 4 (Mount) reaches a Viewpro exactly as before, 6 (MAVLinkCamV2) reaches a Gremsy camera component the mount cannot address at all  
+   - It is **not** the dual-dispatch the earlier plan assumed : `AP_Camera_Mount` already forwards to `AP_Mount`, so one route serves both payloads. `get_zoom_times()` and `IR_Color_Change()` stay on `AP::mount()` - they have no `AP_Camera` equivalent  
+   - **REQUIRES `CAM1_TYPE` to be correct (4 for Viewpro).** It is now load-bearing for the KGCS camera path, where before it only served a standard GCS. A wrong or zero value silently disables KGCS camera control  
+   - Zoom units deliberately **not** converted - that only bites at `CAM1_TYPE=6` and needs the VIO's maximum zoom, which MAVLink cannot report. Deferred as Stage 2b  
+   - **Still outstanding from 5.1.2 : `MNT1_PITCH_MIN` -45 -> -90 and `MNT1_PITCH_MAX` 90 -> 45** on the aircraft, for the pitch relocation  
+- For 5.1.2 version :  
+   - Analysis and groundwork, NOT Stage 2 (the D10 routing was still blocked at that point)  
+   - The ACTION ON PNU regarding Gremsy protocol is **partly** answered and recorded in README.md along with analysis on this issue. IR palette, EO/IR source and camera component ID are answered; `CAMERA_CAP_FLAGS` and the vendor/model strings are still open  
    - Pitch reversal is now changed to accommodate the general convention of gimbals, and the previous pitch reversal now resides in AP_Q30.cpp. This fixes inverted pitch for Mission Planner and AUTO missions on a Viewpro  
    - **REQUIRES a parameter change on the aircraft : `MNT1_PITCH_MIN` -45 -> -90 and `MNT1_PITCH_MAX` 90 -> 45.** The firmware cannot do this itself. Flying with the old pair clips KGCS pitch to 45 deg down and allows 90 deg up, past the mechanical stop  
    - Dual-GCS compatibility strategy recorded : a standard GCS (Mission Planner, QGC) keeps full gimbal and camera control, and KGCS-specific convention lives in AP_Q30. See the section at the end of this file  
@@ -427,7 +434,7 @@ A staged plan, cheapest first:
 |:--:|---|---|
 | 0 | Ask PNU: **must KGCS TC2 drive non-Viewpro cameras at all?** If no, D10 closes by rejecting TC2 camera commands on a non-Viewpro mount and gating the TM2 stream - roughly 20 lines, no refactor | one question to PNU |
 | 1 | **APPLIED 2026-10-01.** Stop fabricating values: give `get_zoom_times()` an error signal, and check the 27 unchecked camera return values | nothing |
-| 2 | Dual-dispatch in `AP_Q30` - try `AP::mount()`, fall back to `AP::camera()` | stage 0 answer |
+| 2 | **APPLIED 2026-10-12 as Stage 2a (routing only).** Not dual-dispatch after all - a single route through `AP::camera()`, with `CAM1_TYPE` selecting mount or MAVLink camera. Zoom units deliberately deferred | nothing (the units half needs a VIO) |
 | 3 | The two functions with no `AP_Camera` path at all | **D11** / the PNU action item |
 
 **Stage 1 was prototyped on 2026-09-28 and reverted**, because it touches 8 files and ~26
@@ -504,6 +511,67 @@ costs **+816 bytes** - the warning strings and the checks). The D13 invariant st
 `--define HAL_MOUNT_ENABLED=0` builds at 1,653,156 B. **Not bench-tested** - no hardware was
 connected, so the Viewpro no-regression claim is a build-and-reasoning claim only, and the
 one behavioural change a Viewpro operator should see is the absence of any new message.
+
+**Stage 2a as applied, 2026-10-12 - routing only, units deferred.**
+
+**The design changed once the Gremsy notes were checked against the tree. Stage 2 is NOT
+dual-dispatch.** `AP_Camera_Mount` - what `CAM1_TYPE=4` selects - already forwards
+`set_zoom`, `set_focus`, `record_video`, `trigger_pic`, `set_tracking`, `set_lens` and
+`set_camera_source` straight to `AP_Mount`. So a single route through `AP::camera()` serves
+both payloads and `CAM1_TYPE` does the switching, which is what that parameter is for. A
+try-mount-then-fall-back-to-camera scheme would have been actively pointless on the current
+aircraft: the fallback calls `AP_Camera_Mount`, which calls back into the very mount that
+just failed.
+
+| `CAM1_TYPE` | `AP::camera()` resolves to | Result |
+|:--:|---|---|
+| 4 (Mount) - **today's Viewpro config** | `AP_Camera_Mount` -> `AP_Mount` -> Viewpro | **behaviourally identical to before** |
+| 6 (MAVLinkCamV2) - Gremsy | `AP_Camera_MAVLinkCamV2` -> VIO camera component | the new path |
+
+| Moved to `AP::camera()` | Stayed on `AP::mount()` |
+|---|---|
+| `set_zoom` (8 call sites), `set_focus` (2), `record_video` (2), `take_picture`, `set_tracking` (2), `set_camera_source` (4) | `set_angle_target`, `set_rate_target` x2 (gimbal); `get_zoom_times`; `IR_Color_Change` (6) |
+
+`get_zoom_times` and `IR_Color_Change` stayed because **neither exists in the `AP_Camera`
+interface at all**. Both are Viewpro-only and silently do nothing on any other gimbal - on a
+Gremsy the palette is a `C_T_PALETTE` extended parameter that KGCS sets directly on the
+payload, and zoom readback is Stage 3.
+
+*Points worth not re-deriving:*
+
+- **`AP_Camera::CameraSource` matches the magic numbers `AP_Q30` already used** - `DEFAULT=0`,
+  `RGB=1`, `IR=2` - and `AP_Mount.h:306` documents its own `uint8_t` as that enum cast. The
+  migration was a type change, not a value change.
+- **`set_camera_source` is wrapped in `AP_Q30::set_video_source()`** because
+  `AP_CAMERA_SET_CAMERA_SOURCE_ENABLED` resolves to `SIYI || XACTI || VIEWPRO` - a future
+  Gremsy-only build would not have the function at all. Wrapping it once keeps the `#if` out
+  of the four call sites. The previous `mount->set_camera_source()` calls were unguarded and
+  would have failed to build in that configuration.
+- **`AP_Q30_ENABLED` now requires `AP_CAMERA_ENABLED`** as well as `HAL_MOUNT_ENABLED`, since
+  the library now needs both singletons. Verified: `--define AP_CAMERA_ENABLED=0` builds at
+  1,695,892 B, and `--define HAL_MOUNT_ENABLED=0` still builds at 1,653,160 B.
+
+> **NEW OPERATIONAL DEPENDENCY - `CAM1_TYPE` now matters to KGCS.** Before Stage 2a the KGCS
+> camera path depended only on `MNT1_TYPE`; `CAM1_TYPE` existed solely so a standard GCS could
+> drive the camera. Now a wrong or zero `CAM1_TYPE` silently disables KGCS camera control on a
+> Viewpro that otherwise looks healthy. `CAM1_TYPE=4` is already the documented Viewpro setting
+> (see the header of this file), so no change is needed on the current aircraft - but it is now
+> load-bearing rather than optional, and Stage 1's return checks are what will report it as
+> `CAM: mount rejected ...` if it is wrong.
+
+**Units deliberately NOT converted - this is the "convert later" half.** `AP_Q30` still sends
+zoom **times** as `ZoomType::PCT`, which works only because `AP_Mount_Viewpro::set_zoom()` was
+locally modified to reinterpret PCT as times x10. Routing through `AP_Camera_Mount` lands in
+that same modified function, so **Viewpro is unaffected**. The mismatch appears only at
+`CAM1_TYPE=6`, where `AP_Camera_MAVLinkCamV2::set_zoom(PCT)` honours the real MAVLink 0-100 %
+contract and 10x would become 10 %. Converting requires the target camera's maximum zoom, which
+is `_Max_zoom_EO = 30` for Viewpro (hard-coded, itself unverified) and **unknown for a VIO** -
+MAVLink has no message that reports zoom range. Decide it with the VIO on the bench, not before.
+
+*Verified:* `./waf copter` clean, zero warnings, **1,721,584 B** (+240 B over 5.1.2's
+1,721,344 B). **Not bench-tested** - no hardware was connected. The Viewpro no-regression claim
+rests on `CAM1_TYPE=4` routing back into the identical code, which is a reasoning claim until
+someone drives a gimbal with it.
 
 **PNU-ISSUE D11 details** - capability gap behind D10. Resume with Gremsy hardware.
 
@@ -655,14 +723,14 @@ If it shows deletions, apply targeted edits only.
 | `libraries/AP_OSD/AP_OSD_ParamSetting.cpp` | `"Q30"` padding deliberately **not** applied |
 | `libraries/GCS_MAVLink/GCS_Common.cpp` | upward-proximity block deliberately **not** commented out; the handler bodies live in `GCS_PNU.cpp`, only 3 hooks remain here (D5) |
 | `libraries/GCS_MAVLink/GCS_PNU.cpp` | PNU-only file; the step-7 defect fixes and `#if` guards live here; the D10 Stage 1 TM2 zoom-truth and no-gimbal gate |
-| `libraries/AP_Q30/AP_Q30.{h,cpp}` | `send_cmd_speed()` **and** `send_cmd_angle()` negate pitch at the call site (see the pitch-reversal table); `AP_Q30_ENABLED` guard and the D14 global declarations; the 27 return checks and `report_cam_unsupported()` (D10 Stage 1) |
+| `libraries/AP_Q30/AP_Q30.{h,cpp}` | `send_cmd_speed()` **and** `send_cmd_angle()` negate pitch at the call site (see the pitch-reversal table); `AP_Q30_ENABLED` guard and the D14 global declarations; the 27 return checks and `report_cam_unsupported()` (D10 Stage 1); camera calls routed through `AP::camera()` and `set_video_source()` (D10 Stage 2a) |
 | `ArduCopter/UserCode.cpp` | `#if HAL_PROXIMITY_ENABLED && AP_AVOIDANCE_ENABLED` guard around the OA block |
 | `ArduCopter/events.cpp` | D9(a) recovery-clear fix and D9(b) arm-time latch gate; `LOGGER_WRITE_ERROR` portability fix |
 | `ArduCopter/AP_Arming_Copter.{h,cpp}` | `pmucan_checks()` prearm warning and the arm-time healthy latch (D9b) |
 | `libraries/GCS_MAVLink/GCS.h` | `OFP_VER_*`; the D3 dialect `#error` guard; the D12 `prev_prx_failed` latch; the D10 `prev_zoom_unavailable` latch; PNU handler declarations |
-| `libraries/AP_Q30/AP_Q30_config.h` | PNU-only file - the `AP_Q30_ENABLED` flag (D13) |
+| `libraries/AP_Q30/AP_Q30_config.h` | PNU-only file - the `AP_Q30_ENABLED` flag (D13), which also requires `AP_CAMERA_ENABLED` since Stage 2a |
 | `Tools/scripts/build_options.py` | the `Camera / Q30` build option (D13) |
-| `ArduCopter/version.h` | **5.1.2 DEV** and the release note describing what it carries |
+| `ArduCopter/version.h` | **5.1.3 DEV** and the release note describing what it carries |
 | `README.md` | this file - never taken from the snapshot |
 
 Most other deviations are KAL -> PNU / PNU-KAL comment renames, which are cosmetic but still
@@ -676,7 +744,7 @@ make a wholesale copy a regression.
 | 4 `pmucan_*.hpp` deleted (1163 lines) | vendored libuavcan v0; only 3 constants were used, all identical in `AP_HAL::CANFrame` / `CANIface` |
 | Mount task kept at 50 Hz | `AP_Mount_Viewpro::update()` self-throttles to 100 ms, so gimbal traffic is 10 Hz either way; at a 10 Hz task rate the period *equals* the throttle and late ticks cause 5 Hz bursts. See D8 |
 | msg 285 suppression made opt-in | V5.0.8 suppressed it for every gimbal, not just Viewpro. See D8 |
-| `version.h` is **5.1.2 DEV** | 5.1.0 OFFICIAL closed the migration; the 5.1.x DEV series carries the post-release D10 work - Stage 1 in 5.1.1, the Gremsy analysis and pitch relocation in 5.1.2 - and goes OFFICIAL when D10/D11 land |
+| `version.h` is **5.1.3 DEV** | 5.1.0 OFFICIAL closed the migration; the 5.1.x DEV series carries the post-release D10 work - Stage 1 in 5.1.1, the Gremsy analysis and pitch relocation in 5.1.2, Stage 2a routing in 5.1.3 - and goes OFFICIAL when D10/D11 land |
 | `GCS.h` dead CAM macros removed, `OFP_VER_*` tracked against `version.h` | were stale/unused; guarded by `static_assert` in `Copter.cpp` |
 | `AP_PMUCAN` fixes | dropped-frame at RX budget, dead branch, `&`->`&&`, `RXdrain()` extraction, named constants, ctor init, `TXspin` void. See git log |
 | `send_proximity()` upward-distance block **not** commented out | V5.0.8 wrapped it in `/* Currently, no upward sensor */`. `AP_Proximity::get_upward_distance()` already returns false when no backend supplies one (`AP_Proximity.cpp:498`), and TeraRanger Tower Evo is not one of the backends that does - so the comment-out is a no-op here and a silent regression for `AP_Proximity_RangeFinder` / `_MAV` / scripting users. Not applied |
@@ -758,7 +826,8 @@ What is left on D10/D11, in order:
 
 | | Work | Blocked on |
 |:--:|---|---|
-| Stage 2 | Dual-dispatch in `AP_Q30` - try `AP::mount()`, fall back to `AP::camera()`. **Convert `EO_zoom_times` at the boundary first** (renamed but not converted). **Scope now reduced to zoom, focus, record and picture** - source and palette left the FC; see the dual-GCS compatibility strategy at the end of this file | `CAMERA_CAP_FLAGS` - if VIO does not advertise `HAS_BASIC_ZOOM`/`_FOCUS`, these never transmit |
+| Stage 2a | **DONE 2026-10-12** - the 6 camera functions route through `AP::camera()`; `CAM1_TYPE` selects the destination. Behaviour-neutral on Viewpro | - |
+| Stage 2b | The `EO_zoom_times` units conversion, which only bites at `CAM1_TYPE=6`. Needs the VIO's maximum zoom, which MAVLink cannot report | a VIO on the bench |
 | Stage 3 | `get_zoom_times` only - needs `CAMERA_SETTINGS` msg 260 decoding (**check ArduPilot master first**), and even then `zoomLevel` is a percentage, not times, so it needs a per-model max-zoom constant. `IR_Color_Change` is **no longer in this stage** - it is KGCS-direct. **May close with no ArduPilot change** if the VIO exposes zoom level as a `PARAM_EXT` parameter | a VIO on the bench - see the checklist in "Gremsy integration mechanics" |
 | KGCS side | EO/IR source, IR palette and object tracking move to KGCS-to-VIO direct routing. No FC code. Requires `MAVn_OPTIONS` bit 1 (`NO_FORWARD`) clear on the link | PNU/KGCS work, not this repo |
 
