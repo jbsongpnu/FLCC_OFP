@@ -1,7 +1,12 @@
 # PNU-KAL FLCC OFP Development Version
 - This branch currently developing PNU-KAL FLCC OFP after official version (TAG) PNU-KAL-FLCC-5.1.0 (this is same code as 5.0.15 dev)  
 - PNU-ISSUE 10 & 11 still remains : For Gremsy camera and general camera mount library structure  
-- IN THIS VERSION : V5.1.1 working with issues 10 and 11 - Stage 1 
+- IN THIS VERSION : V5.1.2 working with issues 10 and 11 - analysis and groundwork, NOT Stage 2 (the D10 dual-dispatch routing is still blocked)  
+   - The ACTION ON PNU regarding Gremsy protocol is **partly** answered and recorded in README.md along with analysis on this issue. IR palette, EO/IR source and camera component ID are answered; `CAMERA_CAP_FLAGS` and the vendor/model strings are still open, and still block D10 routing and D11  
+   - Pitch reversal is now changed to accommodate the general convention of gimbals, and the previous pitch reversal now resides in AP_Q30.cpp. This fixes inverted pitch for Mission Planner and AUTO missions on a Viewpro  
+   - **REQUIRES a parameter change on the aircraft : `MNT1_PITCH_MIN` -45 -> -90 and `MNT1_PITCH_MAX` 90 -> 45.** The firmware cannot do this itself. Flying with the old pair clips KGCS pitch to 45 deg down and allows 90 deg up, past the mechanical stop  
+   - Dual-GCS compatibility strategy recorded : a standard GCS (Mission Planner, QGC) keeps full gimbal and camera control, and KGCS-specific convention lives in AP_Q30. See the section at the end of this file  
+- For 5.1.1 version :  
    - Stage 1 applied : (see below); the routing decision itself stays blocked on the ACTION ON PNU answers  
    - README.md notes are updated to indicate dev version  
 ***
@@ -227,65 +232,68 @@ and reset on staleness. 14 messages give 13 alternations against a threshold of 
 with `pnu_kal.xml` can emit TC1 bursts at any rate while you watch `Engine_OnOff_Echo` in TM3.
 
 
-**Viewpro pitch reversal is intentional - do not "fix" it.**
-`AP_Mount_Backend::set_angle_target()` negates the pitch target when the backend
-returns true from `pitch_target_is_reversed()`, which only `AP_Mount_Viewpro`
-does. This is a KGCS operator convention, not a protocol requirement: when the
-operator presses gimbal pitch-down they expect the *video image* to pan
-downwards, which means the gimbal must physically pitch up. It applies to KGCS
-users, who so far use the Viewpro camera only.
+**KGCS pitch reversal is intentional - do not "fix" it. It lives in `AP_Q30`.**
 
-Deliberately scoped:
+*Relocated 2026-10-12 (see "Dual-GCS compatibility strategy" at the end of this file).*
+It used to live in `AP_Mount_Backend::set_angle_target()` behind a
+`pitch_target_is_reversed()` backend hook that only `AP_Mount_Viewpro` set. Because that
+function is the common funnel for **every** angle source, the KGCS convention also reached
+Mission Planner, QGC and AUTO missions, which therefore got **inverted pitch** on a Viewpro.
+The hook is gone; both KGCS paths now negate at their own call sites in `AP_Q30`.
 
-| Path | Writer | Where the flip happens | Reversed |
-|---|---|---|:-:|
-| MAVLink angle commands (`DO_MOUNT_CONTROL`, `GIMBAL_MANAGER_*`, AUTO mission, `AP_Q30::send_cmd_angle()`) | `set_angle_target()` | `pitch_target_is_reversed()` inside `set_angle_target()` | **yes** - this is what KGCS drives |
-| **KGCS rate commands (TC2 `Control_Mode` 1)** | `set_rate_target()` | **`AP_Q30::send_cmd_speed()` negates `Pitch_Speed_CMD` at the call site** - `set_rate_target()` itself does *not* apply `pitch_target_is_reversed()` | **yes** - same operator convention, different mechanism |
-| RC stick control | `update_mnt_target_from_rc_target()` | — | no - physical convention |
-| ROI / point-at-location | `get_angle_target_to_location()` | — | no - physical convention |
-| Rate integration into an angle target | `update_angle_target_from_rate()` | — | no - operates on the already-correct rate |
+This is a KGCS operator convention, not a protocol requirement: when the operator presses
+gimbal pitch-down they expect the *video image* to pan downwards, which means the gimbal
+must physically pitch up.
 
-So the operator sees image convention on **both** angle and rate, by two different
-mechanisms. `set_rate_target()` is the trap: it looks inconsistent with
-`set_angle_target()` and invites a "consistency fix", but adding
-`pitch_target_is_reversed()` there would **double-negate** the KGCS rate path and invert
-gimbal pitch rate. A comment at `AP_Mount_Backend::set_rate_target()` says so.
+| Path | Where the flip happens | Reversed |
+|---|---|:-:|
+| **KGCS angle (TC2 `Control_Mode` 2)** | `AP_Q30::send_cmd_angle()` negates `Pitch_Angle_CMD` at the call site | **yes** |
+| **KGCS rate (TC2 `Control_Mode` 1)** | `AP_Q30::send_cmd_speed()` negates `Pitch_Speed_CMD` at the call site | **yes** |
+| **TM2 pitch readback** | `GCS_PNU.cpp` negates `pitch` before filling `Pitch_REL_ANG` / `Pitch_IMU_ANG` | **yes** |
+| MAVLink angle commands (`DO_MOUNT_CONTROL`, `GIMBAL_MANAGER_*`, AUTO mission) | — | no - **standard physical convention** |
+| RC stick control | — | no - physical convention |
+| ROI / point-at-location | — | no - physical convention |
+| Rate integration into an angle target | — | no - operates on the already-correct rate |
+
+All three KGCS paths are now unconditional negations in the KGCS adapter, with no backend
+dependency, so they behave identically on Viewpro, Gremsy or any future gimbal. **Do not
+re-add a sign flip to `AP_Mount_Backend`** - a comment at `set_rate_target()` says so. It
+would double-negate the KGCS paths and invert pitch for every standard GCS.
 
 `AP_Q30::send_cmd_hold_angle()` sends an all-zero rate, so the sign is irrelevant there.
 
-**The pitch limits are in KGCS convention, not physical.** `set_angle_target()`
-constrains *before* it negates, so `MNT1_PITCH_MIN` / `MNT1_PITCH_MAX` bound the
-**commanded** value, and the achievable physical range is their negation:
+**The pitch limits are now physical, i.e. standard ArduPilot convention.**
+`set_angle_target()` constrains the value `AP_Q30` already negated, so `MNT1_PITCH_MIN` /
+`MNT1_PITCH_MAX` mean what ArduPilot documents them to mean, and Mission Planner's own
+limit handling is correct:
 
 ```
-MNT1_PITCH_MAX = degrees of DOWN travel allowed   (positive)
-MNT1_PITCH_MIN = -(degrees of UP travel allowed)  (negative)
+MNT1_PITCH_MIN = -(degrees of DOWN travel allowed)   (negative)
+MNT1_PITCH_MAX = +(degrees of UP travel allowed)     (positive)
 ```
 
-The stock defaults (`MIN -90`, `MAX 20`) therefore give only 20 deg of look-down and
-90 deg of look-up on a Viewpro - backwards for a camera. Symmetric limits are **not** a
-safe shortcut: the travel is asymmetric, and `MIN -90` commands 90 deg up, past the
-mechanical stop, which saturates the gimbal and raises an internal error.
+Measured on the bench (Viewpro, 2026-09-29): up saturates near **60 deg physical**, so
+`MNT1_PITCH_MAX` must stay at or below 60.
 
-Measured on the bench (Viewpro, 2026-09-29): up saturates near **60 deg physical**
-(commanded -60), so `MNT1_PITCH_MIN` must stay at or above -60.
+**Required values. These MUST be changed together with the relocation** - the old pair was
+expressed in the old (commanded, pre-negation) convention, and leaving it in place clips
+KGCS pitch to 45 deg down and allows 90 deg up, past the mechanical stop:
 
-**Final values, bench-tested 2026-09-29:**
+| Parameter | Was (old convention) | **Now** | Gives |
+|---|:--:|:--:|---|
+| `MNT1_PITCH_MIN` | -45 | **-90** | 90 deg **down** - full nadir |
+| `MNT1_PITCH_MAX` | 90 | **45** | 45 deg **up** |
 
-| Parameter | Value | Gives |
-|---|:--:|---|
-| `MNT1_PITCH_MAX` | **90** | 90 deg **down** - full nadir |
-| `MNT1_PITCH_MIN` | **-45** | 45 deg **up** |
-
-The -45 is a deliberate ~15 deg margin inside the measured 60 deg up stop - do not
-"optimise" it to -60, that is the saturation point where the gimbal raises an internal
-error.
+The range is unchanged in physical terms - the numbers were negated and swapped, which is
+exactly what moving the negation upstream of the constraint requires. The 45 is the same
+deliberate ~15 deg margin inside the measured 60 deg up stop - do not "optimise" it to 60,
+that is the saturation point where the gimbal raises an internal error.
 
 Note the limits apply to the **angle** path only. Viewpro declares
 `NATIVE_ANGLES_AND_RATES_ONLY`, so rate commands go straight to
 `send_target_rates()` and are never constrained - only the gimbal's own firmware
-stops them. The RC path applies the same parameters in *physical* convention with no
-flip, so RC and KGCS disagree unless the limits are symmetric.
+stops them. The RC path now applies these parameters in the **same** physical convention as
+the limits themselves, so RC and the limits no longer disagree.
 
 Any other gimbal (Gremsy etc.) inherits `false` from the base class and is
 unaffected.
@@ -555,8 +563,8 @@ bench session described above, not with code.
 > | Is there any thermal-palette / IR colour control at all, and over what protocol? | `IR_Color_Change` has no MAVLink standard. If Gremsy has no equivalent, KGCS must hide the IR colour buttons for this camera rather than send commands that do nothing. |
 > | Does the camera report `CAMERA_SETTINGS` (msg 260) with `zoomLevel`? | Decides whether `get_zoom_times` can be implemented at all, or whether TM2 must report zoom as unavailable. |
 > | Is the camera a separate MAVLink component ID from the gimbal? | Decides whether `AP_Camera` (`CAM1_TYPE=6`) can reach it, and what `AP_Q30` must address. |
-> | Which `CAMERA_CAP_FLAGS` does it advertise? | Tells us zoom / focus / video / tracking support without guessing. |
-> | Exact `vendor_name` / `model_name` strings per model | Needed to tell ZIO from VIO at runtime, per the `AP_Mount_MAVLink.h:51` precedent. |
+> | Which `CAMERA_CAP_FLAGS` does it advertise? | Tells us zoom / focus / video / tracking support without guessing. **Now the top remaining blocker** - these flags gate whether the command is transmitted at all. Readable on the bench, see "Gremsy integration mechanics". |
+> | Exact `vendor_name` / `model_name` strings per model | Needed to tell ZIO from VIO at runtime, per the `AP_Mount_MAVLink.h:51` precedent. **Lower priority than it looks** - `model_name` gates nothing; see "Gremsy integration mechanics". |
 > | Is `set_camera_source` (EO / IR / PIP switching) supported, and how? | Four of `AP_Q30`'s calls; no MAVLink standard path. |
 >
 > Until this is delivered, D10 and D11 stay open and no Gremsy camera work should start.
@@ -640,21 +648,21 @@ If it shows deletions, apply targeted edits only.
 | `ArduCopter/Copter.cpp` | 3x `static_assert(OFP_VER... == FW_...)` (step 4, D4); mount task kept at **50 Hz** (D8) |
 | `ArduCopter/Copter.h` | `AP_Q30 q30` member behind `#if AP_Q30_ENABLED` (D13); `failsafe.pmucan` and `failsafe.pmucan_armed_healthy` bits (D9) |
 | `libraries/AP_PMUCAN/*` | the whole step-4 cleanup; 4 vendored `pmucan_*.hpp` were **deleted**; DLC validation (D6), endianness comments (D15), global declarations (D14), engine-interlock send check (D7) |
-| `libraries/AP_Mount/AP_Mount_Backend.{h,cpp}` | `pitch_target_is_reversed()`, `suppress_gimbal_device_attitude_status()` (D8a); the `get_zoom_times()` out-param signature (D10 Stage 1) |
+| `libraries/AP_Mount/AP_Mount_Backend.{h,cpp}` | `suppress_gimbal_device_attitude_status()` (D8a); the `get_zoom_times()` out-param signature (D10 Stage 1). **Deliberately carries NO pitch sign flip** - re-adding one double-negates KGCS and inverts every standard GCS |
 | `libraries/AP_Mount/AP_Mount.{h,cpp}` | the `get_zoom_times()` out-param signature (D10 Stage 1) |
-| `libraries/AP_Mount/AP_Mount_Viewpro.{h,cpp}` | both overrides; D1 markers; `_zoom_times` initialiser and the `get_zoom_times()` validity test (D10 Stage 1) |
+| `libraries/AP_Mount/AP_Mount_Viewpro.{h,cpp}` | `suppress_gimbal_device_attitude_status()` override; D1 markers; `_zoom_times` initialiser and the `get_zoom_times()` validity test (D10 Stage 1) |
 | `libraries/AP_SerialManager/AP_SerialManager.h` | IOMCU renumber deliberately **not** applied |
 | `libraries/AP_OSD/AP_OSD_ParamSetting.cpp` | `"Q30"` padding deliberately **not** applied |
 | `libraries/GCS_MAVLink/GCS_Common.cpp` | upward-proximity block deliberately **not** commented out; the handler bodies live in `GCS_PNU.cpp`, only 3 hooks remain here (D5) |
 | `libraries/GCS_MAVLink/GCS_PNU.cpp` | PNU-only file; the step-7 defect fixes and `#if` guards live here; the D10 Stage 1 TM2 zoom-truth and no-gimbal gate |
-| `libraries/AP_Q30/AP_Q30.{h,cpp}` | `send_cmd_speed()` negates pitch at the call site (see the pitch-reversal table); `AP_Q30_ENABLED` guard and the D14 global declarations; the 27 return checks and `report_cam_unsupported()` (D10 Stage 1) |
+| `libraries/AP_Q30/AP_Q30.{h,cpp}` | `send_cmd_speed()` **and** `send_cmd_angle()` negate pitch at the call site (see the pitch-reversal table); `AP_Q30_ENABLED` guard and the D14 global declarations; the 27 return checks and `report_cam_unsupported()` (D10 Stage 1) |
 | `ArduCopter/UserCode.cpp` | `#if HAL_PROXIMITY_ENABLED && AP_AVOIDANCE_ENABLED` guard around the OA block |
 | `ArduCopter/events.cpp` | D9(a) recovery-clear fix and D9(b) arm-time latch gate; `LOGGER_WRITE_ERROR` portability fix |
 | `ArduCopter/AP_Arming_Copter.{h,cpp}` | `pmucan_checks()` prearm warning and the arm-time healthy latch (D9b) |
 | `libraries/GCS_MAVLink/GCS.h` | `OFP_VER_*`; the D3 dialect `#error` guard; the D12 `prev_prx_failed` latch; the D10 `prev_zoom_unavailable` latch; PNU handler declarations |
 | `libraries/AP_Q30/AP_Q30_config.h` | PNU-only file - the `AP_Q30_ENABLED` flag (D13) |
 | `Tools/scripts/build_options.py` | the `Camera / Q30` build option (D13) |
-| `ArduCopter/version.h` | **5.1.1 DEV** and the release note describing what it carries |
+| `ArduCopter/version.h` | **5.1.2 DEV** and the release note describing what it carries |
 | `README.md` | this file - never taken from the snapshot |
 
 Most other deviations are KAL -> PNU / PNU-KAL comment renames, which are cosmetic but still
@@ -668,7 +676,7 @@ make a wholesale copy a regression.
 | 4 `pmucan_*.hpp` deleted (1163 lines) | vendored libuavcan v0; only 3 constants were used, all identical in `AP_HAL::CANFrame` / `CANIface` |
 | Mount task kept at 50 Hz | `AP_Mount_Viewpro::update()` self-throttles to 100 ms, so gimbal traffic is 10 Hz either way; at a 10 Hz task rate the period *equals* the throttle and late ticks cause 5 Hz bursts. See D8 |
 | msg 285 suppression made opt-in | V5.0.8 suppressed it for every gimbal, not just Viewpro. See D8 |
-| `version.h` is **5.1.1 DEV** | 5.1.0 OFFICIAL closed the migration; 5.1.1 carries the post-release D10 Stage 1 work and goes OFFICIAL when D10/D11 land |
+| `version.h` is **5.1.2 DEV** | 5.1.0 OFFICIAL closed the migration; the 5.1.x DEV series carries the post-release D10 work - Stage 1 in 5.1.1, the Gremsy analysis and pitch relocation in 5.1.2 - and goes OFFICIAL when D10/D11 land |
 | `GCS.h` dead CAM macros removed, `OFP_VER_*` tracked against `version.h` | were stale/unused; guarded by `static_assert` in `Copter.cpp` |
 | `AP_PMUCAN` fixes | dropped-frame at RX budget, dead branch, `&`->`&&`, `RXdrain()` extraction, named constants, ctor init, `TXspin` void. See git log |
 | `send_proximity()` upward-distance block **not** commented out | V5.0.8 wrapped it in `/* Currently, no upward sensor */`. `AP_Proximity::get_upward_distance()` already returns false when no backend supplies one (`AP_Proximity.cpp:498`), and TeraRanger Tower Evo is not one of the backends that does - so the comment-out is a no-op here and a silent regression for `AP_Proximity_RangeFinder` / `_MAV` / scripting users. Not applied |
@@ -735,17 +743,24 @@ grep -rn "PNU-NOT-APPLIED" libraries/ ArduCopter/
 not-applied, and **13 of the 15 issues are resolved**. Left open: **D10** and **D11**.
 
 **D10 Stage 1 is applied (2026-10-01)** - every fabricated camera value is gone and every
-declined camera command is now reported. **The D10 routing decision and all of D11 remain
-blocked on the ACTION ON PNU answers above**, and nothing in this repo will unblock them.
-Stage 1 deliberately did not touch routing: it makes the symptom visible so that a Gremsy
-bench session produces a diagnosis instead of silence.
+declined camera command is now reported. Stage 1 deliberately did not touch routing: it makes
+the symptom visible so that a Gremsy bench session produces a diagnosis instead of silence.
+
+**The Gremsy protocol answers arrived 2026-10-08** (see "Standard Control for Gremsy VIO
+EO/IR payload" at the end of this file) and **cut the remaining work down rather than
+unblocking it wholesale.** Three of the six ACTION ON PNU questions are answered: IR palette
+is `C_T_PALETTE`, EO/IR source is `C_SOURCE`, both over `PARAM_EXT_SET`, and the camera is a
+separate component ID. Because **ArduPilot implements no `PARAM_EXT_*` at all**, those two
+functions can only be reached by direct KGCS-to-payload routing - they leave the FC entirely,
+and no amount of `AP_Q30` routing would have reached them.
 
 What is left on D10/D11, in order:
 
 | | Work | Blocked on |
 |:--:|---|---|
-| Stage 2 | Dual-dispatch in `AP_Q30` - try `AP::mount()`, fall back to `AP::camera()`. **Convert `EO_zoom_times` at the boundary first** (renamed but not converted) | the ACTION ON PNU answers |
-| Stage 3 | The two functions with no `AP_Camera` path - `get_zoom_times` (needs `CAMERA_SETTINGS` msg 260 decoding; **check ArduPilot master first**) and `IR_Color_Change` (no MAVLink standard; vendor-specific) | D11 / a VIO on the bench |
+| Stage 2 | Dual-dispatch in `AP_Q30` - try `AP::mount()`, fall back to `AP::camera()`. **Convert `EO_zoom_times` at the boundary first** (renamed but not converted). **Scope now reduced to zoom, focus, record and picture** - source and palette left the FC; see the dual-GCS compatibility strategy at the end of this file | `CAMERA_CAP_FLAGS` - if VIO does not advertise `HAS_BASIC_ZOOM`/`_FOCUS`, these never transmit |
+| Stage 3 | `get_zoom_times` only - needs `CAMERA_SETTINGS` msg 260 decoding (**check ArduPilot master first**), and even then `zoomLevel` is a percentage, not times, so it needs a per-model max-zoom constant. `IR_Color_Change` is **no longer in this stage** - it is KGCS-direct. **May close with no ArduPilot change** if the VIO exposes zoom level as a `PARAM_EXT` parameter | a VIO on the bench - see the checklist in "Gremsy integration mechanics" |
+| KGCS side | EO/IR source, IR palette and object tracking move to KGCS-to-VIO direct routing. No FC code. Requires `MAVn_OPTIONS` bit 1 (`NO_FORWARD`) clear on the link | PNU/KGCS work, not this repo |
 
 Residuals recorded against resolved issues: D1 (is the prelude needed at all?), D6 (the PMU
 counters are still write-only), D7 (accepted interlock residuals), D12 (confirm the 10 m /
@@ -758,3 +773,282 @@ List them with:
 ```
 grep -rn "PNU-ISSUE" libraries/ ArduCopter/
 ```
+---
+
+**Standard Control for Gremsy VIO EO/IR payload**
+
+*Here, basic control methods and protocol provided by Gremsy are described :*
+
+1) Basic gimbal movement: controlled by Gimbal Protocol V2
+- Related Parameter Setting: MNT1_TYPE=6, SERIAL2_PROTOCOL=2, SERIAL2_BAUD=115. Use MNT1_DEFLT_MODE=2 for MAVLink targeting. RC control additionally requires appropriate RCx_OPTION assignments (No plan to use RC).
+- ArduPilot Library: libraries/AP_Mount/, primarily AP_Mount.cpp and AP_Mount_MAVLink.cpp.
+- Controllable behaviors: Target attitude, angular rate, yaw lock/follow, and retract.
+- Accessible data from gimbal: Device information, attitude quaternion, angular velocity, operating flags, and failure flags through Gimbal V2 messages.  
+Available fields depend on the payload firmware.  
+The MAVLink backend generates device-level commands through functions such as send_target_angles(), send_target_rates(), and send_target_retracted().
+
+2) Camera-related control: controlled by MAVLink commands and extended parameters
+- Related Parameter Setting: CAM1_TYPE=6 for ArduPilot-managed camera control; MAVLink2 and matching UART baud rate. Direct GCS-to-payload routing does not depend on CAM1_TYPE.
+- ArduPilot Library: libraries/AP_Camera/, primarily AP_Camera.cpp and AP_Camera_MAVLinkCamV2.cpp for standard camera operations; libraries/GCS_MAVLink/ for directly routed payload messages.
+- Controllable behaviors: Capture, recording, zoom, and focus using standard commands. EO/IR source, palette, exposure, and other Gremsy settings use PARAM_EXT_SET.
+- Accessible data from payload: Camera information, settings, storage information, capture status, stream information, and extended parameter values.  
+ArduPilot's camera backend includes set_zoom() and set_focus(). Gremsy-specific extended settings should be handled by the GCS and routed to VIO unless additional FC-side integration is implemented.
+
+> **Which of that the FC can actually see, verified against 4.7.1.** Of the five information
+> messages, ArduPilot has an inbound decode for exactly **one**: `CAMERA_INFORMATION`
+> (`AP_Camera_MAVLinkCamV2::handle_message()`). `CAMERA_SETTINGS`, `STORAGE_INFORMATION`,
+> `CAMERA_CAPTURE_STATUS` and `VIDEO_STREAM_INFORMATION` have **zero** inbound decode sites -
+> every occurrence in the tree is ArduPilot *sending* them as a camera to a GCS. So those four
+> reach a GCS by direct routing only, never the FC. This is what blocks TM2 from reporting real
+> zoom (**D11**): `CAMERA_SETTINGS.zoomLevel` carries it, but nothing decodes the message. Note
+> too that `zoomLevel` is a percentage of full range, not zoom times, and is a MAVLink2
+> extension field that may legitimately be NaN.
+>
+> **`PARAM_EXT_*` is not implemented in ArduPilot at all** - no handler for `PARAM_EXT_SET`,
+> `_VALUE`, `_REQUEST_LIST`, `_REQUEST_READ` or `_ACK` anywhere in the tree. So `C_SOURCE`,
+> `C_T_PALETTE` and every other Gremsy extended parameter can **only** be reached by direct
+> GCS-to-payload routing. Routing `AP_Q30`'s calls to `AP::camera()` would not reach them,
+> which settles the **D10** Stage 2 question for those two functions: they do not belong in
+> the FC.
+>
+> **`set_zoom()` / `set_focus()` are gated on `CAMERA_CAP_FLAGS`** taken from
+> `CAMERA_INFORMATION` - `HAS_BASIC_ZOOM` and `HAS_BASIC_FOCUS` respectively. If VIO does not
+> advertise them, `AP_Camera_MAVLinkCamV2` returns false/FAILED **without transmitting
+> anything**. Confirming which flags VIO advertises is therefore the top remaining unknown.
+> Note also that `MAV_CMD_SET_CAMERA_MODE` (530) appears **nowhere** in ArduPilot - it is
+> neither sent nor handled, so there is no FC path for it.
+
+3) Data flow when using a standard open source GCS  
+
+| Path | GCS → ArduPilot | ArduPilot → Gremsy payload |
+|:--:|:--:|:--:|
+| FC-managed gimbal | GIMBAL_MANAGER_SET_ATTITUDE, GIMBAL_MANAGER_SET_PITCHYAW, or COMMAND_LONG containing MAV_CMD_DO_GIMBAL_MANAGER_PITCHYAW | AP_Mount processes the target; AP_Mount_MAVLink generates GIMBAL_DEVICE_SET_ATTITUDE |
+| FC-managed camera | Standard camera commands addressed to the FC | AP_Camera dispatches supported operations to AP_Camera_MAVLinkCamV2, which generates camera commands |
+| Direct payload control | Commands or PARAM_EXT_* messages addressed to VIO's actual System/Component IDs | MAVLink_routing::check_and_forward() routes the message without converting its command semantics |
+
+
+- Direct routing requires a learned route to VIO and enabled forwarding. Do not set the "no forward MAVLink" option on links used for this path. The payload executes the command and returns responses through the routing path.
+- **The parameter for this moved in 4.7.** It is now `MAVn_OPTIONS` bit 1 (`NO_FORWARD`). The old `SERIALx_OPTIONS` bit 10 is deprecated and raises a prearm failure - `AP_SerialManager.cpp:860`: "SERIAL%u_OPTIONS bit 10 ('no forward mavlink') must not be set; use MAVn_OPTIONS bit 1 instead".
+
+4) MAVLink message lists
+
+- *Gimbal Protocol V2 — main integration messages*
+
+| Direction | Messages |
+|:--:|:--:|
+| GCS → FC | GIMBAL_MANAGER_SET_ATTITUDE, GIMBAL_MANAGER_SET_PITCHYAW |
+| FC → GCS | GIMBAL_MANAGER_INFORMATION, GIMBAL_MANAGER_STATUS |
+| FC → Gimbal | GIMBAL_DEVICE_SET_ATTITUDE, AUTOPILOT_STATE_FOR_GIMBAL_DEVICE |
+| Gimbal → FC/GCS | GIMBAL_DEVICE_INFORMATION, GIMBAL_DEVICE_ATTITUDE_STATUS |
+
+- Command-based manager control also uses MAV_CMD_DO_GIMBAL_MANAGER_PITCHYAW and MAV_CMD_DO_GIMBAL_MANAGER_CONFIGURE. This is an integration list, not a claim that VIO implements every Gimbal V2 feature.  
+
+- *Camera-related messages*
+   - Command transport: COMMAND_LONG, COMMAND_ACK.
+   - Control commands: MAV_CMD_SET_CAMERA_MODE, MAV_CMD_SET_CAMERA_ZOOM, MAV_CMD_SET_CAMERA_FOCUS, MAV_CMD_IMAGE_START_CAPTURE, MAV_CMD_IMAGE_STOP_CAPTURE, MAV_CMD_VIDEO_START_CAPTURE, MAV_CMD_VIDEO_STOP_CAPTURE.
+   - Information messages: CAMERA_INFORMATION, CAMERA_SETTINGS, STORAGE_INFORMATION, CAMERA_CAPTURE_STATUS, VIDEO_STREAM_INFORMATION.
+   - Extended parameters: PARAM_EXT_REQUEST_LIST, PARAM_EXT_REQUEST_READ, PARAM_EXT_VALUE, PARAM_EXT_SET, PARAM_EXT_ACK.
+   - Gremsy parameter examples: C_SOURCE, C_V_REC, C_T_PALETTE, C_V_AE, GB_MODE.
+- Gremsy's examples commonly target camera component 101, but the actual ID is configurable. These payload parameters belong to VIO, not to ArduPilot's parameter database.
+
+---
+
+**Gremsy integration mechanics - verified against 4.7.1, 2026-10-12**
+
+*Answers to three questions raised while reviewing the Gremsy notes. All of this is read out
+of the tree, not from vendor documentation.*
+
+**1. `CAMERA_INFORMATION` / `CAMERA_CAP_FLAGS` are not a new concept here - the direction is.**
+
+The current Viewpro build already uses both, **outbound**: `AP_Mount_Viewpro::send_camera_information()`
+builds the message and declares six flags (`CAPTURE_VIDEO`, `CAPTURE_IMAGE`, `HAS_BASIC_ZOOM`,
+`HAS_BASIC_FOCUS`, `HAS_TRACKING_POINT`, `HAS_TRACKING_RECTANGLE`) - ArduPilot acting *as* the
+camera toward a GCS.
+
+For Gremsy the role reverses: `AP_Camera_MAVLinkCamV2` **requests and consumes**
+`CAMERA_INFORMATION` from the payload. The consequence is the part with no Viewpro precedent:
+
+| | Viewpro today | Gremsy via `AP_Camera_MAVLinkCamV2` |
+|---|---|---|
+| Who produces `CAMERA_INFORMATION` | ArduPilot | the VIO |
+| Do the cap flags gate anything? | **No** - `AP_Mount_Viewpro::set_zoom()` checks only `_initialised`; the flags it advertises are never read by its own code | **Yes** - `set_zoom`/`set_focus`/`trigger_pic`/`record_video` each return false **before transmitting** if their flag is clear |
+
+So with Viewpro the flags are pure advertising, which is why they have never mattered. With
+Gremsy they are a hard gate, and a VIO that does not advertise `HAS_BASIC_ZOOM` gets no zoom
+command sent at all - the D10 Stage 1 return checks will report it as
+`CAM: mount rejected zoom in` once routing exists.
+
+**2. How ArduPilot finds the camera - the component ID trap.**
+
+`AP_Camera_MAVLinkCamV2::find_camera()` locates the payload with
+`find_by_mavtype_and_compid(MAV_TYPE_CAMERA, compid, _sysid)` where
+`compid = MIN(MAV_COMP_ID_CAMERA + _instance, MAV_COMP_ID_CAMERA6)`:
+
+| `AP_Camera` instance | Parameter | compid it looks for |
+|:--:|:--:|:--:|
+| 0 | `CAM1_TYPE=6` | **100** (`MAV_COMP_ID_CAMERA`) |
+| 1 | `CAM2_TYPE=6` | **101** (`MAV_COMP_ID_CAMERA2`) |
+
+**The Gremsy notes above say the camera is commonly component 101.** If that is so on the
+actual unit, `CAM1_TYPE=6` searches for 100 and **never finds it**; the payload must either be
+configured to 100 or be driven as `CAM2_TYPE=6`. Confirm the real compid before concluding the
+camera is unsupported.
+
+Two further conditions, both easy to miss:
+
+- The camera must emit a **HEARTBEAT with `MAV_TYPE_CAMERA`**. That is the only thing that
+  populates `mavtype` in the routing table (`MAVLink_routing.cpp:375-386`), and the search
+  matches on it. A payload that answers commands but sends no heartbeat is never found.
+- The search **starts 10 s after boot, runs for 60 s, and stops once armed**. This has to work
+  on the bench, disarmed.
+
+**3. What `model_name` does and does not affect.**
+
+`model_name` is used in exactly two places, neither of them a gate:
+
+- the `"Camera: %.32s %.32s fw:..."` statustext in `AP_Camera_MAVLinkCamV2::handle_message()` - cosmetic;
+- `AP_Mount_MAVLink::natively_supported_mount_target_types()`, for the AVTA/CM41 special case.
+  A garbage or empty string simply fails the `strncmp`, `LOCATION` is not claimed as natively
+  supported, and the base class converts ROI to angles - **which is the normal path anyway**.
+
+`_got_camera_info` is set on decode regardless of field contents. **So a malformed `model_name`
+is harmless; a missing `CAMERA_INFORMATION` is not**, because then `_cam_info.flags` stays 0 and
+every camera call fails. The two failure modes look similar at the GCS and must not be confused.
+
+**4. Zoom: what the capability flag cannot tell you.**
+
+There is **one** flag, `CAMERA_CAP_FLAGS_HAS_BASIC_ZOOM`, covering all five `CAMERA_ZOOM_TYPE`
+values. MAVLink provides no way to advertise "continuous yes, range no", so capability flags
+**cannot** answer whether absolute zoom works. Only a live command can:
+
+```
+send MAV_CMD_SET_CAMERA_ZOOM with param1 = 2 (ZOOM_TYPE_RANGE), param2 = 50
+  COMMAND_ACK = MAV_RESULT_ACCEPTED     -> absolute zoom works, Stage 2 maps 1..30 -> 0..100 %
+  COMMAND_ACK = MAV_RESULT_UNSUPPORTED  -> continuous only, see the options below
+```
+
+This needs no firmware change - it can be sent from Mission Planner or pymavlink.
+
+Mapping TC2 onto a buttons-only payload:
+
+| TC2 / TM2 | Needs | If the VIO is continuous-only |
+|---|---|---|
+| `Zoom_Focus_Stop_CMD` 1 / 2 - zoom in / out | `ZOOM_TYPE_CONTINUOUS` | **works as-is** - this is exactly what a zoom-in/zoom-out button is |
+| `Tracking_CMD` 21-24 - absolute EO zoom | `ZOOM_TYPE_RANGE` | must become timed continuous pulses |
+| TM2 `Zoom_POS_FB` - reports 1..30 | `CAMERA_SETTINGS.zoomLevel` | no measured value available |
+
+**Integer zoom without an explicit level command is possible three ways**, best first:
+
+1. **`ZOOM_TYPE_RANGE`** - if it ACKs, map `EO_zoom_times` 1..30 onto 0..100 %. One command, clean.
+2. **`ZOOM_TYPE_FOCAL_LENGTH` (mm) or `ZOOM_TYPE_HORIZONTAL_FOV` (deg)** - also absolute and also
+   one command, but both need the lens specification from Gremsy to convert.
+3. **Dead-reckoning** - `AP_Q30` already counts steps into `EO_zoom_times`; send timed continuous
+   pulses and trust the counter. Needs nothing from the VIO, but it drifts with no feedback.
+   **Note the ICD consequence:** reporting that counter in TM2 would put a *commanded* value on
+   the wire as though it were measured, partly undoing what D10 Stage 1 fixed. It is an honest
+   estimate rather than a fabricated 0, but it is an ICD decision, not a code one.
+
+**Worth checking before any of that:** whether the VIO exposes zoom level as a `PARAM_EXT`
+parameter alongside `C_SOURCE` and `C_T_PALETTE`. If it does, KGCS can read it directly over the
+routing path it already uses for palette and source, TM2's gap stops mattering, and **Stage 3
+closes with no ArduPilot change at all**.
+
+**Bench checklist, in order** - all disarmed, all before writing any routing code:
+
+1. Power up with the VIO connected. Record the `"Mount: %s %s fw:..."` and `"Camera: %s %s fw:..."`
+   statustexts. Seeing **both** confirms gimbal and camera are separate components.
+2. Record the camera's actual **component ID** and whether it heartbeats as `MAV_TYPE_CAMERA`.
+   This decides `CAM1_TYPE` vs `CAM2_TYPE`, and whether `AP_Camera` can reach it at all.
+3. Record the **`CAMERA_CAP_FLAGS`** bitmask from `CAMERA_INFORMATION`. This decides which of
+   zoom / focus / video / image will transmit.
+4. Send `MAV_CMD_SET_CAMERA_ZOOM` with `ZOOM_TYPE_RANGE` and read the `COMMAND_ACK`.
+5. Check whether `CAMERA_SETTINGS` (msg 260) is emitted after a zoom command, and whether its
+   `zoomLevel` extension field is populated rather than NaN.
+6. List the VIO's `PARAM_EXT` parameters and look for a zoom-level entry.
+
+Steps 1-3 answer the two remaining ACTION ON PNU questions. Steps 4-6 decide Stage 3.
+
+---
+
+**Dual-GCS compatibility strategy - Mission Planner and KGCS on the same aircraft**
+
+*Decided 2026-10-12. This is a standing constraint on all remaining D10/D11 work, not a
+one-off note. Everything below was verified against the 4.7.1 tree.*
+
+**The rule.** A standard MAVLink GCS (Mission Planner, QGC) must keep full control of the
+gimbal and camera. KGCS gets as much of the TC2/TM2 function set as the payload allows.
+Where the two cannot both be served by one mechanism, **the standard path wins** and the
+KGCS-specific behaviour moves into the KGCS adapter (`AP_Q30`), never into a shared library.
+
+**Why this already holds, with the mechanism in each case:**
+
+| Mechanism | Why a standard GCS is unaffected |
+|---|---|
+| `AP_Q30` is passive | Its only entry point is `handle_gcs_flcc_cam_cmd()`, reached solely by msg 50002 (TC2). It registers no scheduler task, timer or thread; its constructor only sets `_singleton`. Standard `GIMBAL_MANAGER_*` and `MAV_CMD_SET_CAMERA_*` never enter it |
+| msg 285 suppression is opt-in (D8a) | Only Viewpro returns true from `suppress_gimbal_device_attitude_status()`. Every other gimbal keeps standard `GIMBAL_DEVICE_ATTITUDE_STATUS`. V5.0.8 suppressed it for *all* gimbals - already corrected in step 5 |
+| `AP_Q30_ENABLED` (D13) | The entire KGCS camera path can be compiled out while keeping the mount |
+| Direct GCS-to-payload routing | The answer for every function with no FC path. Inherently compatible: no FC code is added, and MP can use the identical mechanism |
+| D10 Stage 1 | Reporting only - return checks and honest zoom. No behaviour change on any path |
+| TM2 / TM5 broadcast | `gcs().send_message()` reaches every channel, but MP ignores unknown msgids |
+
+**The one known violation: pitch reversal - RESOLVED 2026-10-12.** `pitch_target_is_reversed()`
+lived in `AP_Mount_Backend`, so it applied to **every** angle source, not just KGCS:
+
+| Caller | Reaches `AP_Mount_Backend::set_angle_target()` |
+|---|:--:|
+| `AP_Q30.cpp:80` - KGCS TC2 | yes |
+| `AP_Mount.cpp:407` - `MAV_CMD_DO_GIMBAL_MANAGER_PITCHYAW` | yes |
+| `AP_Mount.cpp:485` - `GIMBAL_MANAGER_SET_ATTITUDE` | yes |
+| `AP_Mount.cpp:530` - `GIMBAL_MANAGER_SET_PITCHYAW` | yes |
+| `AP_Mission_Commands.cpp:336`, `mode_auto.cpp:2046` - AUTO missions | yes |
+
+So on Viewpro, Mission Planner and AUTO missions got **inverted pitch**, and on a Gremsy it
+would have been internally inconsistent as well, because the base class returns false while
+`AP_Q30::send_cmd_speed()` negates at the call site regardless of backend:
+
+| | KGCS | Mission Planner / AUTO |
+|---|---|---|
+| Before, Viewpro | image convention | **inverted** |
+| Before, Gremsy | angle physical, rate image - **inconsistent** | correct |
+| **After (any gimbal)** | image convention on all three paths | physical, standard |
+
+*The fix direction followed from the rule, and it was the opposite of the obvious one:* do
+**not** make Gremsy reverse pitch to match Viewpro - that would have broken MP on Gremsy.
+The negation moved out of `AP_Mount_Backend::set_angle_target()` and into `AP_Q30`, beside
+the rate path that already did it. The `pitch_target_is_reversed()` hook was removed
+entirely - `AP_Mount_Backend` now carries no PNU-specific pitch logic.
+
+**Applied 2026-10-12**, on PNU confirmation that nobody flies Viewpro from MP or in AUTO.
+Five files: `AP_Mount_Backend.{h,cpp}` (hook and flip removed), `AP_Mount_Viewpro.h`
+(override removed), `AP_Q30.cpp` (negates at the call site), `GCS_PNU.cpp` (TM2 comment).
+Builds clean at 1,721,348 B, and with `HAL_MOUNT_ENABLED=0` at 1,653,164 B.
+
+> **`MNT1_PITCH_MIN` / `MNT1_PITCH_MAX` must be changed on the aircraft** - the parameters
+> are vehicle configuration, not source, so this commit does not and cannot do it.
+> **MIN -45 -> -90, MAX 90 -> 45.** The physical range is unchanged; the numbers are negated
+> and swapped because the constraint now sees the already-negated value. Flying with the old
+> pair clips KGCS pitch to 45 deg down and permits 90 deg up, past the mechanical stop. See
+> the pitch-reversal section above.
+
+**Bench test order when the hardware is next available:** (1) Viewpro + KGCS with the new
+parameters - pitch direction correct, full nadir and 45 deg up both reachable; (2) Viewpro +
+Mission Planner - `GIMBAL_MANAGER_SET_PITCHYAW` down now moves the gimbal down, where it
+previously moved up; (3) any AUTO mission with a gimbal pitch item, since this silently
+changes its behaviour. **Not yet bench-tested - no hardware was connected.**
+
+**Design rules for the remaining work:**
+
+1. KGCS-specific convention belongs in `AP_Q30`. Never in `AP_Mount`, `AP_Camera` or their
+   backends.
+2. If a shared library genuinely must behave differently, gate it on an **opt-in backend
+   capability** - the D8a `suppress_gimbal_device_attitude_status()` precedent - so every
+   other vehicle and gimbal keeps stock behaviour.
+3. A TC2 function with no FC path goes **KGCS to payload direct**, not into new FC code.
+   This is the most compatible option available and costs nothing to maintain.
+4. Check return values and report (D10 Stage 1) rather than diverging silently.
+5. Anything new on the wire must be additive and ignorable by a standard GCS.
+
+**Accepted, not fixed:** with both GCSs connected, gimbal commands are last-writer-wins.
+That is inherent to MAVLink, not a defect. MAVLink's own arbitration is
+`MAV_CMD_DO_GIMBAL_MANAGER_CONFIGURE` (primary/secondary control); adopt it only if
+simultaneous connection is a real operating case rather than a bench convenience.

@@ -76,7 +76,7 @@ void GCS_MAVLINK::send_message_gcs_flcc_cam_status() const
     if (mount->get_attitude_euler(0, roll, pitch, yaw)) {
         CAM_ATTITUDE_STATUS.Roll_REL_ANG = CAM_ATTITUDE_STATUS.Roll_IMU_ANG = roll * 10;
         // reverse the pitch angle to match the KGCS image convention, as
-        // AP_Mount_Backend::set_angle_target() does for the command direction
+        // AP_Q30::send_cmd_angle() and send_cmd_speed() do for the command direction
         CAM_ATTITUDE_STATUS.Pitch_REL_ANG = CAM_ATTITUDE_STATUS.Pitch_IMU_ANG = -pitch * 10;
         CAM_ATTITUDE_STATUS.Yaw_REL_ANG = CAM_ATTITUDE_STATUS.Yaw_IMU_ANG = yaw * 10;
     } else {

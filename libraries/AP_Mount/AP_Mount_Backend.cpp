@@ -183,10 +183,6 @@ void AP_Mount_Backend::set_angle_target(float roll_deg, float pitch_deg, float y
     // enforce angle limits
     roll_deg = constrain_float(roll_deg, _params.roll_angle_min, _params.roll_angle_max);
     pitch_deg = constrain_float(pitch_deg, _params.pitch_angle_min, _params.pitch_angle_max);
-    if (pitch_target_is_reversed()) {
-        // PNU : gimbals such as Viewpro take pitch with the opposite sign
-        pitch_deg = -pitch_deg;
-    }
     if (!yaw_is_earth_frame) {
         // only limit yaw if in body-frame.  earth-frame yaw limiting is backend specific
         // custom wrap code (instead of wrap_180) to better handle yaw of <= -180
@@ -214,12 +210,13 @@ void AP_Mount_Backend::set_angle_target(float roll_deg, float pitch_deg, float y
 
 // sets rate target in deg/s
 // yaw_lock should be true if the yaw rate is earth-frame, false if body-frame (e.g. rotates with body of vehicle)
-// PNU : this deliberately does NOT apply pitch_target_is_reversed(), unlike
-// set_angle_target() above.  The only KGCS caller, AP_Q30::send_cmd_speed(),
-// negates Pitch_Speed_CMD itself before calling here, so the operator already
-// sees the image convention on the rate path.  Adding the flip here would
-// double-negate it and invert KGCS gimbal pitch rate.  See README PNU-ISSUE
-// "Viewpro pitch reversal".
+// PNU : do NOT apply any pitch sign flip here, and none in set_angle_target()
+// above either.  The KGCS image convention is applied by the KGCS adapter at its
+// own call sites - AP_Q30::send_cmd_speed() and send_cmd_angle() - because this
+// function and set_angle_target() are shared with Mission Planner, QGC and AUTO
+// missions, which must keep the standard physical convention.  A flip here would
+// double-negate the KGCS rate path and invert gimbal pitch for everyone else.
+// See README "Dual-GCS compatibility strategy".
 void AP_Mount_Backend::set_rate_target(float roll_degs, float pitch_degs, float yaw_degs, bool yaw_is_earth_frame)
 {
     // set rate targets

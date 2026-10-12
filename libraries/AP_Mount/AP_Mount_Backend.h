@@ -369,12 +369,6 @@ protected:
     // returns true if mavlink heartbeat should be suppressed for this gimbal (only used by Solo gimbal)
     virtual bool suppress_heartbeat() const { return false; }
 
-    // PNU : Pitch control reversal for certain camera type
-    // returns true if this gimbal expects pitch angle targets with the opposite
-    // sign to ArduPilot's convention (ArduPilot: positive = up).  Angle limits
-    // are always applied in ArduPilot convention before the sign is flipped.
-    virtual bool pitch_target_is_reversed() const { return false; }
-
     // returns true if this gimbal should NOT emit GIMBAL_DEVICE_ATTITUDE_STATUS
     // (msg 285). Used where a ground station mis-handles it; the base default
     // keeps the standard MAVLink behaviour for every other gimbal. (PNU)

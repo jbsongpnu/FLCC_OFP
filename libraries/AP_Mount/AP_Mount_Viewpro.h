@@ -107,9 +107,6 @@ public:
     // PNU : Get zoom times
     bool get_zoom_times(uint8_t instance, float &zoom_times) override;
 
-    // PNU : Viewpro takes pitch angle targets with the opposite sign to ArduPilot
-    bool pitch_target_is_reversed() const override { return true; }
-
     // KGCS mis-handles GIMBAL_DEVICE_ATTITUDE_STATUS (msg 285); it reads gimbal
     // attitude from TM2 instead, so suppress 285 for this backend only (PNU)
     bool suppress_gimbal_device_attitude_status() const override { return true; }

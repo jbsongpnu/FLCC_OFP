@@ -77,7 +77,15 @@ void AP_Q30::send_cmd_angle(mavlink_sys_icd_gcs_flcc_cam_cmd_t cmd)
         return;
     }
 
-    mount->set_angle_target(0, cmd.Roll_Angle_CMD, cmd.Pitch_Angle_CMD, cmd.Yaw_Angle_CMD, 0);
+    // PNU : negate pitch HERE, not in AP_Mount_Backend::set_angle_target().  That
+    // function is shared with Mission Planner, QGC and AUTO missions, which must keep
+    // the standard physical convention; only KGCS wants the image convention.  This
+    // matches send_cmd_speed(), which has always negated at the call site.
+    // NOTE: set_angle_target() constrains BEFORE this value reaches the gimbal, so
+    // MNT1_PITCH_MIN/MAX are now in physical convention - MIN = -(degrees of down
+    // travel), MAX = +(degrees of up travel).  See README "Dual-GCS compatibility
+    // strategy" for the parameter values this requires.
+    mount->set_angle_target(0, cmd.Roll_Angle_CMD, -cmd.Pitch_Angle_CMD, cmd.Yaw_Angle_CMD, 0);
     
 }
 
