@@ -7,25 +7,28 @@
 #include "ap_version.h"
 
 // PNU : This is a custom code modified by PNU Drone
-#define THISFIRMWARE "PNU_OFP V5.1.4"
+#define THISFIRMWARE "PNU_OFP V5.1.5"
 
-// NOTE: 5.1.4 is a DEV build on top of the 5.1.0 OFFICIAL release, which closed the
-// Copter-4.7.1 -> FLCC migration.  It is the first version validated against real Gremsy
-// VIO hardware, and carries one fix found there: AP_Camera_MAVLinkCamV2 printed the
-// "Camera: ..." statustext on every CAMERA_INFORMATION received, and the VIO broadcasts
-// that message unsolicited - so it spammed one statustext per broadcast to every link.
-// Now printed once.  This is an upstream defect and should be submitted to ArduPilot
-// rather than carried as another permanent divergence.
+// NOTE: 5.1.5 is a DEV build on top of the 5.1.0 OFFICIAL release, which closed the
+// Copter-4.7.1 -> FLCC migration.  It closes D10 Stage 2b by NOT implementing it in the
+// flight controller: AP_Q30 now sends an absolute zoom only to a Viewpro, which reads
+// ZoomType::PCT as zoom times.  On any other mount it stays silent and says so once,
+// because ZOOM_TYPE_RANGE is a percentage of a mode-dependent range (240x combine / 30x
+// super-resolution on a Gremsy VIO) selected by an extended parameter the FC cannot read -
+// ArduPilot implements no PARAM_EXT_*.  KGCS drives absolute zoom directly with
+// MAV_CMD_USER_4 "zoom to level" in times.  A rate-pulse fallback was rejected: it would
+// fight the command KGCS is sending.
 //
-// Bench results recorded in README: Stage 2a validated with no code change, both
-// ACTION ON PNU identity questions answered, HAS_BASIC_ZOOM proven, and a Gremsy firmware
-// defect found - the yaw fields of GIMBAL_DEVICE_INFORMATION are sent in degrees where
-// msg 283 specifies radians, which gives MNT1_YAW_MAX a default of 18334.
+// The FC-side work on D10 is now essentially complete.  What remains is KGCS
+// implementation against mappings that are all documented in README and in
+// VIO_MAVLink_Messages.md, plus the Stage 3 decision on where TM2 gets its zoom value.
 //
-// Carried forward from 5.1.1 to 5.1.3: D10 Stage 1 (no fabricated camera values, every
+// Carried forward from 5.1.1 to 5.1.4: D10 Stage 1 (no fabricated camera values, every
 // declined camera command reported), the Gremsy VIO protocol analysis, the dual-GCS
-// compatibility strategy, the KGCS pitch reversal relocated into AP_Q30, and D10 Stage 2a
-// (camera calls routed through AP::camera(), CAM1_TYPE selecting the destination).
+// compatibility strategy, the KGCS pitch reversal relocated into AP_Q30, D10 Stage 2a
+// (camera calls routed through AP::camera(), CAM1_TYPE selecting the destination), and
+// the Gremsy hardware validation - including a one-shot guard on the "Camera: ..."
+// statustext, an upstream defect worth submitting to ArduPilot.
 //
 // REQUIRES these settings on the aircraft, which the firmware cannot do itself:
 //   - MNT1_PITCH_MIN / MNT1_PITCH_MAX in PHYSICAL convention since 5.1.2.  Viewpro
@@ -47,11 +50,11 @@
 // must stay in step with the three defines below (static_assert in Copter.cpp, D4).
 
 // the following line is parsed by the autotest scripts
-#define FIRMWARE_VERSION 5,1,4,FIRMWARE_VERSION_TYPE_DEV
+#define FIRMWARE_VERSION 5,1,5,FIRMWARE_VERSION_TYPE_DEV
 
 #define FW_MAJOR 5
 #define FW_MINOR 1
-#define FW_PATCH 4
+#define FW_PATCH 5
 #define FW_TYPE FIRMWARE_VERSION_TYPE_DEV
 
 #include <AP_Common/AP_FWVersionDefine.h>

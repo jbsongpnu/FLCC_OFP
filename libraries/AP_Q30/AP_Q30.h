@@ -119,6 +119,14 @@ private:
     // feature is compiled out, which the caller reports as an unsupported command.
     bool set_video_source(AP_Camera::CameraSource primary, AP_Camera::CameraSource secondary);
 
+    // PNU-ISSUE(D10) : true when ZoomType::PCT reaches a destination that reads it as zoom
+    // TIMES rather than the MAVLink 0-100 % contract.  Only AP_Mount_Viewpro does, through a
+    // local modification to its set_zoom().  Everywhere else the FC must not send an
+    // absolute zoom at all - see the Stage 2b note in AP_Q30.cpp.
+    bool fc_handles_absolute_zoom() const;
+
+    bool _abs_zoom_delegated_reported = false;  // one-shot note that absolute zoom is KGCS-direct
+
     uint32_t _cam_unsupported_cnt = 0;      // total camera commands the mount declined
     uint32_t _cam_unsupported_last_ms = 0;  // system time the last report was sent
 

@@ -1,7 +1,14 @@
 # PNU-KAL FLCC OFP Development Version
 - This branch currently developing PNU-KAL FLCC OFP after official version (TAG) PNU-KAL-FLCC-5.1.0 (this is same code as 5.0.15 dev)  
 - PNU-ISSUE 10 & 11 still remains : For Gremsy camera and general camera mount library structure  
-- IN THIS VERSION : V5.1.4 working with issues 10 and 11 - **first version validated against real Gremsy VIO hardware**  
+- IN THIS VERSION : V5.1.5 working with issues 10 and 11 - **D10 Stage 2b closed; the FC-side work on D10 is essentially complete**  
+   - **Stage 2b is closed by NOT implementing it in the FC.** `AP_Q30` sends an absolute zoom only to a Viewpro, which reads `ZoomType::PCT` as zoom times. On any other mount it stays silent and says so once per boot  
+   - Reason : `ZOOM_TYPE_RANGE` is a percentage of a **mode-dependent** range - 240x combine / 30x super-resolution on a Gremsy VIO, selected by an extended parameter **the FC cannot read**, since ArduPilot implements no `PARAM_EXT_*`. KGCS drives absolute zoom directly with `MAV_CMD_USER_4` "zoom to level", in times  
+   - A rate-pulse fallback was **rejected** : it would fight the command KGCS is sending. Two sources commanding one camera is worse than one source doing less  
+   - **`VIO_MAVLink_Messages.md`** was added to this folder - the message reference extracted from Gremsy PayloadSDK 3.2.0 source. It answers both Stage 2b and Stage 3, and supplies the `C_SOURCE`, `C_T_PALETTE` and tracking mappings the KGCS-direct work needs  
+   - What remains is **KGCS implementation**, against mappings that are all documented, plus the Stage 3 decision on where TM2 gets its zoom value  
+- For 5.1.4 version :  
+   - **First version validated against real Gremsy VIO hardware**  
    - **D10 Stage 2a validated on hardware with no code change** : with the VIO's camera component set to 100 and `CAM1_TYPE=6`, ArduPilot finds the camera and zoom works through Mission Planner  
    - **Both remaining ACTION ON PNU questions are now ANSWERED** : gimbal `GREMSY`/`VIO` fw 7.8.7.0, camera `Gremsy`/`Vio Payload G1` fw 18.4.1.3, and `CAMERA_CAP_FLAGS_HAS_BASIC_ZOOM` is proven by zoom reaching the camera at all  
    - **Fixed an upstream defect found on the bench** : the `"Camera: ..."` statustext was printed on every `CAMERA_INFORMATION`, and the VIO broadcasts that message unsolicited, so it spammed one statustext per broadcast to every link. Now printed once. Worth submitting to ArduPilot rather than carried as a divergence  
@@ -581,6 +588,33 @@ MAVLink has no message that reports zoom range. Decide it with the VIO on the be
 rests on `CAM1_TYPE=4` routing back into the identical code, which is a reasoning claim until
 someone drives a gimbal with it.
 
+**Stage 2b as closed, 2026-10-13 - the FC stops sending absolute zoom off a Viewpro.**
+
+`AP_Q30::fc_handles_absolute_zoom()` returns true only when `AP::mount()->get_mount_type(0)`
+is `Type::Viewpro`, which is the one backend whose `set_zoom()` reads `ZoomType::PCT` as zoom
+**times** rather than the MAVLink 0-100 % contract. The `Tracking_CMD` 21-24 EO branch sends
+its absolute zoom only in that case.
+
+Anywhere else the FC sends **nothing** and notes once per boot:
+`CAM: absolute zoom is KGCS-direct on this mount`. One-shot and `MAV_SEVERITY_INFO` on
+purpose - this is designed behaviour, not a failure, so it must not read like the Stage 1
+`CAM: mount rejected ...` warnings.
+
+*Why silence rather than a degraded fallback:* a rate pulse here would **fight** the
+`USER_4` zoom-to-level command KGCS is sending directly. Two sources commanding the same
+camera is worse than one source doing less.
+
+`EO_zoom_times` keeps counting on both paths, so the cached value stays meaningful if the
+mount changes. The IR branch is untouched - it sends `ZoomType::RATE`, which is continuous and
+correct on every payload.
+
+The predicate is wrapped in `#if HAL_MOUNT_VIEWPRO_ENABLED`, since `AP_Mount::Type::Viewpro`
+only exists inside that guard; it returns false when Viewpro is compiled out. Verified by
+building with `--define HAL_MOUNT_VIEWPRO_ENABLED=0` at 1,717,140 B.
+
+*Verified:* `./waf copter` clean, zero warnings, **1,721,712 B**. The `HAL_MOUNT_ENABLED=0`
+invariant still holds at 1,653,168 B. **Not bench-tested.**
+
 **PNU-ISSUE D11 details** - capability gap behind D10. Resume with Gremsy hardware.
 
 D10 is *where* `AP_Q30` sends camera calls. D11 is *what the destination can actually do*.
@@ -739,7 +773,7 @@ If it shows deletions, apply targeted edits only.
 | `libraries/AP_Q30/AP_Q30_config.h` | PNU-only file - the `AP_Q30_ENABLED` flag (D13), which also requires `AP_CAMERA_ENABLED` since Stage 2a |
 | `libraries/AP_Camera/AP_Camera_MAVLinkCamV2.cpp` | the one-shot guard on the `"Camera: ..."` statustext - an upstream defect found on the Gremsy bench, worth submitting upstream rather than keeping |
 | `Tools/scripts/build_options.py` | the `Camera / Q30` build option (D13) |
-| `ArduCopter/version.h` | **5.1.4 DEV** and the release note describing what it carries, including the required aircraft settings |
+| `ArduCopter/version.h` | **5.1.5 DEV** and the release note describing what it carries |
 | `README.md` | this file - never taken from the snapshot |
 
 Most other deviations are KAL -> PNU / PNU-KAL comment renames, which are cosmetic but still
@@ -753,7 +787,7 @@ make a wholesale copy a regression.
 | 4 `pmucan_*.hpp` deleted (1163 lines) | vendored libuavcan v0; only 3 constants were used, all identical in `AP_HAL::CANFrame` / `CANIface` |
 | Mount task kept at 50 Hz | `AP_Mount_Viewpro::update()` self-throttles to 100 ms, so gimbal traffic is 10 Hz either way; at a 10 Hz task rate the period *equals* the throttle and late ticks cause 5 Hz bursts. See D8 |
 | msg 285 suppression made opt-in | V5.0.8 suppressed it for every gimbal, not just Viewpro. See D8 |
-| `version.h` is **5.1.4 DEV** | 5.1.0 OFFICIAL closed the migration; the 5.1.x DEV series carries the post-release D10 work - Stage 1 in 5.1.1, the Gremsy analysis and pitch relocation in 5.1.2, Stage 2a routing in 5.1.3, Gremsy hardware validation in 5.1.4 - and goes OFFICIAL when D10/D11 land |
+| `version.h` is **5.1.5 DEV** | 5.1.0 OFFICIAL closed the migration; the 5.1.x DEV series carries the post-release D10 work - Stage 1 in 5.1.1, the Gremsy analysis and pitch relocation in 5.1.2, Stage 2a routing in 5.1.3, Gremsy hardware validation in 5.1.4, Stage 2b closure in 5.1.5 - and goes OFFICIAL when D10/D11 land |
 | `GCS.h` dead CAM macros removed, `OFP_VER_*` tracked against `version.h` | were stale/unused; guarded by `static_assert` in `Copter.cpp` |
 | `AP_PMUCAN` fixes | dropped-frame at RX budget, dead branch, `&`->`&&`, `RXdrain()` extraction, named constants, ctor init, `TXspin` void. See git log |
 | `send_proximity()` upward-distance block **not** commented out | V5.0.8 wrapped it in `/* Currently, no upward sensor */`. `AP_Proximity::get_upward_distance()` already returns false when no backend supplies one (`AP_Proximity.cpp:498`), and TeraRanger Tower Evo is not one of the backends that does - so the comment-out is a no-op here and a silent regression for `AP_Proximity_RangeFinder` / `_MAV` / scripting users. Not applied |
@@ -836,9 +870,9 @@ What is left on D10/D11, in order:
 | | Work | Blocked on |
 |:--:|---|---|
 | Stage 2a | **DONE 2026-10-12** - the 6 camera functions route through `AP::camera()`; `CAM1_TYPE` selects the destination. Behaviour-neutral on Viewpro | - |
-| Stage 2b | The `EO_zoom_times` units conversion, which only bites at `CAM1_TYPE=6`. Needs the VIO's maximum zoom, which MAVLink cannot report | **one test**: does the VIO accept `ZOOM_TYPE_RANGE`? MP's buttons only prove `ZOOM_TYPE_CONTINUOUS` |
-| Stage 3 | `get_zoom_times` only - needs `CAMERA_SETTINGS` msg 260 decoding (**check ArduPilot master first**), and even then `zoomLevel` is a percentage, not times, so it needs a per-model max-zoom constant. `IR_Color_Change` is **no longer in this stage** - it is KGCS-direct. **May close with no ArduPilot change** if the VIO exposes zoom level as a `PARAM_EXT` parameter | **one test**: does the VIO emit `CAMERA_SETTINGS` with a real `zoomLevel` rather than NaN? |
-| KGCS side | EO/IR source, IR palette and object tracking move to KGCS-to-VIO direct routing. No FC code. Requires `MAVn_OPTIONS` bit 1 (`NO_FORWARD`) clear on the link | PNU/KGCS work, not this repo |
+| Stage 2b | **CLOSED 2026-10-13 by not implementing it in the FC.** `AP_Q30` now sends an absolute zoom only to a Viewpro; on any other mount it stays silent and KGCS drives zoom directly with `USER_4` "zoom to level". See "Gremsy PayloadSDK message reference" | - |
+| Stage 3 | **May close with no ArduPilot change.** `CAMERA_SETTINGS` (260) *is* emitted with `zoomLevel`, so decoding it would work - but the VIO also streams `EO_ZOOM` as telemetry index 0, in times rather than percent, which is what TM2 actually needs. If KGCS reads that directly, TM2's zoom gap stops mattering | a PNU decision, not information |
+| KGCS side | EO/IR source (`C_SOURCE`), IR palette (`C_T_PALETTE`), object tracking (`USER_4` to the payload app) and **absolute zoom (`USER_4` zoom-to-level, decided 2026-10-13)** move to KGCS-to-VIO direct routing. No FC code. **All the mappings are now known** - see "Gremsy PayloadSDK message reference". Requires `MAVn_OPTIONS` bit 1 (`NO_FORWARD`) clear on the link | PNU/KGCS work, not this repo |
 
 Residuals recorded against resolved issues: D1 (is the prelude needed at all?), D6 (the PMU
 counters are still write-only), D7 (accepted interlock residuals), D12 (confirm the 10 m /
@@ -928,6 +962,12 @@ ArduPilot's camera backend includes set_zoom() and set_focus(). Gremsy-specific 
    - Extended parameters: PARAM_EXT_REQUEST_LIST, PARAM_EXT_REQUEST_READ, PARAM_EXT_VALUE, PARAM_EXT_SET, PARAM_EXT_ACK.
    - Gremsy parameter examples: C_SOURCE, C_V_REC, C_T_PALETTE, C_V_AE, GB_MODE.
 - Gremsy's examples commonly target camera component 101, but the actual ID is configurable. These payload parameters belong to VIO, not to ArduPilot's parameter database.
+
+> **A fuller message reference extracted from Gremsy PayloadSDK 3.2.0 source lives in
+> `VIO_MAVLink_Messages.md` in this folder**, with the conclusions drawn from it recorded
+> below under "Gremsy PayloadSDK message reference". It supersedes the summary above where
+> the two differ, and notes that the VIO addresses **three** components - camera, gimbal and
+> a payload app on comp 26 that carries tracking, absolute zoom and several other functions.
 
 ---
 
@@ -1113,12 +1153,9 @@ convention stays confined to `AP_Q30`. Until this session that was a reasoning c
 button is held so it never trips; KGCS must likewise keep sending TC2 while a rate is
 commanded, which it does. Confirmed to behave the same on a Gremsy as on a Viewpro.
 
-**Still unproven, and still what Stage 2b and Stage 3 turn on:**
-
-- Mission Planner's zoom buttons almost certainly send `ZOOM_TYPE_CONTINUOUS`. **Whether the
-  VIO accepts `ZOOM_TYPE_RANGE` (absolute) is still unknown** - that is the Stage 2b question.
-- Whether `CAMERA_SETTINGS` (msg 260) is emitted with a real `zoomLevel` rather than NaN -
-  that is the Stage 3 question.
+**Both Stage 2b and Stage 3 questions were answered 2026-10-13 from the Gremsy PayloadSDK -
+see the next section.** Mission Planner's buttons only exercised `ZOOM_TYPE_CONTINUOUS`; the
+SDK reference settles the rest.
 
 **Gremsy firmware defect - the yaw fields of `GIMBAL_DEVICE_INFORMATION` are in degrees.**
 `MNT1_YAW_MAX` took a default of **18334**, which is `degrees(320)`. Msg 283 specifies
@@ -1165,6 +1202,123 @@ was one statustext per broadcast on every connected link.
 Fixed by reading `_got_camera_info` before printing, so the message appears once. This is a
 genuine upstream bug, small and self-contained, and **worth submitting to ArduPilot** rather
 than carried as another permanent divergence - see D5 for why divergence is expensive here.
+
+---
+
+**Gremsy PayloadSDK message reference - 2026-10-13. Closes Stage 2b and Stage 3.**
+
+`VIO_MAVLink_Messages.md` in this folder is a condensed reference extracted from Gremsy
+PayloadSDK 3.2.0 source (`libs/payloadSdkInterface.cpp`, `libs/payload-define/vio_sdk.h`,
+`examples/`). It is the message list the VIO actually implements, and it overrides Gremsy's
+own `Mavlink_Command_List_v2.0.0.pdf` where the two differ. **Taken as given - it has not been
+verified against a running payload beyond the bench results above.**
+
+**The VIO addresses three components, not two.** This matters because much of what KGCS needs
+is not on the camera at all:
+
+| | Component | Default |
+|---|---|---|
+| **C** camera | 100-105 | **101** |
+| **G** gimbal | 154 or 171-175 | 154 |
+| **P** payload app | 26 (`USER2`) | fixed |
+
+**Stage 2b - ANSWERED. `ZOOM_TYPE_RANGE` is supported**, along with the other two:
+`SET_CAMERA_ZOOM 531`, `p1` type 0 step / 1 continuous / 2 range, `p2` = -1 out / 0 stop /
+1 in for step and continuous, 0-100 % for range.
+
+**But absolute zoom through ArduPilot is still the wrong answer**, for a reason the bench
+could not have shown. `ZOOM_TYPE_RANGE` is a percentage of the camera's *full* range, and that
+range is **mode-dependent**:
+
+| `C_V_ZM_MODE` | Maximum |
+|---|---|
+| 0 combine | **240x** (`C_V_ZM_CB_LV` idx 0-21) |
+| 2 super-resolution | **30x** (`C_V_ZM_SR_LV` idx 0-11) |
+
+So converting `EO_zoom_times` to a percentage needs a divisor of 240 or 30 depending on a
+`PARAM_EXT` value **ArduPilot cannot read**, since it implements no `PARAM_EXT_*` at all. At
+100 % in combine mode the camera would go to 240x, not the 30x the operator asked for.
+(Incidentally `_Max_zoom_EO = 30` matches the SR-mode maximum exactly, which suggests that
+constant never described this camera.)
+
+**There is a clean absolute-zoom path, and it is not on the camera:**
+
+```
+Zoom to level -> P (comp 26) : MAV_CMD_USER_4 31013, p1=2, p2=0, p3=4, p4 = zoom x (e.g. 13.5)
+```
+
+Absolute zoom **in times**, no percentage, no divisor, no mode dependency - exactly what TC2
+`Tracking_CMD` 21-24 wants. Being `USER_4` to the payload app, ArduPilot has no route to it.
+
+> **DECIDED 2026-10-13: absolute zoom moves to KGCS-direct**, alongside palette, source and
+> tracking. ArduPilot handles continuous zoom only, which already works and needs no units
+> conversion. The alternative - a mode-dependent percentage conversion in `AP_Q30` against a
+> parameter the FC cannot read - would have been wrong whenever the operator changed zoom
+> mode. **Stage 2b is closed by not implementing it.** See the implementation note below.
+
+**Stage 3 - ANSWERED. `CAMERA_SETTINGS` (260) is emitted** with `mode_id`, `zoomLevel` and
+`focusLevel`, and can be requested with `REQUEST_CAMERA_SETTINGS 522`. So decoding msg 260
+would work.
+
+**But again there is a better source outside ArduPilot:** telemetry index **0 = `EO_ZOOM`**
+(and 1 = `IR_ZOOM`), streamed as a float via `SET_MESSAGE_INTERVAL` and delivered in
+`PARAM_VALUE` (22) or `DEBUG` (254). Almost certainly zoom *times* rather than the percentage
+`CAMERA_SETTINGS.zoomLevel` carries - which is what TM2's `Zoom_POS_FB` actually needs. If
+KGCS reads that directly, **TM2's zoom gap stops mattering and Stage 3 closes with no
+ArduPilot change at all.**
+
+**Three mappings the KGCS-direct work needs, now known:**
+
+TC2 video source maps 1:1 onto `C_SOURCE` (`PARAM_EXT_SET`, uint32 in bytes 0-3, **binary not
+ASCII**):
+
+| TC2 `Tracking_CMD` | `C_SOURCE` |
+|:--:|---|
+| 10 EO full + IR PIP | **0** (EO+IR) |
+| 11 IR full | **2** (IR) |
+| 12 IR full + EO PIP | **3** (IR+EO) |
+| 13 EO full | **1** (EO) |
+
+IR palette is `C_T_PALETTE` 0-9, named: WhiteHot, BlackHot, Rainbow, RainbowHC, Ironbow, Lava,
+Arctic, Globow, Gradedfire, Hottest. TC2 has six codes (14-19), so there is room to map them
+properly instead of the current Viewpro workaround where Colors 3 and 4 fall back to
+WhiteHot/BlackHot.
+
+**Tracking is on P via `USER_4`** (`p1=4, p2=0, p3=0, p4` 0 stop / 1 active / 2 EagleEyes;
+target rectangle with `p3=1`), **not** `MAV_CMD_CAMERA_TRACK_POINT` on the camera. That
+settles the tracking question definitively: no ArduPilot path exists, and none could without
+vendor-specific code. It also requires `C_SOURCE=1` and `TRACK_MODE=0` first.
+
+**`CAMERA_CAP_FLAGS` - expected `0x1C7`, and every ArduPilot gate passes.** The reference
+gives the expected value as `0x1C7` = 455, which decodes to:
+
+| Bit | Flag | Gates, in `AP_Camera_MAVLinkCamV2` |
+|:--:|---|---|
+| 1 | `CAPTURE_VIDEO` | `record_video()` - **passes** |
+| 2 | `CAPTURE_IMAGE` | `trigger_pic()` - **passes** |
+| 4 | `HAS_MODES` | `MAV_CMD_SET_CAMERA_MODE`, which ArduPilot never sends - unreachable from the FC either way |
+| 64 | `HAS_BASIC_ZOOM` | `set_zoom()` - **passes**, and independently proven on the bench |
+| 128 | `HAS_BASIC_FOCUS` | `set_focus()` - **passes** |
+| 256 | `HAS_VIDEO_STREAM` | not used by ArduPilot; the SDK checks it before requesting the RTSP URI |
+
+So **all four camera functions ArduPilot can reach are enabled** and nothing is gated off.
+The tracking bits (512 / 1024) are expected to be clear, which is consistent with VIO tracking
+living on `USER_4` to the payload app rather than the standard tracking commands - and moot
+regardless, since `AP_Camera_MAVLinkCamV2` implements no `set_tracking()`.
+
+**This value is unverified** - the reference says so explicitly, and it should be read off the
+device. It is one line in Mission Planner's MAVLink Inspector: the `flags` field of
+`CAMERA_INFORMATION` from the camera component.
+
+**Still unknown, not blocking:** whether `CAMERA_SETTINGS.zoomLevel` holds a percentage (per
+the MAVLink spec) or times (a vendor deviation). Moot if KGCS reads `EO_ZOOM` telemetry
+instead.
+
+**Also worth knowing from the reference:** focus supports only continuous (`p1=1`) and auto
+(`p1=4`) - no range - which matches what ArduPilot sends for `FocusType::RATE`. The gimbal
+mode flags carry a Gremsy extension `0x4000` for mapping mode. `DO_MOUNT_CONTROL 205` is
+listed as legacy v1. A laser rangefinder reports through `DISTANCE_SENSOR` (132), for which
+TC2/TM2 have no field.
 
 ---
 

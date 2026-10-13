@@ -69,6 +69,19 @@ void AP_Q30::report_cam_unsupported(const char *what)
 }
 
 // -------------------------------------------------------------------------
+// PNU-ISSUE(D10) : may the FC send an absolute zoom, or is it KGCS-direct?
+// -------------------------------------------------------------------------
+bool AP_Q30::fc_handles_absolute_zoom() const
+{
+#if HAL_MOUNT_VIEWPRO_ENABLED
+    const AP_Mount *mount = AP::mount();
+    return (mount != nullptr) && (mount->get_mount_type(0) == AP_Mount::Type::Viewpro);
+#else
+    return false;
+#endif
+}
+
+// -------------------------------------------------------------------------
 // PNU-ISSUE(D10) : select the EO/IR video source, guarded for builds without it
 // -------------------------------------------------------------------------
 bool AP_Q30::set_video_source(AP_Camera::CameraSource primary, AP_Camera::CameraSource secondary)
@@ -480,8 +493,25 @@ void AP_Q30::IR_operation(mavlink_sys_icd_gcs_flcc_cam_cmd_t cam_cmd)
             {
                 EO_zoom_times = 1;
             }
-            if (!camera->set_zoom(0, ZoomType::PCT, EO_zoom_times)) {
-                report_cam_unsupported("zoom level");
+            // PNU-ISSUE(D10) Stage 2b : absolute zoom is sent from here ONLY to a Viewpro,
+            // which reads ZoomType::PCT as zoom times.  Anywhere else PCT becomes
+            // ZOOM_TYPE_RANGE, a percentage of the camera's full range - and on a Gremsy VIO
+            // that range is mode-dependent (240x combine / 30x super-resolution, selected by
+            // the C_V_ZM_MODE extended parameter), which the FC cannot read because ArduPilot
+            // implements no PARAM_EXT_*.  Sending 1..30 there would be read as 1-30 %, i.e.
+            // zoomed out.  KGCS drives absolute zoom directly instead, with MAV_CMD_USER_4
+            // "zoom to level" in times, so the FC must stay out of it entirely - a rate pulse
+            // here would fight the command KGCS is sending.  See README "Gremsy PayloadSDK
+            // message reference".  EO_zoom_times keeps counting either way so the cached
+            // value stays meaningful if the mount changes.
+            if (fc_handles_absolute_zoom()) {
+                if (!camera->set_zoom(0, ZoomType::PCT, EO_zoom_times)) {
+                    report_cam_unsupported("zoom level");
+                }
+            } else if (!_abs_zoom_delegated_reported) {
+                // say it once: this is designed behaviour, not a failure
+                _abs_zoom_delegated_reported = true;
+                GCS_SEND_TEXT(MAV_SEVERITY_INFO, "CAM: absolute zoom is KGCS-direct on this mount");
             }
             prev_EO_zoom_cmd = cam_cmd.Tracking_CMD;
         } else if (_primary_EOIR_source == 2) { //This case will lead to zoom IR
