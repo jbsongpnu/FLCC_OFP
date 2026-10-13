@@ -1,7 +1,15 @@
 # PNU-KAL FLCC OFP Development Version
 - This branch currently developing PNU-KAL FLCC OFP after official version (TAG) PNU-KAL-FLCC-5.1.0 (this is same code as 5.0.15 dev)  
 - PNU-ISSUE 10 & 11 still remains : For Gremsy camera and general camera mount library structure  
-- IN THIS VERSION : V5.1.3 working with issues 10 and 11 - **D10 Stage 2a applied : camera calls routed through `AP::camera()`**  
+- IN THIS VERSION : V5.1.4 working with issues 10 and 11 - **first version validated against real Gremsy VIO hardware**  
+   - **D10 Stage 2a validated on hardware with no code change** : with the VIO's camera component set to 100 and `CAM1_TYPE=6`, ArduPilot finds the camera and zoom works through Mission Planner  
+   - **Both remaining ACTION ON PNU questions are now ANSWERED** : gimbal `GREMSY`/`VIO` fw 7.8.7.0, camera `Gremsy`/`Vio Payload G1` fw 18.4.1.3, and `CAMERA_CAP_FLAGS_HAS_BASIC_ZOOM` is proven by zoom reaching the camera at all  
+   - **Fixed an upstream defect found on the bench** : the `"Camera: ..."` statustext was printed on every `CAMERA_INFORMATION`, and the VIO broadcasts that message unsolicited, so it spammed one statustext per broadcast to every link. Now printed once. Worth submitting to ArduPilot rather than carried as a divergence  
+   - **Gremsy firmware defect recorded** : the yaw fields of `GIMBAL_DEVICE_INFORMATION` are sent in degrees where msg 283 specifies radians, giving `MNT1_YAW_MAX` a default of 18334 = `degrees(320)`. Roll and pitch are correct. Workaround is to set `MNT1_YAW_MIN`/`MAX` explicitly  
+   - **The dual-GCS compatibility strategy is now hardware-validated** : slew, Set Neutral, point-down and zoom all work from Mission Planner against a Gremsy while KGCS convention stays confined to `AP_Q30`  
+   - **Aircraft settings required** - see the release note in `ArduCopter/version.h` for the full list : pitch limits in physical convention, yaw limits set explicitly on a Gremsy, `CAM1_TYPE` 4 for Viewpro / 6 for Gremsy, and a Gremsy VIO's camera component set to 100 rather than its default 101  
+- For 5.1.3 version :  
+   - **D10 Stage 2a applied : camera calls routed through `AP::camera()`**  
    - The six camera functions (zoom, focus, record, picture, tracking, video source) now go through `AP::camera()` instead of `AP::mount()`, so **`CAM1_TYPE` selects the destination** - 4 (Mount) reaches a Viewpro exactly as before, 6 (MAVLinkCamV2) reaches a Gremsy camera component the mount cannot address at all  
    - It is **not** the dual-dispatch the earlier plan assumed : `AP_Camera_Mount` already forwards to `AP_Mount`, so one route serves both payloads. `get_zoom_times()` and `IR_Color_Change()` stay on `AP::mount()` - they have no `AP_Camera` equivalent  
    - **REQUIRES `CAM1_TYPE` to be correct (4 for Viewpro).** It is now load-bearing for the KGCS camera path, where before it only served a standard GCS. A wrong or zero value silently disables KGCS camera control  
@@ -631,8 +639,8 @@ bench session described above, not with code.
 > | Is there any thermal-palette / IR colour control at all, and over what protocol? | `IR_Color_Change` has no MAVLink standard. If Gremsy has no equivalent, KGCS must hide the IR colour buttons for this camera rather than send commands that do nothing. |
 > | Does the camera report `CAMERA_SETTINGS` (msg 260) with `zoomLevel`? | Decides whether `get_zoom_times` can be implemented at all, or whether TM2 must report zoom as unavailable. |
 > | Is the camera a separate MAVLink component ID from the gimbal? | Decides whether `AP_Camera` (`CAM1_TYPE=6`) can reach it, and what `AP_Q30` must address. |
-> | Which `CAMERA_CAP_FLAGS` does it advertise? | Tells us zoom / focus / video / tracking support without guessing. **Now the top remaining blocker** - these flags gate whether the command is transmitted at all. Readable on the bench, see "Gremsy integration mechanics". |
-> | Exact `vendor_name` / `model_name` strings per model | Needed to tell ZIO from VIO at runtime, per the `AP_Mount_MAVLink.h:51` precedent. **Lower priority than it looks** - `model_name` gates nothing; see "Gremsy integration mechanics". |
+> | Which `CAMERA_CAP_FLAGS` does it advertise? | **ANSWERED 2026-10-13** - `HAS_BASIC_ZOOM` proven by zoom working through Mission Planner. See "Gremsy VIO bench results". |
+> | Exact `vendor_name` / `model_name` strings per model | **ANSWERED 2026-10-13** - gimbal `GREMSY`/`VIO` fw 7.8.7.0, camera `Gremsy`/`Vio Payload G1` fw 18.4.1.3. `model_name` gates nothing anyway. |
 > | Is `set_camera_source` (EO / IR / PIP switching) supported, and how? | Four of `AP_Q30`'s calls; no MAVLink standard path. |
 >
 > Until this is delivered, D10 and D11 stay open and no Gremsy camera work should start.
@@ -729,8 +737,9 @@ If it shows deletions, apply targeted edits only.
 | `ArduCopter/AP_Arming_Copter.{h,cpp}` | `pmucan_checks()` prearm warning and the arm-time healthy latch (D9b) |
 | `libraries/GCS_MAVLink/GCS.h` | `OFP_VER_*`; the D3 dialect `#error` guard; the D12 `prev_prx_failed` latch; the D10 `prev_zoom_unavailable` latch; PNU handler declarations |
 | `libraries/AP_Q30/AP_Q30_config.h` | PNU-only file - the `AP_Q30_ENABLED` flag (D13), which also requires `AP_CAMERA_ENABLED` since Stage 2a |
+| `libraries/AP_Camera/AP_Camera_MAVLinkCamV2.cpp` | the one-shot guard on the `"Camera: ..."` statustext - an upstream defect found on the Gremsy bench, worth submitting upstream rather than keeping |
 | `Tools/scripts/build_options.py` | the `Camera / Q30` build option (D13) |
-| `ArduCopter/version.h` | **5.1.3 DEV** and the release note describing what it carries |
+| `ArduCopter/version.h` | **5.1.4 DEV** and the release note describing what it carries, including the required aircraft settings |
 | `README.md` | this file - never taken from the snapshot |
 
 Most other deviations are KAL -> PNU / PNU-KAL comment renames, which are cosmetic but still
@@ -744,7 +753,7 @@ make a wholesale copy a regression.
 | 4 `pmucan_*.hpp` deleted (1163 lines) | vendored libuavcan v0; only 3 constants were used, all identical in `AP_HAL::CANFrame` / `CANIface` |
 | Mount task kept at 50 Hz | `AP_Mount_Viewpro::update()` self-throttles to 100 ms, so gimbal traffic is 10 Hz either way; at a 10 Hz task rate the period *equals* the throttle and late ticks cause 5 Hz bursts. See D8 |
 | msg 285 suppression made opt-in | V5.0.8 suppressed it for every gimbal, not just Viewpro. See D8 |
-| `version.h` is **5.1.3 DEV** | 5.1.0 OFFICIAL closed the migration; the 5.1.x DEV series carries the post-release D10 work - Stage 1 in 5.1.1, the Gremsy analysis and pitch relocation in 5.1.2, Stage 2a routing in 5.1.3 - and goes OFFICIAL when D10/D11 land |
+| `version.h` is **5.1.4 DEV** | 5.1.0 OFFICIAL closed the migration; the 5.1.x DEV series carries the post-release D10 work - Stage 1 in 5.1.1, the Gremsy analysis and pitch relocation in 5.1.2, Stage 2a routing in 5.1.3, Gremsy hardware validation in 5.1.4 - and goes OFFICIAL when D10/D11 land |
 | `GCS.h` dead CAM macros removed, `OFP_VER_*` tracked against `version.h` | were stale/unused; guarded by `static_assert` in `Copter.cpp` |
 | `AP_PMUCAN` fixes | dropped-frame at RX budget, dead branch, `&`->`&&`, `RXdrain()` extraction, named constants, ctor init, `TXspin` void. See git log |
 | `send_proximity()` upward-distance block **not** commented out | V5.0.8 wrapped it in `/* Currently, no upward sensor */`. `AP_Proximity::get_upward_distance()` already returns false when no backend supplies one (`AP_Proximity.cpp:498`), and TeraRanger Tower Evo is not one of the backends that does - so the comment-out is a no-op here and a silent regression for `AP_Proximity_RangeFinder` / `_MAV` / scripting users. Not applied |
@@ -827,8 +836,8 @@ What is left on D10/D11, in order:
 | | Work | Blocked on |
 |:--:|---|---|
 | Stage 2a | **DONE 2026-10-12** - the 6 camera functions route through `AP::camera()`; `CAM1_TYPE` selects the destination. Behaviour-neutral on Viewpro | - |
-| Stage 2b | The `EO_zoom_times` units conversion, which only bites at `CAM1_TYPE=6`. Needs the VIO's maximum zoom, which MAVLink cannot report | a VIO on the bench |
-| Stage 3 | `get_zoom_times` only - needs `CAMERA_SETTINGS` msg 260 decoding (**check ArduPilot master first**), and even then `zoomLevel` is a percentage, not times, so it needs a per-model max-zoom constant. `IR_Color_Change` is **no longer in this stage** - it is KGCS-direct. **May close with no ArduPilot change** if the VIO exposes zoom level as a `PARAM_EXT` parameter | a VIO on the bench - see the checklist in "Gremsy integration mechanics" |
+| Stage 2b | The `EO_zoom_times` units conversion, which only bites at `CAM1_TYPE=6`. Needs the VIO's maximum zoom, which MAVLink cannot report | **one test**: does the VIO accept `ZOOM_TYPE_RANGE`? MP's buttons only prove `ZOOM_TYPE_CONTINUOUS` |
+| Stage 3 | `get_zoom_times` only - needs `CAMERA_SETTINGS` msg 260 decoding (**check ArduPilot master first**), and even then `zoomLevel` is a percentage, not times, so it needs a per-model max-zoom constant. `IR_Color_Change` is **no longer in this stage** - it is KGCS-direct. **May close with no ArduPilot change** if the VIO exposes zoom level as a `PARAM_EXT` parameter | **one test**: does the VIO emit `CAMERA_SETTINGS` with a real `zoomLevel` rather than NaN? |
 | KGCS side | EO/IR source, IR palette and object tracking move to KGCS-to-VIO direct routing. No FC code. Requires `MAVn_OPTIONS` bit 1 (`NO_FORWARD`) clear on the link | PNU/KGCS work, not this repo |
 
 Residuals recorded against resolved issues: D1 (is the prelude needed at all?), D6 (the PMU
@@ -1036,6 +1045,126 @@ closes with no ArduPilot change at all**.
 6. List the VIO's `PARAM_EXT` parameters and look for a zoom-level entry.
 
 Steps 1-3 answer the two remaining ACTION ON PNU questions. Steps 4-6 decide Stage 3.
+
+---
+
+**Gremsy VIO bench results - 2026-10-13. First real hardware.**
+
+*A Gremsy VIO was connected and driven from Mission Planner. This closes both remaining
+ACTION ON PNU questions and validates D10 Stage 2a on hardware.*
+
+**Identity - both ACTION ON PNU identity questions answered:**
+
+| Device | vendor / model | Firmware |
+|---|---|---|
+| Gimbal (`MNT1_TYPE=6`) | `GREMSY` / `VIO` | 7.8.7.0 |
+| Camera (`CAM1_TYPE=6`) | `Gremsy` / `Vio Payload G1` | 18.4.1.3 |
+
+The two firmware versions differ, confirming the gimbal and camera are genuinely separate
+devices rather than one unit answering on two component IDs.
+
+**Component ID: the VIO camera ships on 101, ArduPilot instance 0 looks for 100.**
+`find_camera()` uses `compid = MAV_COMP_ID_CAMERA + _instance`, so `CAM1_TYPE=6` searches for
+**100** while the VIO defaults to **101** - and the camera is simply never found, with no
+error beyond the absence of the `"Camera: ..."` statustext.
+
+**Resolved by setting the VIO's camera component to 100**, which its configuration allows.
+That needs **no firmware change** and is the recommended setup. The alternative - driving it
+as `CAM2_TYPE=6` (instance 1) - **would not work without code changes**, because all 17 of
+`AP_Q30`'s camera calls hardcode instance 0. If a future payload has a fixed component ID,
+that is the change required: an instance selector in `AP_Q30`.
+
+**Confirmed working with `CAM1_TYPE=6` and the camera on component 100:**
+
+| | Result |
+|---|---|
+| `CAMERA_INFORMATION` received, camera found | yes |
+| Zoom via Mission Planner's camera interface | **works** |
+| `CAMERA_CAP_FLAGS_HAS_BASIC_ZOOM` (bit 64) | **effectively proven** - `AP_Camera_MAVLinkCamV2::set_zoom()` returns false *before transmitting* when that flag is clear, so zoom reaching the camera means the flag is set |
+| Video streaming | separate from ArduPilot; works, and is not ArduPilot's concern |
+
+**D10 Stage 2a is validated on hardware with zero code changes.** The routing applied in
+5.1.3 reaches a real Gremsy camera through `AP::camera()`.
+
+**Gimbal control from Mission Planner's slew interface - all paths verified.**
+
+| Control | Result | Mechanism |
+|---|---|---|
+| Rate slew, roll / pitch / yaw | works; 1 deg/s moves very little, 10 deg/s as expected | `send_target_rates()` is a clean passthrough - rad/s straight into `GIMBAL_DEVICE_SET_ATTITUDE` angular velocity with `attitude = {NaN,NaN,NaN,NaN}`. No scaling, deadzone or quantisation anywhere in ArduPilot, so 1 deg/s really is 1 deg/s - about 0.5 deg per half-second press. **Not a defect** |
+| Set Neutral | moves to `MNT1_NEUTRAL_{X,Y,Z}` | **Converted by the base class, not native.** `AP_Mount_MAVLink::natively_supported_mount_target_types()` returns only `ANGLE \| RATE \| RETRACTED`, so `MountTargetType::NEUTRAL` falls to the conversion path, which reads `_params.neutral_angles` and calls `send_target_angles()`. The gimbal never sees a "neutral" command - only an angle |
+| Point down | pitch -90 deg | Confirms **physical convention** on the standard MAVLink path, and that `MNT1_PITCH_MIN = -90` permits full nadir on this gimbal - the constraint is `[-90, 15]` and -90 passes unclipped |
+
+*Two notes worth not rediscovering:*
+
+- **`NEUTRAL` being converted rather than native** is the same mechanism that handles ROI on
+  this gimbal. Someone changing `MNT1_NEUTRAL_*` and seeing it take effect will reasonably
+  assume the Gremsy implements neutral natively. It does not.
+- **Point-down does not test the 5.1.2 pitch relocation.** On a Gremsy
+  `pitch_target_is_reversed()` returned false from the base class even *before* the
+  relocation, so Mission Planner was always correct here. **The relocation's real test is
+  Viewpro + Mission Planner**, which is where pitch was inverted and should now be right.
+
+**The dual-GCS compatibility strategy is now validated on hardware.** Slew, neutral,
+point-down and zoom all work from Mission Planner against a Gremsy while the KGCS-specific
+convention stays confined to `AP_Q30`. Until this session that was a reasoning claim only.
+
+**Relevant to KGCS:** 4.7.x added a 3 s rate timeout (`mnt_target.last_rate_request_ms`,
+`AP_Mount_Backend.cpp:1192`) that zeroes all three rate axes. Mission Planner streams while a
+button is held so it never trips; KGCS must likewise keep sending TC2 while a rate is
+commanded, which it does. Confirmed to behave the same on a Gremsy as on a Viewpro.
+
+**Still unproven, and still what Stage 2b and Stage 3 turn on:**
+
+- Mission Planner's zoom buttons almost certainly send `ZOOM_TYPE_CONTINUOUS`. **Whether the
+  VIO accepts `ZOOM_TYPE_RANGE` (absolute) is still unknown** - that is the Stage 2b question.
+- Whether `CAMERA_SETTINGS` (msg 260) is emitted with a real `zoomLevel` rather than NaN -
+  that is the Stage 3 question.
+
+**Gremsy firmware defect - the yaw fields of `GIMBAL_DEVICE_INFORMATION` are in degrees.**
+`MNT1_YAW_MAX` took a default of **18334**, which is `degrees(320)`. Msg 283 specifies
+`yaw_min`/`yaw_max` as `units="rad"`, so ArduPilot's `degrees()` conversion is correct and the
+VIO is sending 320 - a sensible *degrees* yaw range - in a radians field.
+
+**The bug is confined to the yaw fields.** Roll and pitch defaults arrived as sensible
+degrees, which means the VIO sends those correctly in radians. Worth reporting to Gremsy
+against gimbal firmware 7.8.7.0. Note this is not caused by leaving yaw unset:
+`set_default()` computes `degrees(info.X)` for all six fields on every message, regardless of
+what the operator has configured.
+
+*Consequences, and why it is not merely cosmetic:*
+
+| Use of `yaw_angle_max` | Effect at 18334 |
+|---|---|
+| RC targeting (`AP_Mount_Backend.cpp:138`) | **broken** - the stick maps linearly over `[min,max]`, so a *centred* stick commands `0.5 x (18334 + 180) - 180 = 9077 deg`. PNU does not use RC gimbal control |
+| `GIMBAL_MANAGER_INFORMATION` (`:476`) | **wrong data to a standard GCS** - advertises `radians(18334)` = 320 rad as the yaw limit |
+| `set_angle_target()` (`:192`) | harmless - yaw is wrapped to <= 180 *before* the constraint, so the upper bound never binds |
+
+**Workaround: set the parameters explicitly.** `set_default()` only applies
+`if (!configured())` (`AP_ParamT.cpp:39`), so any saved value is permanent. Verified on the
+bench - `MNT1_YAW_MIN/MAX` = -180/180 works correctly, as do `MNT1_ROLL_MIN/MAX` = -15/15 and
+`MNT1_PITCH_MIN/MAX` = -90/15 for this gimbal.
+
+> **Residual trap.** `set_default()` calls `add_default()` **before** the `configured()`
+> check, and `AP_PARAM_DEFAULTS_ENABLED` is on for this build. So 18334 remains registered as
+> the parameter's *default* even while the live value is 180. Mission Planner will show
+> `MNT1_YAW_MAX` as modified-from-default, parameter diff tooling will flag the correct value
+> as the anomaly, and **a "reset to defaults" would restore 18334.** Harmless until someone
+> resets or audits parameters.
+
+**Note the VIO's pitch range is not the Viewpro's.** `MNT1_PITCH_MIN/MAX` = **-90/15** was
+verified on this gimbal, against -90/45 for the Viewpro. Both are in physical convention
+since the 5.1.2 pitch relocation: MIN is degrees of down travel, MAX degrees of up travel.
+
+**Upstream defect found and fixed here: the `"Camera: ..."` statustext repeated endlessly.**
+The VIO **broadcasts `CAMERA_INFORMATION` unsolicited**, and
+`AP_Camera_MAVLinkCamV2::handle_message()` printed the statustext on every copy with no
+guard - `_got_camera_info` was set *after* the print and never read. ArduPilot was not
+re-requesting; `update()` stops calling `find_camera()` once `_initialised` is set. The result
+was one statustext per broadcast on every connected link.
+
+Fixed by reading `_got_camera_info` before printing, so the message appears once. This is a
+genuine upstream bug, small and self-contained, and **worth submitting to ArduPilot** rather
+than carried as another permanent divergence - see D5 for why divergence is expensive here.
 
 ---
 

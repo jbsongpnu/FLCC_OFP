@@ -148,14 +148,20 @@ void AP_Camera_MAVLinkCamV2::handle_message(mavlink_channel_t chan, const mavlin
         const uint8_t fw_ver_revision = (_cam_info.firmware_version & 0x00FF0000) >> 16;
         const uint8_t fw_ver_build = (_cam_info.firmware_version & 0xFF000000) >> 24;
 
-        // display camera info to user
-        GCS_SEND_TEXT(MAV_SEVERITY_INFO, "Camera: %.32s %.32s fw:%u.%u.%u.%u",
-                _cam_info.vendor_name,
-                _cam_info.model_name,
-                (unsigned)fw_ver_major,
-                (unsigned)fw_ver_minor,
-                (unsigned)fw_ver_revision,
-                (unsigned)fw_ver_build);
+        // display camera info to user, once.  CAMERA_INFORMATION is normally sent in
+        // response to a request, but a camera may also broadcast it periodically - the
+        // Gremsy VIO Payload G1 does - and printing on every copy spams a statustext to
+        // every connected link.  _got_camera_info was already being set here; it is now
+        // read first so the message is emitted only the first time. (PNU)
+        if (!_got_camera_info) {
+            GCS_SEND_TEXT(MAV_SEVERITY_INFO, "Camera: %.32s %.32s fw:%u.%u.%u.%u",
+                    _cam_info.vendor_name,
+                    _cam_info.model_name,
+                    (unsigned)fw_ver_major,
+                    (unsigned)fw_ver_minor,
+                    (unsigned)fw_ver_revision,
+                    (unsigned)fw_ver_build);
+        }
 
         _got_camera_info = true;
     }
