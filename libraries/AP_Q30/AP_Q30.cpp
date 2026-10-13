@@ -69,6 +69,41 @@ void AP_Q30::report_cam_unsupported(const char *what)
 }
 
 // -------------------------------------------------------------------------
+// PNU-ISSUE(D10) Stage 3 : zoom times for TM2, from whichever payload is fitted
+// -------------------------------------------------------------------------
+bool AP_Q30::get_tm2_zoom_times(float &zoom_times)
+{
+    // A Viewpro carries gimbal and camera on one serial protocol and reports zoom in its
+    // own telemetry, so the mount answers directly and already in times.
+    AP_Mount *mount = AP::mount();
+    if ((mount != nullptr) && mount->get_zoom_times(0, zoom_times)) {
+        return true;
+    }
+
+    // A MAVLink camera reports zoom in CAMERA_SETTINGS.zoomLevel.
+    //
+    // **The MAVLink spec defines that field as a percentage of full range, but the Gremsy
+    // VIO reports zoom TIMES** - bench-verified 2026-10-13 reading 1.00 at wide and 30.00
+    // at full tele in super-resolution mode, matching its video overlay exactly, and
+    // matching TM2's own ICD range of 1..30.
+    //
+    // That reinterpretation is a fact about the payloads THIS firmware flies, not about
+    // MAVLink, which is why it lives here in the KGCS adapter rather than in AP_Camera.
+    // AP_Camera deliberately reports the raw number without claiming to know its units;
+    // see README "Dual-GCS compatibility strategy", design rule 1.
+    //
+    // A spec-compliant camera reporting a percentage would therefore be misreported here
+    // as times.  Accepted: TM2 is a PNU message carried on PNU aircraft, whose payloads
+    // are known.  Revisit if a third camera type is ever fitted.
+    AP_Camera *camera = AP::camera();
+    if ((camera != nullptr) && camera->get_reported_zoom_level(0, zoom_times)) {
+        return true;
+    }
+
+    return false;
+}
+
+// -------------------------------------------------------------------------
 // PNU-ISSUE(D10) : may the FC send an absolute zoom, or is it KGCS-direct?
 // -------------------------------------------------------------------------
 bool AP_Q30::fc_handles_absolute_zoom() const

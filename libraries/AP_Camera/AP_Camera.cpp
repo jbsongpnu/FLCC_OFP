@@ -746,6 +746,17 @@ bool AP_Camera::set_zoom(ZoomType zoom_type, float zoom_value)
     return primary->set_zoom(zoom_type, zoom_value);
 }
 
+// PNU : get the zoom level the camera reports, in whatever units it reports them
+bool AP_Camera::get_reported_zoom_level(uint8_t instance, float &zoom_level) const
+{
+    auto *backend = get_instance(instance);
+    if (backend == nullptr) {
+        return false;
+    }
+
+    return backend->get_reported_zoom_level(zoom_level);
+}
+
 // zoom specified as a rate or percentage
 bool AP_Camera::set_zoom(uint8_t instance, ZoomType zoom_type, float zoom_value)
 {

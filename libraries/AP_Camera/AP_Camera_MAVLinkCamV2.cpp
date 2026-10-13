@@ -5,6 +5,12 @@
 
 extern const AP_HAL::HAL& hal;
 
+// PNU : how often CAMERA_SETTINGS is requested, and how long a reported value stays valid.
+// The camera answers a request rather than streaming the message, so it has to be polled;
+// 1 Hz is ample for a zoom readback, which only changes when an operator drives it.
+#define AP_CAMERA_MAVLINKCAMV2_SETTINGS_REQ_MS     1000
+#define AP_CAMERA_MAVLINKCAMV2_SETTINGS_TIMEOUT_MS 3000
+
 #define AP_CAMERA_MAVLINKCAMV2_SEARCH_MS    60000   // search for camera for 60 seconds after startup
 
 // update - should be called at 50hz
@@ -17,6 +23,31 @@ void AP_Camera_MAVLinkCamV2::update()
 
     // call parent update
     AP_Camera_Backend::update();
+
+    // PNU : keep CAMERA_SETTINGS fresh.  The camera answers a request rather than
+    // streaming this message, so poll it once the camera has been found.
+    if (_initialised) {
+        const uint32_t now_ms = AP_HAL::millis();
+        if (now_ms - _last_camsettings_req_ms >= AP_CAMERA_MAVLINKCAMV2_SETTINGS_REQ_MS) {
+            _last_camsettings_req_ms = now_ms;
+            request_camera_settings();
+        }
+
+#if AP_CAMERA_MAVLINKCAMV2_ZOOM_DEBUG
+        // PNU : bench aid, off by default.  See the flag in the header.
+        if (now_ms - _dbg_last_report_ms >= 2000) {
+            _dbg_last_report_ms = now_ms;
+            if (_cam_settings_ms == 0) {
+                GCS_SEND_TEXT(MAV_SEVERITY_INFO, "CAMdbg: no CAMERA_SETTINGS yet");
+            } else {
+                GCS_SEND_TEXT(MAV_SEVERITY_INFO, "CAMdbg: zoom %.2f focus %.2f age %ums",
+                              (double)_cam_settings.zoomLevel,
+                              (double)_cam_settings.focusLevel,
+                              (unsigned)(now_ms - _cam_settings_ms));
+            }
+        }
+#endif
+    }
 }
 
 // entry point to actually take a picture.  returns true on success
@@ -165,6 +196,55 @@ void AP_Camera_MAVLinkCamV2::handle_message(mavlink_channel_t chan, const mavlin
 
         _got_camera_info = true;
     }
+
+    // PNU : handle CAMERA_SETTINGS.  Nothing else in ArduPilot decodes this message -
+    // elsewhere it is only ever sent outwards - so this is the whole of the inbound path.
+    // zoomLevel and focusLevel are MAVLink2 extension fields and are legitimately NaN on a
+    // camera that does not know them, which get_reported_zoom_level() rejects.
+    if (msg.msgid == MAVLINK_MSG_ID_CAMERA_SETTINGS) {
+        mavlink_msg_camera_settings_decode(&msg, &_cam_settings);
+        _cam_settings_ms = AP_HAL::millis();
+    }
+}
+
+// PNU : get the zoom level the camera last reported, in whatever units it reports them.
+// See the declaration - the units are deliberately not interpreted here.
+bool AP_Camera_MAVLinkCamV2::get_reported_zoom_level(float &zoom_level) const
+{
+    // never received
+    if (_cam_settings_ms == 0) {
+        return false;
+    }
+
+    // stale: the camera has stopped answering, so the last value is no longer evidence
+    if (AP_HAL::millis() - _cam_settings_ms > AP_CAMERA_MAVLINKCAMV2_SETTINGS_TIMEOUT_MS) {
+        return false;
+    }
+
+    // the field is an extension and may be NaN when the camera does not know its zoom
+    if (isnan(_cam_settings.zoomLevel)) {
+        return false;
+    }
+
+    zoom_level = _cam_settings.zoomLevel;
+    return true;
+}
+
+// PNU : forward what the camera actually reported, rather than the base class's NaNs
+void AP_Camera_MAVLinkCamV2::send_camera_settings(mavlink_channel_t chan) const
+{
+    if (_cam_settings_ms == 0) {
+        // nothing received yet - let the base class send its "unknown" placeholders
+        AP_Camera_Backend::send_camera_settings(chan);
+        return;
+    }
+
+    mavlink_msg_camera_settings_send(
+        chan,
+        AP_HAL::millis(),           // time_boot_ms
+        _cam_settings.mode_id,      // camera mode reported by the camera
+        _cam_settings.zoomLevel,    // as reported, units not reinterpreted
+        _cam_settings.focusLevel);
 }
 
 // send camera information message to GCS
@@ -230,6 +310,33 @@ void AP_Camera_MAVLinkCamV2::find_camera()
     }
 
     _initialised = true;
+}
+
+// PNU : request CAMERA_SETTINGS (holds zoomLevel and focusLevel)
+void AP_Camera_MAVLinkCamV2::request_camera_settings() const
+{
+    if (_link == nullptr) {
+        return;
+    }
+
+    // MAV_CMD_REQUEST_MESSAGE is the current form.  A Gremsy VIO was bench-verified
+    // answering both this and the superseded MAV_CMD_REQUEST_CAMERA_SETTINGS (522), so
+    // only the modern one is sent.
+    const mavlink_command_long_t pkt {
+        MAVLINK_MSG_ID_CAMERA_SETTINGS, // param1
+        0,  // param2
+        0,  // param3
+        0,  // param4
+        0,  // param5
+        0,  // param6
+        0,  // param7
+        MAV_CMD_REQUEST_MESSAGE,
+        _sysid,
+        _compid,
+        0   // confirmation
+    };
+
+    _link->send_message(MAVLINK_MSG_ID_COMMAND_LONG, (const char*)&pkt);
 }
 
 // request CAMERA_INFORMATION (holds vendor and model name)

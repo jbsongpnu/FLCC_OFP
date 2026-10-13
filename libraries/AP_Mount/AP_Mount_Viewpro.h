@@ -426,16 +426,15 @@ private:
     bool _last_lock;                                // last lock mode sent to gimbal
     TrackingStatus _last_tracking_status;           // last tracking status received from gimbal (used to notify users)
     ImageSensor _image_sensor;                      // user selected image sensor (aka camera lens)
-    // PNU-ISSUE(D10) : _zoom_times MUST keep its initialiser, for the same reason as the
-    // three D1 members below - inherited constructor, heap-allocated backend, so without
-    // one it is indeterminate until the first gimbal report, not 0.  It was read in that
-    // state by TM2 and by AP_Q30::IR_operation().  0 doubles as the "not yet reported"
-    // marker: EO and IR zoom are both >= 1x, so is_positive() is the validity test.
+    // PNU-ISSUE(D10) : _zoom_times keeps its initialiser so the "not yet reported" marker
+    // does not depend on allocator behaviour.  (Backends are allocated with NEW_NOTHROW,
+    // which AP_Common/c++.cpp implements as calloc, so the object does arrive zeroed - the
+    // initialiser is hygiene, not a bug fix.)  0 doubles as that marker: EO and IR zoom are
+    // both >= 1x, so is_positive() is the validity test.
     float _zoom_times = 0;                          // zoom times received from gimbal (0 = none received yet)
-    // PNU-ISSUE(D1) : these three MUST keep their initialisers.  The class uses an
-    // inherited constructor and the backend is heap-allocated, so an uninitialised
-    // _palette_pending_color would be indeterminate - a non-zero value at boot would
-    // make the first update() send a garbage CameraCommand to the gimbal.
+    // PNU-ISSUE(D1) : these three keep their initialisers so the deferred-palette state
+    // does not depend on allocator behaviour.  (NEW_NOTHROW resolves to calloc, so the
+    // object is zeroed in practice - this is hygiene, not a live bug.)
     uint8_t _palette_pending_color = 0;             // PNU : deferred palette code, sent on a later update() tick after the IR_RAINBOW prelude (0 = none pending)
     ImageSensor _palette_pending_sensor = ImageSensor::NO_ACTION;   // PNU-ISSUE(D1) : display captured when the palette was deferred, so the colour reaches the sensor it was meant for
     uint32_t _palette_pending_ms = 0;               // PNU-ISSUE(D1) : system time the palette was deferred, for the staleness deadline

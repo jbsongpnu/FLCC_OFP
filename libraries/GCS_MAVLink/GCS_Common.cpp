@@ -4419,6 +4419,10 @@ void GCS_MAVLINK::handle_message(const mavlink_message_t &msg)
     case MAVLINK_MSG_ID_DIGICAM_CONTROL:
     case MAVLINK_MSG_ID_GOPRO_HEARTBEAT: // heartbeat from a GoPro in Solo gimbal
     case MAVLINK_MSG_ID_CAMERA_INFORMATION:
+    // PNU : upstream does not route CAMERA_SETTINGS to AP_Camera, so a camera's reported
+    // zoom and focus never reach the backend.  AP_Camera_MAVLinkCamV2 decodes it to serve
+    // get_reported_zoom_level() and to forward real values in send_camera_settings().
+    case MAVLINK_MSG_ID_CAMERA_SETTINGS:
         {
             AP_Camera *camera = AP::camera();
             if (camera == nullptr) {

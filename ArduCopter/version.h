@@ -7,21 +7,37 @@
 #include "ap_version.h"
 
 // PNU : This is a custom code modified by PNU Drone
-#define THISFIRMWARE "PNU_OFP V5.1.5"
+#define THISFIRMWARE "PNU_OFP V5.1.7"
 
-// NOTE: 5.1.5 is a DEV build on top of the 5.1.0 OFFICIAL release, which closed the
-// Copter-4.7.1 -> FLCC migration.  It closes D10 Stage 2b by NOT implementing it in the
-// flight controller: AP_Q30 now sends an absolute zoom only to a Viewpro, which reads
-// ZoomType::PCT as zoom times.  On any other mount it stays silent and says so once,
-// because ZOOM_TYPE_RANGE is a percentage of a mode-dependent range (240x combine / 30x
-// super-resolution on a Gremsy VIO) selected by an extended parameter the FC cannot read -
-// ArduPilot implements no PARAM_EXT_*.  KGCS drives absolute zoom directly with
-// MAV_CMD_USER_4 "zoom to level" in times.  A rate-pulse fallback was rejected: it would
-// fight the command KGCS is sending.
+// NOTE: 5.1.6 is a DEV build on top of the 5.1.0 OFFICIAL release, which closed the
+// Copter-4.7.1 -> FLCC migration.  It closes D10 Stage 3: TM2's Zoom_POS_FB now carries
+// real zoom on a Gremsy VIO.  Bench measurement showed the VIO reports
+// CAMERA_SETTINGS.zoomLevel in zoom TIMES rather than the percentage the MAVLink spec
+// defines - 1.00 at wide, 30.00 at full tele in super-resolution mode - which removed both
+// the conversion and the int8_t overflow problems at once.
 //
-// The FC-side work on D10 is now essentially complete.  What remains is KGCS
-// implementation against mappings that are all documented in README and in
-// VIO_MAVLink_Messages.md, plus the Stage 3 decision on where TM2 gets its zoom value.
+// Found while implementing it: CAMERA_SETTINGS was never routed to AP_Camera at all, so
+// any backend decode was dead code.  Fixed with one case label in GCS_Common.cpp - the
+// only core-file cost.  The decode, the unit-neutral get_reported_zoom_level() accessor
+// and a send_camera_settings() override that forwards real values instead of upstream's
+// NaN placeholders are all vendor-neutral and worth submitting to ArduPilot; only
+// AP_Q30 decides the value means times, which is where PNU-specific facts belong.
+//
+// 5.1.7 adds the bench confirmation that settled the last open question: the VIO's
+// zoomLevel FOLLOWS THE ACTIVE EO/IR SOURCE, so no sensor check is needed in the FC and
+// none was added.  Had it reported EO zoom while the operator watched IR, TM2 would have
+// carried a number that was not what it claimed to be.  Both ranges fit TM2's int8_t
+// field - EO reaches 30x in super-resolution, IR 8x.
+//
+// The bench aid that answered it is kept but disabled:
+// AP_CAMERA_MAVLINKCAMV2_ZOOM_DEBUG in AP_Camera_MAVLinkCamV2.h defaults to 0.  The decode
+// is permanent, so only the reporting is conditional and the off build is byte-identical
+// to having no debug code at all.
+//
+// With Stage 3 done, the FC-side work on D10 is complete.  What remains is KGCS
+// implementation against mappings documented in README and VIO_MAVLink_Messages.md:
+// EO/IR source, IR palette, object tracking and absolute zoom are all KGCS-to-payload
+// direct, needing no firmware.
 //
 // Carried forward from 5.1.1 to 5.1.4: D10 Stage 1 (no fabricated camera values, every
 // declined camera command reported), the Gremsy VIO protocol analysis, the dual-GCS
@@ -50,11 +66,11 @@
 // must stay in step with the three defines below (static_assert in Copter.cpp, D4).
 
 // the following line is parsed by the autotest scripts
-#define FIRMWARE_VERSION 5,1,5,FIRMWARE_VERSION_TYPE_DEV
+#define FIRMWARE_VERSION 5,1,7,FIRMWARE_VERSION_TYPE_DEV
 
 #define FW_MAJOR 5
 #define FW_MINOR 1
-#define FW_PATCH 5
+#define FW_PATCH 7
 #define FW_TYPE FIRMWARE_VERSION_TYPE_DEV
 
 #include <AP_Common/AP_FWVersionDefine.h>

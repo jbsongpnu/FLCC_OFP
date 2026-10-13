@@ -144,6 +144,11 @@ public:
     bool set_zoom(ZoomType zoom_type, float zoom_value);
     bool set_zoom(uint8_t instance, ZoomType zoom_type, float zoom_value);
 
+    // PNU : get the zoom level the camera reports, in whatever units it reports them.
+    // Returns false if unavailable or stale.  See AP_Camera_Backend for why the units are
+    // not interpreted here.
+    bool get_reported_zoom_level(uint8_t instance, float &zoom_level) const;
+
     // set focus specified as rate, percentage or auto
     // focus in = -1, focus hold = 0, focus out = 1
     SetFocusResult set_focus(FocusType focus_type, float focus_value);

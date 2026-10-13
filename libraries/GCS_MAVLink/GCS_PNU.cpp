@@ -91,8 +91,14 @@ void GCS_MAVLINK::send_message_gcs_flcc_cam_status() const
     // changes is that 0 is now sent because the value is unknown, not because a
     // fabricated 0.0f was mistaken for a reading, and the operator is told once on the
     // edge rather than left to infer it from a camera that appears stuck at 0x.
+    // PNU-ISSUE(D10) Stage 3 : AP_Q30 decides where the value comes from and what its
+    // units mean - the mount on a Viewpro, CAMERA_SETTINGS on a MAVLink camera.
     float zoom_times = 0;
-    const bool zoom_known = mount->get_zoom_times(0, zoom_times);
+    bool zoom_known = false;
+    AP_Q30 *Q30 = AP::Q30();
+    if (Q30 != nullptr) {
+        zoom_known = Q30->get_tm2_zoom_times(zoom_times);
+    }
     CAM_ATTITUDE_STATUS.Zoom_POS_FB = zoom_known ? (int8_t)zoom_times : 0;
 
     // A working Viewpro reports zoom only once the gimbal's first telemetry frame

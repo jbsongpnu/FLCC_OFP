@@ -76,6 +76,13 @@ public:
     // set zoom specified as a rate or percentage
     virtual bool set_zoom(ZoomType zoom_type, float zoom_value) { return false; }
 
+    // PNU : get the zoom level the camera reports, in whatever units it reports them.
+    // Returns false if this backend cannot report it, leaving zoom_level untouched.
+    // The units are deliberately not interpreted: CAMERA_SETTINGS.zoomLevel is a
+    // percentage per the MAVLink spec, but cameras exist that report zoom times, so the
+    // caller - which knows which camera is fitted - decides what the number means.
+    virtual bool get_reported_zoom_level(float &zoom_level) const { return false; }
+
     // set focus specified as rate, percentage or auto
     // focus in = -1, focus hold = 0, focus out = 1
     virtual SetFocusResult set_focus(FocusType focus_type, float focus_value) { return SetFocusResult::UNSUPPORTED; }

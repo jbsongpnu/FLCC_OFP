@@ -73,6 +73,10 @@ public:
     // Removed : void get_cmd_angle() const;                                                         // Send "get_angle" Command to CAM (KAL)
     // Removed : void get_cmd_zoom() const;                                                          // Send "get_zoom" Command to CAM (KAL)
 
+    // PNU-ISSUE(D10) Stage 3 : zoom TIMES for TM2's Zoom_POS_FB, from whichever payload is
+    // fitted.  Returns false if neither can report it, which TM2 sends as 0.
+    bool get_tm2_zoom_times(float &zoom_times);
+
     void no_control_mode_operation(mavlink_sys_icd_gcs_flcc_cam_cmd_t cmd);             // Stop CAM & Stabilize (KAL)
     void IR_operation(mavlink_sys_icd_gcs_flcc_cam_cmd_t cam_cmd);                      // Control IR Functions (KAL)
 
