@@ -7,7 +7,7 @@
 #include "ap_version.h"
 
 // PNU : This is a custom code modified by PNU Drone
-#define THISFIRMWARE "PNU_OFP V5.1.7"
+#define THISFIRMWARE "PNU_OFP V5.1.8"
 
 // NOTE: 5.1.6 is a DEV build on top of the 5.1.0 OFFICIAL release, which closed the
 // Copter-4.7.1 -> FLCC migration.  It closes D10 Stage 3: TM2's Zoom_POS_FB now carries
@@ -23,7 +23,32 @@
 // NaN placeholders are all vendor-neutral and worth submitting to ArduPilot; only
 // AP_Q30 decides the value means times, which is where PNU-specific facts belong.
 //
-// 5.1.7 adds the bench confirmation that settled the last open question: the VIO's
+// 5.1.8 is the backward-compatibility fix for KGCS.  Tracking, video source and IR palette
+// had already left the FC for GCS-direct routing, but were still reported as failures -
+// on a Gremsy they produced "CAM: mount rejected ..." every 10 s forever, because KGCS
+// keeps sending TC2 and nothing on that payload can serve those commands.  Since
+// report_cam_unsupported() shares one rate limiter, three permanent warnings would have
+// crowded out genuine faults, destroying the signal D10 Stage 1 exists to provide.
+// All four GCS-direct functions now announce themselves ONCE at MAV_SEVERITY_INFO and
+// then stay silent.  A Viewpro that genuinely declines still warns: the gate is on the
+// payload, not on the return value.
+//
+// Also recorded in 5.1.8: the supported GCS/gimbal combinations.  KGCS whitelists MAVLink
+// message ids and is VIEWPRO-ONLY - a Gremsy adds ids it has never parsed, and its stream
+// stops.  That is not a firmware defect and KGCS + Gremsy must not be retested.  PNU-GCS
+// replaces it and works with any gimbal, over the KGCS interface or standard MAVLink2.
+// Two consequences, both needing no change: the msg 285 suppression is correctly keyed per
+// backend, and NO_FORWARD must NOT be set on the VIO link because PARAM_EXT_ACK carries no
+// target fields and would be blocked on the way back.  The four one-shot notices are now
+// "GCS-direct" rather than "KGCS-direct", since the station driving them is PNU-GCS.
+//
+// Also verified, with no code needed: GCS-to-VIO routing already works.  get_targets()
+// reads the generated message-entry table, PARAM_EXT_SET and COMMAND_LONG both carry
+// target fields and are in the staged dialect, and a message addressed to the camera's
+// component falls through to forward().  All seven PNU-KAL messages are likewise
+// unaffected - none carries a target field, so they are broadcast and FC-handled.
+//
+// 5.1.7 added the bench confirmation that settled the last Stage 3 question: the VIO's
 // zoomLevel FOLLOWS THE ACTIVE EO/IR SOURCE, so no sensor check is needed in the FC and
 // none was added.  Had it reported EO zoom while the operator watched IR, TM2 would have
 // carried a number that was not what it claimed to be.  Both ranges fit TM2's int8_t
@@ -66,11 +91,11 @@
 // must stay in step with the three defines below (static_assert in Copter.cpp, D4).
 
 // the following line is parsed by the autotest scripts
-#define FIRMWARE_VERSION 5,1,7,FIRMWARE_VERSION_TYPE_DEV
+#define FIRMWARE_VERSION 5,1,8,FIRMWARE_VERSION_TYPE_DEV
 
 #define FW_MAJOR 5
 #define FW_MINOR 1
-#define FW_PATCH 7
+#define FW_PATCH 8
 #define FW_TYPE FIRMWARE_VERSION_TYPE_DEV
 
 #include <AP_Common/AP_FWVersionDefine.h>

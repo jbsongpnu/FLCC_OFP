@@ -121,15 +121,33 @@ private:
     // SIYI || XACTI || VIEWPRO, so a Gremsy-only build would not have it.  Wrapping it
     // once here keeps the #if out of the four call sites.  Returns false when the
     // feature is compiled out, which the caller reports as an unsupported command.
-    bool set_video_source(AP_Camera::CameraSource primary, AP_Camera::CameraSource secondary);
+    void set_video_source(AP_Camera::CameraSource primary, AP_Camera::CameraSource secondary);
 
-    // PNU-ISSUE(D10) : true when ZoomType::PCT reaches a destination that reads it as zoom
-    // TIMES rather than the MAVLink 0-100 % contract.  Only AP_Mount_Viewpro does, through a
-    // local modification to its set_zoom().  Everywhere else the FC must not send an
-    // absolute zoom at all - see the Stage 2b note in AP_Q30.cpp.
-    bool fc_handles_absolute_zoom() const;
+    // PNU-ISSUE(D10) : is the fitted gimbal a Viewpro?  Several TC2 functions can only be
+    // served by the FC on that payload, for two different reasons - see the call sites.
+    bool mount_is_viewpro() const;
 
-    bool _abs_zoom_delegated_reported = false;  // one-shot note that absolute zoom is KGCS-direct
+    // PNU-ISSUE(D10) : TC2 functions the FC cannot serve on a non-Viewpro payload, which the
+    // ground station therefore drives straight to the camera instead.  Reported ONCE each
+    // rather than through report_cam_unsupported(): this is designed behaviour, not a
+    // failure, and the GCS keeps sending TC2 for backward compatibility - so a repeating
+    // "mount rejected ..." would be permanent noise and would crowd out genuine faults on
+    // the shared rate limit.
+    //
+    // Named GCS_DIRECT rather than KGCS_DIRECT because the ground station driving these is
+    // PNU-GCS, not KGCS: KGCS whitelists MAVLink message ids and is only ever used with a
+    // Viewpro, where none of this applies.  See README "Supported GCS and gimbal
+    // combinations".
+    static constexpr uint8_t GCS_DIRECT_ABS_ZOOM     = (1U << 0);
+    static constexpr uint8_t GCS_DIRECT_TRACKING     = (1U << 1);
+    static constexpr uint8_t GCS_DIRECT_VIDEO_SOURCE = (1U << 2);
+    static constexpr uint8_t GCS_DIRECT_IR_PALETTE   = (1U << 3);
+    void report_gcs_direct(uint8_t which, const char *what);
+    uint8_t _gcs_direct_reported = 0;   // bitmask of which have been announced
+
+    // wrappers carrying the Viewpro gate, so the #if and the gate stay out of the call sites
+    void set_ir_palette(uint8_t color);
+    void set_tracking_state(TrackingType tracking_type);
 
     uint32_t _cam_unsupported_cnt = 0;      // total camera commands the mount declined
     uint32_t _cam_unsupported_last_ms = 0;  // system time the last report was sent

@@ -1,7 +1,18 @@
 # PNU-KAL FLCC OFP Development Version
 - This branch currently developing PNU-KAL FLCC OFP after official version (TAG) PNU-KAL-FLCC-5.1.0 (this is same code as 5.0.15 dev)  
 - PNU-ISSUE 10 & 11 still remains : For Gremsy camera and general camera mount library structure  
-- IN THIS VERSION : V5.1.7 working with issues 10 and 11 - **Stage 3 bench-confirmed; the FC-side work on D10 is COMPLETE**  
+- IN THIS VERSION : V5.1.8 working with issues 10 and 11 - **backward-compatibility fix for KGCS; D10 is FC-complete**  
+   - **Tracking, video source and IR palette no longer report as failures on a Gremsy.** They had already left the FC for GCS-direct routing, but still produced `CAM: mount rejected ...` **every 10 s, forever**, because the GCS keeps sending TC2 and nothing on that payload can serve them  
+   - That mattered beyond the wording : `report_cam_unsupported()` shares one rate limiter, so three permanent warnings would have **crowded out genuine faults** - destroying the signal D10 Stage 1 exists to provide  
+   - All four GCS-direct functions now announce themselves **once** at `MAV_SEVERITY_INFO` and then stay silent : `CAM: <function> is GCS-direct on this mount`  
+   - **A Viewpro that genuinely declines still warns** - the gate is on the payload, not on the return value, so a real fault on a payload that should work is never silenced  
+   - **Verified with no code needed : KGCS-to-VIO routing already works.** `get_targets()` reads the generated message-entry table; `PARAM_EXT_SET` and `COMMAND_LONG` both carry target fields and are in the staged dialect; a message addressed to the camera's component falls through to `forward()`  
+   - All seven PNU-KAL messages checked and unaffected - none carries a target field, so they are broadcast and FC-handled  
+   - **Supported GCS and gimbal combinations recorded** (new section at the end of this file). KGCS whitelists MAVLink message ids and is **Viewpro-only**; PNU-GCS replaces it and works with any gimbal, over either the KGCS interface or standard MAVLink2. **KGCS + Gremsy is not supported - do not retest it**  
+   - Two consequences, both meaning *no* code or parameter change : the msg 285 suppression is **correctly keyed per backend** (KGCS only ever flies a Viewpro, which suppresses it), and **`NO_FORWARD` must NOT be set on the VIO link** - `PARAM_EXT_ACK` carries no target fields, so acks would be blocked and every palette/source change would look like a failure  
+   - Renamed `KGCS-direct` to **`GCS-direct`** in the four notices and in the code (`GCS_DIRECT_*`, `report_gcs_direct()`) - the ground station driving them is PNU-GCS. "KGCS interface" now means the TC2/TM2 ICD; "KGCS" means the product  
+- For 5.1.7 version :  
+   - **Stage 3 bench-confirmed; the FC-side work on D10 is COMPLETE**  
    - **`zoomLevel` follows the active EO/IR source** - bench-measured. Switching the main source switches the reported value, so the camera does the selection itself and no sensor check was needed in the FC  
    - This was the last thing that could have made Stage 3 wrong : `AP_Mount_Viewpro` is sensor-aware internally, so had the VIO reported EO zoom while the operator watched IR, TM2 would have carried a number that was not what it claimed to be  
    - Both ranges fit TM2's `int8_t` field : EO reaches 30x in super-resolution (matching the ICD's `MIN:1, MAX:30`), IR reaches 8x. Only combine mode at 240x would overflow, and it is not used  
@@ -21,7 +32,7 @@
    - **Stage 2b is closed by NOT implementing it in the FC.** `AP_Q30` sends an absolute zoom only to a Viewpro, which reads `ZoomType::PCT` as zoom times. On any other mount it stays silent and says so once per boot  
    - Reason : `ZOOM_TYPE_RANGE` is a percentage of a **mode-dependent** range - 240x combine / 30x super-resolution on a Gremsy VIO, selected by an extended parameter **the FC cannot read**, since ArduPilot implements no `PARAM_EXT_*`. KGCS drives absolute zoom directly with `MAV_CMD_USER_4` "zoom to level", in times  
    - A rate-pulse fallback was **rejected** : it would fight the command KGCS is sending. Two sources commanding one camera is worse than one source doing less  
-   - **`VIO_MAVLink_Messages.md`** was added to this folder - the message reference extracted from Gremsy PayloadSDK 3.2.0 source. It answers both Stage 2b and Stage 3, and supplies the `C_SOURCE`, `C_T_PALETTE` and tracking mappings the KGCS-direct work needs  
+   - **`VIO_MAVLink_Messages.md`** was added to this folder - the message reference extracted from Gremsy PayloadSDK 3.2.0 source. It answers both Stage 2b and Stage 3, and supplies the `C_SOURCE`, `C_T_PALETTE` and tracking mappings the GCS-direct work needs  
    - What remains is **KGCS implementation**, against mappings that are all documented, plus the Stage 3 decision on where TM2 gets its zoom value  
 - For 5.1.4 version :  
    - **First version validated against real Gremsy VIO hardware**  
@@ -120,7 +131,7 @@ grep -rn "PNU-ISSUE" libraries/ ArduCopter/
 | D5 | **RESOLVED (2026-09-30).** The 356-line block appended at `GCS_Common.cpp`'s EOF was the main recurring merge cost on every ArduPilot bump, and the only issue here whose cost grew with time. It now lives in `libraries/GCS_MAVLink/GCS_PNU.cpp`. | `GCS_Common.cpp`, `GCS_PNU.cpp` | — | Done. `GCS_Common.cpp` vs pristine 4.7.1 went from **429 added lines in 7 hunks** to **45 in 3** - better than the 72 estimated, because the two includes and the extern/macro block moved out too. The three survivors are unavoidable: they insert into upstream's `mavlink_id_to_ap_message_id()` map, `handle_message()` and `try_send_message()` switches. Moved code is **byte-identical** - no logic touched. Costs **+136 bytes** of flash, since the handlers are no longer in the same translation unit as their callers |
 | D6 | **RESOLVED (2026-09-30).** `AP_PMUCAN::handleFrame()` performed no DLC validation - every case `memcpy`d from fixed offsets up to `data[7]` whatever `can_rxframe.dlc` said. No out-of-bounds read (`data[]` is a fixed 8 bytes), but a short or malformed PMU frame was parsed silently and yielded stale values for battery current, RPM, fuel quantity etc. | `AP_PMUCAN.cpp` | — | **ICD confirms DLC 8 for all five status messages** (BATSTS, ENGSTS, AUX1STS, AUX2STS, VERSTS), which also confirms every field the code reads is present. **TX confirmed too**: 4 for all five commands (BATCTRL, ENGONOFF, ENGMANUAL, ENGPCL, ENGCHK), matching `PMUCAN_CMD_DLC`; all five route through the single `pmucan_cmd()` path, and the driver has only two TX paths in total. RTR is N/A in the ICD, so `pmucan_rtr()`'s 8 is unconstrained. No TX change needed. Frames shorter than `PMUCAN_STS_DLC` are now rejected before parsing, counted in `_short_frame_cnt`, and reported to the GCS as `PMUCAN: short frame 0x<id> dlc <n> (<count> dropped)`, rate limited to one message per 10 s with the first always reported. Unknown ids now return early rather than falling through the switch. **Still open - see D15** (byte order) and the note below on the write-only counters |
 | D7 | **RESOLVED (2026-09-30) - one defect fixed, the rest analysed and accepted.** The engine ON/OFF interlock's counters are not a count of operator alternations: the pair they inspect only changes when a new TC1 arrives, but `engineonoffstate()` runs at ~10 Hz regardless, so a frozen valid pair keeps incrementing. They are a ~100 ms tick timer - threshold 10 means *~1.0 s after the first valid alternating pair*. | `AP_PMUCAN.cpp` | — | **Fixed:** the state no longer advances on a failed CAN send. It previously set `_engineonoffmode` unconditionally, so a send failure left the FC believing the engine was running while the PMU had never been told - and KGCS blocks Start from that point, leaving the operator only Stop to resolve a divergence they could not see. On failure the state now holds and the still-valid pair retries on the next tick. **Accepted, with the reasoning recorded at the code site:** the two-messages-plus-1 s shortcut is sound *only because KGCS never sends TC1 unsolicited*; threshold 10 is deliberate and must not be raised back to 14; loss tolerance and rate immunity both follow from the timer behaviour. See the KGCS behaviour and residuals below |
-| D8 | **Mount scheduler rate vs. the Viewpro self-throttle.** (a) *RESOLVED (step 5)* - msg 285 suppression is now an opt-in backend capability (`suppress_gimbal_device_attitude_status()`), so only Viewpro suppresses it; every other gimbal keeps standard MAVLink behaviour. (b) *RESOLVED (step 5)* - V5.0.8 lowered the `AP_Mount` task 50&rarr;10 Hz; **deliberately reverted to 50 Hz**. `AP_Mount_Viewpro::update()` self-throttles to `AP_MOUNT_VIEWPRO_UPDATE_INTERVAL_MS` (100 ms, upstream), so gimbal traffic is 10 Hz at *either* scheduler rate - the scheduler does not control it. At 10 Hz the scheduler period **equals** that throttle interval, so any late tick defers the update a full period (200 ms &rarr; 5 Hz bursts); 50 Hz oversamples it 5x (worst case 120 ms). 50 Hz also keeps `AP_Mount_Backend::update()` - servo retract and `update_poi_lock_target()`, which run *before* the throttle - at full rate. | `Copter.cpp` | — | Done. To reduce gimbal traffic, raise `AP_MOUNT_VIEWPRO_UPDATE_INTERVAL_MS`, not the scheduler rate |
+| D8 | **Mount scheduler rate vs. the Viewpro self-throttle.** (a) *RESOLVED (step 5)* - msg 285 suppression is now an opt-in backend capability (`suppress_gimbal_device_attitude_status()`), so only Viewpro suppresses it; every other gimbal keeps standard MAVLink behaviour. **Confirmed correctly keyed 2026-10-14** - KGCS only ever flies a Viewpro, so it never sees 285; see "Supported GCS and gimbal combinations". (b) *RESOLVED (step 5)* - V5.0.8 lowered the `AP_Mount` task 50&rarr;10 Hz; **deliberately reverted to 50 Hz**. `AP_Mount_Viewpro::update()` self-throttles to `AP_MOUNT_VIEWPRO_UPDATE_INTERVAL_MS` (100 ms, upstream), so gimbal traffic is 10 Hz at *either* scheduler rate - the scheduler does not control it. At 10 Hz the scheduler period **equals** that throttle interval, so any late tick defers the update a full period (200 ms &rarr; 5 Hz bursts); 50 Hz oversamples it 5x (worst case 120 ms). 50 Hz also keeps `AP_Mount_Backend::update()` - servo retract and `update_poi_lock_target()`, which run *before* the throttle - at full rate. | `Copter.cpp` | — | Done. To reduce gimbal traffic, raise `AP_MOUNT_VIEWPRO_UPDATE_INTERVAL_MS`, not the scheduler rate |
 | D9 | **RESOLVED (2026-09-30) - both parts.** Both "no PMU" paths correctly avoid a false trigger (`PMUCAN_Fail` stays 2 when the driver runs with no PMU; stays 0 from static init when `CAN_Dn_PROTOCOL` is not 15). (a) *step 6* - `failsafe.pmucan` was set but never cleared, so the failsafe could fire at most once per power cycle. It now clears on recovery with `ERROR_RESOLVED`, matching `failsafe.terrain` / `.deadreckon` / `.ekf`. The mode change is deliberately **not** undone, matching upstream precedent. (b) the failsafe could not tell "PMU lost in flight" from "armed without one", so an emergency launch after a PMU dropout was disarmed ~100 ms after arming, with no prearm warning. | `events.cpp`, `AP_Arming_Copter.{h,cpp}`, `Copter.h` | — | **(b) implemented as designed, no new parameter.** `AP_Arming_Copter::arm()` latches `failsafe.pmucan_armed_healthy = (PMUCAN_Fail == 0)`, and `failsafe_pmucan_check()` returns early unless it is set - so losing the PMU in flight still triggers the failsafe, while arming deliberately without one flies on unmolested. `AP_Arming_Copter::pmucan_checks()` warns before arming as a `Check::SYSTEM`, bypassable via `ARMING_SKIPCHK` bit 13 (System, decimal 8192). **One deviation from the written design:** it lives in `AP_Arming_Copter`, not `AP_Arming::can_checks()` - `AP_PMUCAN` is listed only in `ArduCopter/wscript`, so referencing `PMU_Ctrl_Echo` from the shared library would fail to link for Plane, Rover and Sub |
 | D10 | **`AP_Q30` routes every camera function through `AP::mount()`, never `AP::camera()`.** Valid for Viewpro (one serial protocol carries gimbal + camera), but on any other mount all 27 camera calls fall through to the base class and do nothing. **Stage 1 applied 2026-10-01** - they no longer do it *silently*, and `get_zoom_times()` no longer fabricates `0.0f`. Dormant if the camera is driven by standard MAVLink2 instead of KGCS TC2. | `AP_Q30.{h,cpp}`, `AP_Mount*.{h,cpp}`, `GCS_PNU.cpp`, `GCS.h` | — (was 8; step 8 applied). **The routing decision is blocked on the ACTION ON PNU answers below**, not on any step | Decide whether KGCS TC2 must drive non-Viewpro cameras; if so, route camera calls via `AP::camera()` - but see **D11**, the destination cannot do everything. See details below. |
 | D11 | **Even with correct routing (D10), the MAVLink camera backend cannot cover everything KGCS needs.** Pristine 4.7.1 *does* have a MAVLink camera path (`AP_Camera_MAVLinkCamV2`, `CAM1_TYPE=6`) - it is the *mount* that is gimbal-only. Of `AP_Q30`'s 8 camera functions, 4 work, 2 exist only in the `AP_Camera` base, and 2 have **no path at all**: `get_zoom_times` (the backend never decodes `CAMERA_SETTINGS` msg 260, where `zoomLevel` lives) and `IR_Color_Change` (MAVLink has no standard thermal-palette message). | `AP_Camera_MAVLinkCamV2.cpp` | — | Bench a real VIO first; then decide per function - upstream fix, local fix, or vendor-specific. See details below. |
@@ -619,7 +630,7 @@ is `Type::Viewpro`, which is the one backend whose `set_zoom()` reads `ZoomType:
 its absolute zoom only in that case.
 
 Anywhere else the FC sends **nothing** and notes once per boot:
-`CAM: absolute zoom is KGCS-direct on this mount`. One-shot and `MAV_SEVERITY_INFO` on
+`CAM: absolute zoom is GCS-direct on this mount`. One-shot and `MAV_SEVERITY_INFO` on
 purpose - this is designed behaviour, not a failure, so it must not read like the Stage 1
 `CAM: mount rejected ...` warnings.
 
@@ -630,6 +641,68 @@ camera is worse than one source doing less.
 `EO_zoom_times` keeps counting on both paths, so the cached value stays meaningful if the
 mount changes. The IR branch is untouched - it sends `ZoomType::RATE`, which is continuous and
 correct on every payload.
+
+**Extended to the other three GCS-direct functions, 2026-10-13 - the backward-compatibility
+fix.** Absolute zoom was the first function to leave the FC; tracking, video source and IR
+palette had already left but were still reporting as failures. On a Gremsy they produced
+`CAM: mount rejected tracking start` / `video source` / `IR palette` **every 10 s, forever**,
+because KGCS keeps sending TC2 for backward compatibility and nothing on that payload can
+serve those commands.
+
+That was wrong in two ways. "Rejected" reads as a fault when it is the designed split. And
+`report_cam_unsupported()` shares one rate limiter, so three permanent warnings would have
+**crowded out genuine faults** - destroying the signal D10 Stage 1 existed to create.
+
+All four now behave the same way: on a non-Viewpro payload the FC stays silent and says so
+**once per function per boot**, at `MAV_SEVERITY_INFO`:
+
+```
+CAM: absolute zoom is GCS-direct on this mount
+CAM: tracking is GCS-direct on this mount
+CAM: video source is GCS-direct on this mount
+CAM: IR palette is GCS-direct on this mount
+```
+
+*Named GCS-direct, not KGCS-direct: the ground station driving them is PNU-GCS. See
+"Supported GCS and gimbal combinations".*
+
+| TC2 | On a Viewpro | On a Gremsy |
+|---|---|---|
+| `Tracking_CMD` 1/2 - tracking | served by the FC; a decline is a real failure and still warns | announced once, then silent. KGCS uses `USER_4` to the payload app |
+| `Tracking_CMD` 10-13 - video source | as above | announced once. KGCS sets `C_SOURCE` by `PARAM_EXT` |
+| `Tracking_CMD` 14-19 - IR palette | as above | announced once. KGCS sets `C_T_PALETTE` by `PARAM_EXT` |
+| `Tracking_CMD` 21-24 - absolute zoom | as above | announced once. KGCS uses `USER_4` zoom-to-level |
+
+**A Viewpro that genuinely declines still warns**, through the unchanged
+`report_cam_unsupported()` path - the gate is on the *payload*, not on the return value, so a
+real fault on a payload that should work is never silenced.
+
+*Shape of the change:* one predicate `mount_is_viewpro()` (renamed from
+`fc_handles_absolute_zoom()`, since the same test now serves four functions for two different
+reasons - PCT-means-times for zoom, sole implementor for the other three), one
+`report_gcs_direct()` with a 4-bit mask, and three wrappers - `set_ir_palette()`,
+`set_tracking_state()` and the existing `set_video_source()` - so the gate and the
+`AP_CAMERA_SET_CAMERA_SOURCE_ENABLED` guard stay out of the twelve call sites. Those call
+sites each collapsed to a single line.
+
+**KGCS-to-VIO routing needs no FC change at all** - verified, not assumed.
+`MAVLink_routing::get_targets()` reads the **generated** `mavlink_get_msg_entry()` table, so
+any dialect message carrying `target_system`/`target_component` routes correctly with nothing
+hard-coded. `PARAM_EXT_SET` (323) and its family are in the staged dialect and do carry those
+fields; `COMMAND_LONG` for `USER_4` likewise. A message addressed to the camera's component
+fails `process_locally` - ArduPilot's own compid is 1 - and falls through to `forward()`, which
+sends it out on the link whose learned route matches. The preconditions are the VIO
+heartbeating (it does), the links differing (they do), and `MAVn_OPTIONS` bit 1 (`NO_FORWARD`)
+being clear.
+
+*Also checked:* all seven PNU-KAL messages in `pnu_kal.xml` are accounted for - three inbound
+TC handled in `GCS_Common.cpp`, four outbound TM in the id map and `try_send_message()`. None
+carries a target field, so they are broadcast and handled by the FC, unaffected by any VIO
+routing.
+
+*Verified:* `./waf copter` clean, zero warnings, **1,722,228 B**. Also builds with
+`HAL_MOUNT_VIEWPRO_ENABLED=0` (1,717,352 B) and `HAL_MOUNT_ENABLED=0` (1,653,516 B).
+**Not bench-tested.**
 
 The predicate is wrapped in `#if HAL_MOUNT_VIEWPRO_ENABLED`, since `AP_Mount::Type::Viewpro`
 only exists inside that guard; it returns false when Viewpro is compiled out. Verified by
@@ -896,7 +969,7 @@ If it shows deletions, apply targeted edits only.
 | `libraries/AP_Camera/AP_Camera_MAVLinkCamV2.{h,cpp}` | the one-shot guard on the `"Camera: ..."` statustext; the `CAMERA_SETTINGS` decode, 1 Hz poll, `get_reported_zoom_level()` and the `send_camera_settings()` override (D10 Stage 3). All of it upstream-submittable rather than PNU-specific |
 | `libraries/AP_Camera/AP_Camera.{h,cpp}`, `AP_Camera_Backend.h` | the `get_reported_zoom_level()` accessor and its backend virtual (D10 Stage 3) - deliberately unit-neutral |
 | `Tools/scripts/build_options.py` | the `Camera / Q30` build option (D13) |
-| `ArduCopter/version.h` | **5.1.7 DEV** and the release note describing what it carries |
+| `ArduCopter/version.h` | **5.1.8 DEV** and the release note describing what it carries |
 | `README.md` | this file - never taken from the snapshot |
 
 Most other deviations are KAL -> PNU / PNU-KAL comment renames, which are cosmetic but still
@@ -910,7 +983,7 @@ make a wholesale copy a regression.
 | 4 `pmucan_*.hpp` deleted (1163 lines) | vendored libuavcan v0; only 3 constants were used, all identical in `AP_HAL::CANFrame` / `CANIface` |
 | Mount task kept at 50 Hz | `AP_Mount_Viewpro::update()` self-throttles to 100 ms, so gimbal traffic is 10 Hz either way; at a 10 Hz task rate the period *equals* the throttle and late ticks cause 5 Hz bursts. See D8 |
 | msg 285 suppression made opt-in | V5.0.8 suppressed it for every gimbal, not just Viewpro. See D8 |
-| `version.h` is **5.1.7 DEV** | 5.1.0 OFFICIAL closed the migration; the 5.1.x DEV series carries the post-release D10 work - Stage 1 in 5.1.1, the Gremsy analysis and pitch relocation in 5.1.2, Stage 2a routing in 5.1.3, Gremsy hardware validation in 5.1.4, Stage 2b closure in 5.1.5, Stage 3 in 5.1.6, its bench confirmation in 5.1.7 - and goes OFFICIAL when D10/D11 land |
+| `version.h` is **5.1.8 DEV** | 5.1.0 OFFICIAL closed the migration; the 5.1.x DEV series carries the post-release D10 work - Stage 1 in 5.1.1, the Gremsy analysis and pitch relocation in 5.1.2, Stage 2a routing in 5.1.3, Gremsy hardware validation in 5.1.4, Stage 2b closure in 5.1.5, Stage 3 in 5.1.6, its bench confirmation in 5.1.7, the KGCS backward-compatibility fix in 5.1.8 - and goes OFFICIAL when D10/D11 land |
 | `GCS.h` dead CAM macros removed, `OFP_VER_*` tracked against `version.h` | were stale/unused; guarded by `static_assert` in `Copter.cpp` |
 | `AP_PMUCAN` fixes | dropped-frame at RX budget, dead branch, `&`->`&&`, `RXdrain()` extraction, named constants, ctor init, `TXspin` void. See git log |
 | `send_proximity()` upward-distance block **not** commented out | V5.0.8 wrapped it in `/* Currently, no upward sensor */`. `AP_Proximity::get_upward_distance()` already returns false when no backend supplies one (`AP_Proximity.cpp:498`), and TeraRanger Tower Evo is not one of the backends that does - so the comment-out is a no-op here and a silent regression for `AP_Proximity_RangeFinder` / `_MAV` / scripting users. Not applied |
@@ -1373,7 +1446,7 @@ Zoom to level -> P (comp 26) : MAV_CMD_USER_4 31013, p1=2, p2=0, p3=4, p4 = zoom
 Absolute zoom **in times**, no percentage, no divisor, no mode dependency - exactly what TC2
 `Tracking_CMD` 21-24 wants. Being `USER_4` to the payload app, ArduPilot has no route to it.
 
-> **DECIDED 2026-10-13: absolute zoom moves to KGCS-direct**, alongside palette, source and
+> **DECIDED 2026-10-13: absolute zoom moves to GCS-direct**, alongside palette, source and
 > tracking. ArduPilot handles continuous zoom only, which already works and needs no units
 > conversion. The alternative - a mode-dependent percentage conversion in `AP_Q30` against a
 > parameter the FC cannot read - would have been wrong whenever the operator changed zoom
@@ -1390,7 +1463,7 @@ would work.
 KGCS reads that directly, **TM2's zoom gap stops mattering and Stage 3 closes with no
 ArduPilot change at all.**
 
-**Three mappings the KGCS-direct work needs, now known:**
+**Three mappings the GCS-direct work needs, now known:**
 
 TC2 video source maps 1:1 onto `C_SOURCE` (`PARAM_EXT_SET`, uint32 in bytes 0-3, **binary not
 ASCII**):
@@ -1442,6 +1515,56 @@ instead.
 mode flags carry a Gremsy extension `0x4000` for mapping mode. `DO_MOUNT_CONTROL 205` is
 listed as legacy v1. A laser rangefinder reports through `DISTANCE_SENSOR` (132), for which
 TC2/TM2 have no field.
+
+---
+
+**Supported GCS and gimbal combinations - decided 2026-10-14**
+
+*PNU-GCS is replacing KGCS. KGCS is a closed project and **whitelists MAVLink message ids**,
+discarding or erroring on anything it does not already know - which fixes the set of payloads
+it can fly with.*
+
+| Ground station | Gimbal | Interface | Status |
+|---|---|---|---|
+| **KGCS** | **Viewpro only** | TC2/TM2 (PNU-KAL ICD) | supported - the legacy path, must keep working unchanged |
+| KGCS | Gremsy, or any MAVLink gimbal | - | **NOT SUPPORTED.** Do not retest this |
+| **PNU-GCS** | any | TC2/TM2 (KGCS interface) | supported - the `AP_Q30` path; four functions are GCS-direct on a non-Viewpro |
+| **PNU-GCS** | any | standard MAVLink2 | supported - `AP_Mount` / `AP_Camera` handlers; `AP_Q30` is not involved at all |
+| Mission Planner, QGC | any | standard MAVLink2 | supported - see the dual-GCS compatibility strategy below |
+
+**Why KGCS + Gremsy cannot work, so nobody spends a day rediscovering it.** Tried on the bench
+2026-10-14: KGCS connects and keeps seeing the FC, then its data stream stops after a few
+seconds. A Gremsy adds message ids KGCS has never had to parse - from ArduPilot
+`GIMBAL_DEVICE_ATTITUDE_STATUS` (285), and from the payload itself everything MAVLink routing
+forwards: `HEARTBEAT` from three components (26, 100, 154), `CAMERA_INFORMATION` (259),
+`CAMERA_SETTINGS` (260), `GIMBAL_DEVICE_INFORMATION` (283), `GIMBAL_DEVICE_ATTITUDE_STATUS`
+(285), `STATUSTEXT` (253), and on request 261, 262, 269, 271, 322, 324, 397, 132, 248.
+**This is not a firmware defect and there is nothing to fix in the FC.**
+
+**The msg 285 suppression is correctly keyed, because of this table.** `AP_Mount_Viewpro`
+suppresses `GIMBAL_DEVICE_ATTITUDE_STATUS` (D8a) and nothing else does. Since KGCS only ever
+flies a Viewpro, KGCS never sees 285; every other combination has a ground station that copes
+with it. A *per-channel* suppression was considered when KGCS+Gremsy was still thought
+supportable, and is **not needed** - the per-backend hook is right.
+
+**Do NOT set `MAVn_OPTIONS` bit 1 (`NO_FORWARD`) on the VIO's link.** It was considered as a
+way to stop payload traffic reaching KGCS, and would break PNU-GCS: a private channel does
+still receive exactly-targeted messages, so commands would get through, but
+**`PARAM_EXT_ACK` (324) carries no target fields** and is therefore broadcast - so it would be
+blocked on the way back. Every palette and source change would succeed silently and look like
+a failure. `PARAM_EXT_VALUE` (322) and `COMMAND_ACK` (77) do carry targets and would return
+normally, which makes the failure mode confusingly partial. Leave forwarding on.
+
+**Naming.** The four one-shot notices say `CAM: <function> is GCS-direct on this mount` - not
+"KGCS-direct", because the ground station driving them is PNU-GCS. In the code, `GCS_DIRECT_*`
+and `report_gcs_direct()` follow the same rule. References to the **KGCS interface** mean the
+TC2/TM2 ICD, which both ground stations speak; references to **KGCS** mean the product.
+
+**What PNU-GCS already has working.** Its standard-MAVLink2 mode needs nothing new: the
+Mission Planner bench session on 2026-10-13 - slew, Set Neutral, point-down and zoom against a
+Gremsy - exercises the identical handlers, and the dual-GCS compatibility strategy below exists
+to keep that path clean. Its KGCS-interface mode uses `AP_Q30` exactly as KGCS does, with the
+four GCS-direct functions on a non-Viewpro payload.
 
 ---
 

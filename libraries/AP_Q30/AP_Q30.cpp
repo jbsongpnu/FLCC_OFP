@@ -55,7 +55,7 @@ void AP_Q30::report_cam_unsupported(const char *what)
 {
     _cam_unsupported_cnt++;
 
-    // always report the first one, then at most one message per interval: KGCS streams
+    // always report the first one, then at most one message per interval: the GCS streams
     // TC2 at ~10 Hz, so on a mount without camera support every tick fails
     const uint32_t now_ms = AP_HAL::millis();
     if ((_cam_unsupported_cnt > 1) &&
@@ -88,7 +88,8 @@ bool AP_Q30::get_tm2_zoom_times(float &zoom_times)
     // matching TM2's own ICD range of 1..30.
     //
     // That reinterpretation is a fact about the payloads THIS firmware flies, not about
-    // MAVLink, which is why it lives here in the KGCS adapter rather than in AP_Camera.
+    // MAVLink, which is why it lives here in the KGCS-interface adapter rather than in
+    // AP_Camera.  (The interface is shared: KGCS speaks it, and PNU-GCS can select it.)
     // AP_Camera deliberately reports the raw number without claiming to know its units;
     // see README "Dual-GCS compatibility strategy", design rule 1.
     //
@@ -104,9 +105,9 @@ bool AP_Q30::get_tm2_zoom_times(float &zoom_times)
 }
 
 // -------------------------------------------------------------------------
-// PNU-ISSUE(D10) : may the FC send an absolute zoom, or is it KGCS-direct?
+// PNU-ISSUE(D10) : is the fitted gimbal a Viewpro?
 // -------------------------------------------------------------------------
-bool AP_Q30::fc_handles_absolute_zoom() const
+bool AP_Q30::mount_is_viewpro() const
 {
 #if HAL_MOUNT_VIEWPRO_ENABLED
     const AP_Mount *mount = AP::mount();
@@ -117,20 +118,83 @@ bool AP_Q30::fc_handles_absolute_zoom() const
 }
 
 // -------------------------------------------------------------------------
+// PNU-ISSUE(D10) : note once that a TC2 function is GCS-direct on this payload
+// -------------------------------------------------------------------------
+void AP_Q30::report_gcs_direct(uint8_t which, const char *what)
+{
+    if (_gcs_direct_reported & which) {
+        return;
+    }
+    _gcs_direct_reported |= which;
+
+    // MAV_SEVERITY_INFO, and said once: this is the designed split, not a fault
+    GCS_SEND_TEXT(MAV_SEVERITY_INFO, "CAM: %s is GCS-direct on this mount", what);
+}
+
+// -------------------------------------------------------------------------
+// PNU-ISSUE(D10) : IR palette.  Only AP_Mount_Viewpro implements IR_Color_Change() -
+// MAVLink defines no thermal-palette message at all.  On a Gremsy VIO the palette is the
+// C_T_PALETTE extended parameter, which the GCS sets directly on the camera because
+// ArduPilot implements no PARAM_EXT_*.  Note that means PNU-GCS, not KGCS - KGCS is only
+// ever used with a Viewpro.  See README "Supported GCS and gimbal combinations".
+// -------------------------------------------------------------------------
+void AP_Q30::set_ir_palette(uint8_t color)
+{
+    if (!mount_is_viewpro()) {
+        report_gcs_direct(GCS_DIRECT_IR_PALETTE, "IR palette");
+        return;
+    }
+
+    AP_Mount *mount = AP::mount();
+    if ((mount == nullptr) || !mount->IR_Color_Change(0, color)) {
+        // a Viewpro that declines is a real failure, so warn as usual
+        report_cam_unsupported("IR palette");
+    }
+}
+
+// -------------------------------------------------------------------------
+// PNU-ISSUE(D10) : object tracking.  AP_Camera_MAVLinkCamV2 implements no set_tracking(),
+// and ArduPilot never *sends* MAV_CMD_CAMERA_TRACK_POINT - it only receives it.  On a
+// Gremsy VIO tracking lives on the payload app (component 26) behind MAV_CMD_USER_4, which
+// no AP_Camera path can reach, so the GCS drives it directly.
+// -------------------------------------------------------------------------
+void AP_Q30::set_tracking_state(TrackingType tracking_type)
+{
+    if (!mount_is_viewpro()) {
+        report_gcs_direct(GCS_DIRECT_TRACKING, "tracking");
+        return;
+    }
+
+    //check do_aux_function_camera_image_tracking() in RC_Channel.cpp for usage
+    AP_Camera *camera = AP::camera();
+    if ((camera == nullptr) ||
+        !camera->set_tracking(0, tracking_type, Vector2f{0.5, 0.5}, Vector2f{})) {
+        report_cam_unsupported("tracking");
+    }
+}
+
+// -------------------------------------------------------------------------
 // PNU-ISSUE(D10) : select the EO/IR video source, guarded for builds without it
 // -------------------------------------------------------------------------
-bool AP_Q30::set_video_source(AP_Camera::CameraSource primary, AP_Camera::CameraSource secondary)
+void AP_Q30::set_video_source(AP_Camera::CameraSource primary, AP_Camera::CameraSource secondary)
 {
+    // PNU-ISSUE(D10) : only AP_Mount_Viewpro implements set_camera_source(); MAVLink has no
+    // standard EO/IR/PIP selection.  On a Gremsy VIO it is the C_SOURCE extended parameter,
+    // which the GCS sets directly on the camera.
+    if (!mount_is_viewpro()) {
+        report_gcs_direct(GCS_DIRECT_VIDEO_SOURCE, "video source");
+        return;
+    }
+
 #if AP_CAMERA_SET_CAMERA_SOURCE_ENABLED
     AP_Camera *camera = AP::camera();
-    if (camera == nullptr) {
-        return false;
+    if ((camera == nullptr) || !camera->set_camera_source(0, primary, secondary)) {
+        report_cam_unsupported("video source");
     }
-    return camera->set_camera_source(0, primary, secondary);
 #else
     (void)primary;
     (void)secondary;
-    return false;
+    report_cam_unsupported("video source");
 #endif
 }
 
@@ -256,8 +320,8 @@ void AP_Q30::no_control_mode_operation(mavlink_sys_icd_gcs_flcc_cam_cmd_t cam_cm
     // through AP::camera() rather than AP::mount().  With CAM1_TYPE=4 (Mount) that
     // forwards straight back to the mount, so a Viewpro behaves exactly as before; with
     // CAM1_TYPE=6 (MAVLinkCamV2) it reaches a camera the mount cannot address at all,
-    // which is the Gremsy case.  CAM1_TYPE now has to be set correctly for the KGCS
-    // camera path to work - see README "Dual-GCS compatibility strategy".
+    // which is the Gremsy case.  CAM1_TYPE now has to be set correctly for the TC2 camera
+    // path to work - see README "Dual-GCS compatibility strategy".
     AP_Camera *camera = AP::camera();
     if (camera == nullptr) {
         return;
@@ -350,18 +414,12 @@ void AP_Q30::no_control_mode_operation(mavlink_sys_icd_gcs_flcc_cam_cmd_t cam_cm
     // TRACKING
     if(cam_cmd.Tracking_CMD==1U)        //start
     {
-        //check do_aux_function_camera_image_tracking() in RC_Channel.cpp for usage
-        if (!camera->set_tracking(0, TrackingType::TRK_POINT, Vector2f{0.5, 0.5}, Vector2f{})) {
-            report_cam_unsupported("tracking start");
-        }
+        set_tracking_state(TrackingType::TRK_POINT);
         debug_cam_track_cmd = 1U; //debug //0: not sent, 1: start, 2: stop
     }
     else if(cam_cmd.Tracking_CMD==2U)   //stop
     {
-        //check do_aux_function_camera_image_tracking() in RC_Channel.cpp for usage
-        if (!camera->set_tracking(0, TrackingType::TRK_NONE, Vector2f{0.5, 0.5}, Vector2f{})) {
-            report_cam_unsupported("tracking stop");
-        }
+        set_tracking_state(TrackingType::TRK_NONE);
         debug_cam_track_cmd = 2U; //debug //0: not sent, 1: start, 2: stop
     }
 
@@ -386,7 +444,7 @@ void AP_Q30::IR_operation(mavlink_sys_icd_gcs_flcc_cam_cmd_t cam_cmd)
     // camera operations and go through AP::camera().  get_zoom_times() and
     // IR_Color_Change() have no AP_Camera equivalent at all - they exist only on
     // AP_Mount_Viewpro - so they stay on AP::mount() and simply do nothing on any other
-    // gimbal.  On a Gremsy the palette is a C_T_PALETTE extended parameter that KGCS
+    // gimbal.  On a Gremsy the palette is a C_T_PALETTE extended parameter that the GCS
     // sets directly on the payload; see README "Standard Control for Gremsy VIO".
     AP_Mount *mount = AP::mount();
     AP_Camera *camera = AP::camera();
@@ -397,33 +455,25 @@ void AP_Q30::IR_operation(mavlink_sys_icd_gcs_flcc_cam_cmd_t cam_cmd)
     // Control Window Combination
     if(cam_cmd.Tracking_CMD==10)                // EO FULL & IR PIP
     {
-        if (!set_video_source(AP_Camera::CameraSource::RGB, AP_Camera::CameraSource::IR)) {
-            report_cam_unsupported("video source");
-        }
+        set_video_source(AP_Camera::CameraSource::RGB, AP_Camera::CameraSource::IR);
         _primary_EOIR_source = 1;
         debug_cam_ir_cmd = 1U; //debug //0: not sent, 1: mode, 2: coler, 3: zoom
     }
     else if(cam_cmd.Tracking_CMD==11)           // IR FULL
     {
-        if (!set_video_source(AP_Camera::CameraSource::IR, AP_Camera::CameraSource::DEFAULT)) {
-            report_cam_unsupported("video source");
-        }
+        set_video_source(AP_Camera::CameraSource::IR, AP_Camera::CameraSource::DEFAULT);
         _primary_EOIR_source = 2;
         debug_cam_ir_cmd = 1U; //debug //0: not sent, 1: mode, 2: coler, 3: zoom
     }
     else if(cam_cmd.Tracking_CMD==12)           // IR FULL & EO PIP
     {
-        if (!set_video_source(AP_Camera::CameraSource::IR, AP_Camera::CameraSource::RGB)) {
-            report_cam_unsupported("video source");
-        }
+        set_video_source(AP_Camera::CameraSource::IR, AP_Camera::CameraSource::RGB);
         _primary_EOIR_source = 2;
         debug_cam_ir_cmd = 1U; //debug //0: not sent, 1: mode, 2: coler, 3: zoom
     }
     else if(cam_cmd.Tracking_CMD==13U)          // EO FULL
     {
-        if (!set_video_source(AP_Camera::CameraSource::RGB, AP_Camera::CameraSource::DEFAULT)) {
-            report_cam_unsupported("video source");
-        }
+        set_video_source(AP_Camera::CameraSource::RGB, AP_Camera::CameraSource::DEFAULT);
         _primary_EOIR_source = 1;
         debug_cam_ir_cmd = 1U; //debug //0: not sent, 1: mode, 2: coler, 3: zoom
     }
@@ -447,46 +497,34 @@ void AP_Q30::IR_operation(mavlink_sys_icd_gcs_flcc_cam_cmd_t cam_cmd)
     // Control Image Color (IR pseudo-color palette via Viewpro C1 packet)
     if(cam_cmd.Tracking_CMD==14U)               // White Hot
     {
-        if (!mount->IR_Color_Change(0, 0x0E)) {
-            report_cam_unsupported("IR palette");
-        }
+        set_ir_palette(0x0E);
         debug_cam_ir_cmd = 2U; //debug //0: not sent, 1: mode, 2: coler, 3: zoom
     }
     else if(cam_cmd.Tracking_CMD==15U)          // Black Hot
     {
-        if (!mount->IR_Color_Change(0, 0x0F)) {
-            report_cam_unsupported("IR palette");
-        }
+        set_ir_palette(0x0F);
         debug_cam_ir_cmd = 2U; //debug //0: not sent, 1: mode, 2: coler, 3: zoom
     }
     else if(cam_cmd.Tracking_CMD==16U)          // Color 1
     {
-        if (!mount->IR_Color_Change(0, 0x21)) {
-            report_cam_unsupported("IR palette");
-        }
+        set_ir_palette(0x21);
         debug_cam_ir_cmd = 2U; //debug //0: not sent, 1: mode, 2: coler, 3: zoom
     }
     else if(cam_cmd.Tracking_CMD==17U)          // Color 2
     {
-        if (!mount->IR_Color_Change(0, 0x22)) {
-            report_cam_unsupported("IR palette");
-        }
+        set_ir_palette(0x22);
         debug_cam_ir_cmd = 2U; //debug //0: not sent, 1: mode, 2: coler, 3: zoom
     }
     else if(cam_cmd.Tracking_CMD==18U)          // Color 3
     {
         // mount->IR_Color_Change(0, 0x23);
-        if (!mount->IR_Color_Change(0, 0x0E)) {
-            report_cam_unsupported("IR palette");
-        }
+        set_ir_palette(0x0E);
         debug_cam_ir_cmd = 2U; //debug //0: not sent, 1: mode, 2: coler, 3: zoom
     }
     else if(cam_cmd.Tracking_CMD==19U)          // Color 4
     {
         // mount->IR_Color_Change(0, 0x24);
-        if (!mount->IR_Color_Change(0, 0x0F)) {
-            report_cam_unsupported("IR palette");
-        }
+        set_ir_palette(0x0F);
         debug_cam_ir_cmd = 2U; //debug //0: not sent, 1: mode, 2: coler, 3: zoom
     }
     // Tracking_CMD == 20 is intentionally left unassigned for future use.
@@ -534,19 +572,17 @@ void AP_Q30::IR_operation(mavlink_sys_icd_gcs_flcc_cam_cmd_t cam_cmd)
             // that range is mode-dependent (240x combine / 30x super-resolution, selected by
             // the C_V_ZM_MODE extended parameter), which the FC cannot read because ArduPilot
             // implements no PARAM_EXT_*.  Sending 1..30 there would be read as 1-30 %, i.e.
-            // zoomed out.  KGCS drives absolute zoom directly instead, with MAV_CMD_USER_4
-            // "zoom to level" in times, so the FC must stay out of it entirely - a rate pulse
-            // here would fight the command KGCS is sending.  See README "Gremsy PayloadSDK
-            // message reference".  EO_zoom_times keeps counting either way so the cached
+            // zoomed out.  The GCS drives absolute zoom directly instead, with
+            // MAV_CMD_USER_4 "zoom to level" in times, so the FC must stay out of it
+            // entirely - a rate pulse here would fight the command the GCS is sending.
+            // See README "Gremsy PayloadSDK message reference".  EO_zoom_times keeps counting either way so the cached
             // value stays meaningful if the mount changes.
-            if (fc_handles_absolute_zoom()) {
+            if (mount_is_viewpro()) {
                 if (!camera->set_zoom(0, ZoomType::PCT, EO_zoom_times)) {
                     report_cam_unsupported("zoom level");
                 }
-            } else if (!_abs_zoom_delegated_reported) {
-                // say it once: this is designed behaviour, not a failure
-                _abs_zoom_delegated_reported = true;
-                GCS_SEND_TEXT(MAV_SEVERITY_INFO, "CAM: absolute zoom is KGCS-direct on this mount");
+            } else {
+                report_gcs_direct(GCS_DIRECT_ABS_ZOOM, "absolute zoom");
             }
             prev_EO_zoom_cmd = cam_cmd.Tracking_CMD;
         } else if (_primary_EOIR_source == 2) { //This case will lead to zoom IR
