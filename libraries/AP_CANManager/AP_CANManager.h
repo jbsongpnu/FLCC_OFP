@@ -147,6 +147,8 @@ private:
         AP_CANDriver* _uavcan;
         AP_CANDriver* _piccolocan;
         AP_CANDriver* _pmucan;  // PNU
+        AP_CANDriver* _pnugimbal;   // PNU
+        AP_CANDriver* _pnusar;      // PNU
     };
 
     CANIface_Params _interfaces[HAL_NUM_CAN_IFACES];

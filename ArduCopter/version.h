@@ -7,7 +7,7 @@
 #include "ap_version.h"
 
 // PNU : This is a custom code modified by PNU Drone
-#define THISFIRMWARE "PNU_OFP V5.1.8"
+#define THISFIRMWARE "PNU_OFP V5.1.9"
 
 // NOTE: 5.1.6 is a DEV build on top of the 5.1.0 OFFICIAL release, which closed the
 // Copter-4.7.1 -> FLCC migration.  It closes D10 Stage 3: TM2's Zoom_POS_FB now carries
@@ -22,6 +22,25 @@
 // and a send_camera_settings() override that forwards real values instead of upstream's
 // NaN placeholders are all vendor-neutral and worth submitting to ArduPilot; only
 // AP_Q30 decides the value means times, which is where PNU-specific facts belong.
+//
+// 5.1.9 adds skeletons for two new CAN drivers: AP_PNUGimbal (a PNU-developed gimbal
+// mount) and AP_PNUSAR (a SAR radar payload).  Both speak private CAN protocols, NOT
+// DroneCAN, in the same shape as AP_PMUCAN - their own thread created in init(), nothing on
+// the vehicle scheduler.  Registered as AP_CAN::Protocol 16 and 17, so CAN_Dn_PROTOCOL = 16
+// or 17 selects them.
+//
+// They are STRUCTURE ONLY.  The ICDs are not yet available, so rx_spin(), tx_spin(),
+// handle_frame() and send_frame() are stubs marked TODO; no parameters, no CAN_Dn_PROTOCOL
+// @Values entry, and no vehicle-side consumers yet.  What the skeletons do carry is this
+// project's own hard-won lessons: DLC validation before reading any field with a
+// rate-limited short-frame report (D6), initialisers on every member (D1/D10), a note not
+// to add write-only counters (D6), and a reminder to confirm endianness and say so at the
+// site if no byte swap is needed (D15).
+//
+// Note that adding protocol enum values breaks exhaustive switches - -Werror=switch caught
+// AP_Arming.cpp, which now lists both beside PMUCAN's existing no-op case.  Values 16 and 17
+// could collide with future upstream protocol numbers, exactly as PMUCAN = 15 might; worth
+// watching on the next ArduPilot bump.
 //
 // 5.1.8 is the backward-compatibility fix for KGCS.  Tracking, video source and IR palette
 // had already left the FC for GCS-direct routing, but were still reported as failures -
@@ -91,11 +110,11 @@
 // must stay in step with the three defines below (static_assert in Copter.cpp, D4).
 
 // the following line is parsed by the autotest scripts
-#define FIRMWARE_VERSION 5,1,8,FIRMWARE_VERSION_TYPE_DEV
+#define FIRMWARE_VERSION 5,1,9,FIRMWARE_VERSION_TYPE_DEV
 
 #define FW_MAJOR 5
 #define FW_MINOR 1
-#define FW_PATCH 8
+#define FW_PATCH 9
 #define FW_TYPE FIRMWARE_VERSION_TYPE_DEV
 
 #include <AP_Common/AP_FWVersionDefine.h>

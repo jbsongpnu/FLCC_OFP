@@ -1,7 +1,15 @@
 # PNU-KAL FLCC OFP Development Version
 - This branch currently developing PNU-KAL FLCC OFP after official version (TAG) PNU-KAL-FLCC-5.1.0 (this is same code as 5.0.15 dev)  
 - PNU-ISSUE 10 & 11 still remains : For Gremsy camera and general camera mount library structure  
-- IN THIS VERSION : V5.1.8 working with issues 10 and 11 - **backward-compatibility fix for KGCS; D10 is FC-complete**  
+- IN THIS VERSION : V5.1.9 - **skeletons for two new CAN drivers : `AP_PNUGimbal` and `AP_PNUSAR`**  
+   - Both speak **private CAN protocols, NOT DroneCAN**, in the same shape as `AP_PMUCAN` - their own thread created in `init()`, nothing on the vehicle scheduler  
+   - Registered as `AP_CAN::Protocol` **16** (`PNUGimbal`) and **17** (`PNUSAR`), so `CAN_Dn_PROTOCOL = 16` or `17` selects them. Slots in `AP_CANManager`, factory cases behind `#if`, and both listed in `ArduCopter/wscript`  
+   - **STRUCTURE ONLY.** The ICDs are not yet available, so `rx_spin()`, `tx_spin()`, `handle_frame()` and `send_frame()` are stubs marked `TODO`; no parameters, no `CAN_Dn_PROTOCOL` `@Values` entry, no vehicle-side consumers  
+   - The skeletons carry this project's own lessons rather than copying `AP_PMUCAN` verbatim : **DLC validation before reading any field** with a rate-limited short-frame report (D6), **initialisers on every member** (D1/D10), a note **not to add write-only counters** (D6), and a reminder to **confirm endianness and say so at the site** if no byte swap is needed (D15)  
+   - **Adding protocol enum values breaks exhaustive switches** - `-Werror=switch` caught `AP_Arming.cpp`, which now lists both beside PMUCAN's existing no-op case. Values 16/17 could collide with future upstream protocol numbers, exactly as `PMUCAN = 15` might; watch this on the next ArduPilot bump  
+   - **Design intent recorded in both headers** (2026-10-15), see below - `AP_PNUGimbal` drives three CubeMars motors and carries **no camera**; it stabilises the SAR device that `AP_PNUSAR` will drive  
+- For 5.1.8 version :  
+   - **backward-compatibility fix for KGCS; D10 is FC-complete**  
    - **Tracking, video source and IR palette no longer report as failures on a Gremsy.** They had already left the FC for GCS-direct routing, but still produced `CAM: mount rejected ...` **every 10 s, forever**, because the GCS keeps sending TC2 and nothing on that payload can serve them  
    - That mattered beyond the wording : `report_cam_unsupported()` shares one rate limiter, so three permanent warnings would have **crowded out genuine faults** - destroying the signal D10 Stage 1 exists to provide  
    - All four GCS-direct functions now announce themselves **once** at `MAV_SEVERITY_INFO` and then stay silent : `CAM: <function> is GCS-direct on this mount`  
@@ -968,8 +976,11 @@ If it shows deletions, apply targeted edits only.
 | `libraries/AP_Q30/AP_Q30_config.h` | PNU-only file - the `AP_Q30_ENABLED` flag (D13), which also requires `AP_CAMERA_ENABLED` since Stage 2a |
 | `libraries/AP_Camera/AP_Camera_MAVLinkCamV2.{h,cpp}` | the one-shot guard on the `"Camera: ..."` statustext; the `CAMERA_SETTINGS` decode, 1 Hz poll, `get_reported_zoom_level()` and the `send_camera_settings()` override (D10 Stage 3). All of it upstream-submittable rather than PNU-specific |
 | `libraries/AP_Camera/AP_Camera.{h,cpp}`, `AP_Camera_Backend.h` | the `get_reported_zoom_level()` accessor and its backend virtual (D10 Stage 3) - deliberately unit-neutral |
+| `libraries/AP_PNUGimbal/*`, `libraries/AP_PNUSAR/*` | PNU-only files - CAN driver skeletons (5.1.9), structure only until the ICDs arrive |
+| `libraries/AP_CANManager/AP_CAN.h`, `AP_CANManager.{h,cpp}` | `PMUCAN = 15`, `PNUGimbal = 16`, `PNUSAR = 17` plus their driver slots and factory cases |
+| `libraries/AP_Arming/AP_Arming.cpp` | the three PNU protocols listed in the `AP_CAN::Protocol` switch - required to compile under `-Werror=switch`, zero runtime effect |
 | `Tools/scripts/build_options.py` | the `Camera / Q30` build option (D13) |
-| `ArduCopter/version.h` | **5.1.8 DEV** and the release note describing what it carries |
+| `ArduCopter/version.h` | **5.1.9 DEV** and the release note describing what it carries |
 | `README.md` | this file - never taken from the snapshot |
 
 Most other deviations are KAL -> PNU / PNU-KAL comment renames, which are cosmetic but still
@@ -983,7 +994,7 @@ make a wholesale copy a regression.
 | 4 `pmucan_*.hpp` deleted (1163 lines) | vendored libuavcan v0; only 3 constants were used, all identical in `AP_HAL::CANFrame` / `CANIface` |
 | Mount task kept at 50 Hz | `AP_Mount_Viewpro::update()` self-throttles to 100 ms, so gimbal traffic is 10 Hz either way; at a 10 Hz task rate the period *equals* the throttle and late ticks cause 5 Hz bursts. See D8 |
 | msg 285 suppression made opt-in | V5.0.8 suppressed it for every gimbal, not just Viewpro. See D8 |
-| `version.h` is **5.1.8 DEV** | 5.1.0 OFFICIAL closed the migration; the 5.1.x DEV series carries the post-release D10 work - Stage 1 in 5.1.1, the Gremsy analysis and pitch relocation in 5.1.2, Stage 2a routing in 5.1.3, Gremsy hardware validation in 5.1.4, Stage 2b closure in 5.1.5, Stage 3 in 5.1.6, its bench confirmation in 5.1.7, the KGCS backward-compatibility fix in 5.1.8 - and goes OFFICIAL when D10/D11 land |
+| `version.h` is **5.1.9 DEV** | 5.1.0 OFFICIAL closed the migration; the 5.1.x DEV series carries the post-release D10 work - Stage 1 in 5.1.1, the Gremsy analysis and pitch relocation in 5.1.2, Stage 2a routing in 5.1.3, Gremsy hardware validation in 5.1.4, Stage 2b closure in 5.1.5, Stage 3 in 5.1.6, its bench confirmation in 5.1.7, the KGCS backward-compatibility fix in 5.1.8, and the `AP_PNUGimbal` / `AP_PNUSAR` CAN driver skeletons in 5.1.9 - and goes OFFICIAL when D10/D11 land |
 | `GCS.h` dead CAM macros removed, `OFP_VER_*` tracked against `version.h` | were stale/unused; guarded by `static_assert` in `Copter.cpp` |
 | `AP_PMUCAN` fixes | dropped-frame at RX budget, dead branch, `&`->`&&`, `RXdrain()` extraction, named constants, ctor init, `TXspin` void. See git log |
 | `send_proximity()` upward-distance block **not** commented out | V5.0.8 wrapped it in `/* Currently, no upward sensor */`. `AP_Proximity::get_upward_distance()` already returns false when no backend supplies one (`AP_Proximity.cpp:498`), and TeraRanger Tower Evo is not one of the backends that does - so the comment-out is a no-op here and a silent regression for `AP_Proximity_RangeFinder` / `_MAV` / scripting users. Not applied |
@@ -1518,6 +1529,48 @@ TC2/TM2 have no field.
 
 ---
 
+**AP_PNUGimbal and AP_PNUSAR - design intent, recorded 2026-10-15**
+
+*Skeletons only at 5.1.9. This is what the next session needs to know before writing code;
+the same notes are at the top of each header, which is where you will actually look.*
+
+| | `AP_PNUGimbal` | `AP_PNUSAR` |
+|---|---|---|
+| What it is | a 3-axis gimbal **mount controller** | the **SAR radar payload** |
+| Hardware | three **CubeMars GL60 II KV28** motors, one per axis, over CAN | one device over CAN |
+| Camera | **none** | n/a |
+| What it carries | **the SAR device** - it stabilises the `AP_PNUSAR` payload | - |
+| `CAN_Dn_PROTOCOL` | 16 | 17 |
+
+**`AP_PNUGimbal` is NOT the same kind of driver as `AP_PMUCAN`, and the skeleton is only a
+starting shape.** `AP_PMUCAN` talks to one complete device that reports status. This talks to
+**three actuators** and has to close a stabilisation loop around them, so:
+
+- **The CAN protocol is the motor's, not a PNU device protocol.** The "ICD" is CubeMars' CAN
+  protocol - MIT or servo mode - plus whatever per-axis addressing is chosen. There may be no
+  PNU document to wait for at all.
+- **It is a control loop, not a message decoder.** It needs AHRS attitude, and the 100 Hz
+  thread the skeleton creates is very likely too slow for motor control. Check what rate the
+  chosen CubeMars mode wants before keeping it.
+
+**The open question for `AP_PNUGimbal`:** does it back an **`AP_Mount` backend**, which would
+give targeting, mount modes, RC and MAVLink control for free - or stand alone with its own
+interface? `AP_Mount` assumes a camera in places but does not require one (`AP_Mount_Servo`
+has none), so a backend looks plausible and would avoid reimplementing targeting. **Decide
+before writing the loop, not after.**
+
+**The open question for `AP_PNUSAR`:** where does SAR data go? Candidates are `AP_Proximity`
+(if it yields range/bearing usable for avoidance), a PNU-KAL ICD message of its own in
+`pnu_kal.xml` alongside TM1/TM2/TM5, or a private path to the ground. That choice decides most
+of the driver, so settle it first.
+
+*Note the dependency direction:* `AP_PNUGimbal` stabilises what `AP_PNUSAR` drives, so the two
+are coupled at the vehicle level even though neither needs to include the other. Whether the
+gimbal needs anything **from** the SAR - a boresight offset, a scan-synchronised rate - is
+itself an open question.
+
+---
+
 **Supported GCS and gimbal combinations - decided 2026-10-14**
 
 *PNU-GCS is replacing KGCS. KGCS is a closed project and **whitelists MAVLink message ids**,
@@ -1565,6 +1618,54 @@ Mission Planner bench session on 2026-10-13 - slew, Set Neutral, point-down and 
 Gremsy - exercises the identical handlers, and the dual-GCS compatibility strategy below exists
 to keep that path clean. Its KGCS-interface mode uses `AP_Q30` exactly as KGCS does, with the
 four GCS-direct functions on a non-Viewpro payload.
+
+**Per-channel message suppression - it exists, and it is narrower than it looks.**
+
+A ground station can stop ArduPilot sending any single message on **its own link**, with one
+standard command and **no firmware change**:
+
+```
+MAV_CMD_SET_MESSAGE_INTERVAL (511)
+  param1 = <message id>     e.g. 285 for GIMBAL_DEVICE_ATTITUDE_STATUS
+  param2 = -1               "stop sending"
+```
+
+`GCS_Common.cpp:3227` treats -1 as stop and clears that message's scheduling interval.
+`set_message_interval()` is a `GCS_MAVLINK` **member**, so it applies only to the channel the
+command arrived on - genuinely per-channel. `mavlink_id_to_ap_message_id()` maps 285 at
+`GCS_Common.cpp:1134`, guarded only by `HAL_MOUNT_ENABLED`, so 285 is addressable this way.
+
+> **It stops ArduPilot's own messages only. It does NOT stop forwarded payload traffic.**
+> `MAVLink_routing::forward()` calls `_mavlink_resend_uart()` directly and never consults
+> stream intervals or the deferred-message buckets - routing is a separate path that copies
+> bytes to the matching link. So on a Gremsy, msg 285 reaches the GCS from **two independent
+> sources**, and this command stops only the first:
+>
+> | Source | Stopped by `SET_MESSAGE_INTERVAL(285,-1)`? |
+> |---|---|
+> | ArduPilot's `send_gimbal_device_attitude_status()` | **yes** |
+> | the VIO's gimbal component broadcasting its own 285, forwarded by routing | **no** |
+>
+> Suppressing ArduPilot's copy while the payload's still arrives is the **worst** outcome: the
+> message still appears, at an irregular rate, from a different component id.
+
+Two further limits, both normal but easy to forget:
+
+- **Not persistent.** The interval lives in RAM, so it must be re-sent after every reboot or
+  reconnect. That belongs in the GCS's connection sequence, not in a one-time setup step.
+- **A stream-rate parameter change undoes it.** `GCS_Param.cpp:160,202` call
+  `initialise_message_intervals_for_stream()` whenever an `SRn_*` parameter changes, which
+  re-applies the group rate to every message in that group - and 285 lives in `STREAM_EXTRA3`.
+
+*To stop the payload's own copies* you would have to send `SET_MESSAGE_INTERVAL` to the gimbal
+component (sysid 1, compid 154) and hope the VIO implements the standard command - **untested**,
+and the PayloadSDK only documents 511 against the payload app with a vendor-repurposed
+`param1`. The other route, `NO_FORWARD` on the VIO link, is ruled out above.
+
+**Recommendation: do not suppress 285.** PNU-GCS handles it, the payload's copies arrive
+regardless, and the only real decision is which source of gimbal attitude PNU-GCS reads - msg
+285 (standard, and arriving anyway) or TM2 (the KGCS convention). The per-backend suppression
+stays as it is for Viewpro/KGCS, which cannot send this command at all.
 
 ---
 

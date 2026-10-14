@@ -42,6 +42,8 @@
 #include <AP_Common/sorting.h>
 #include <AP_Logger/AP_Logger.h>
 #include <AP_PMUCAN/AP_PMUCAN.h>    // PNU
+#include <AP_PNUGimbal/AP_PNUGimbal.h>  // PNU
+#include <AP_PNUSAR/AP_PNUSAR.h>        // PNU
 
 extern const AP_HAL::HAL& hal;
 
@@ -221,6 +223,24 @@ void AP_CANManager::init()
                 continue;
             }
             break;
+#if AP_PNUGIMBAL_ENABLED
+        case AP_CAN::Protocol::PNUGimbal : // PNU : gimbal mount, private CAN protocol
+            _drivers[drv_num] = _drv_param[drv_num]._pnugimbal = NEW_NOTHROW AP_PNUGimbal;
+            if (_drivers[drv_num] == nullptr) {
+                AP_BoardConfig::allocation_error("PNUGimbal %d", drv_num + 1);
+                continue;
+            }
+            break;
+#endif
+#if AP_PNUSAR_ENABLED
+        case AP_CAN::Protocol::PNUSAR : // PNU : SAR radar, private CAN protocol
+            _drivers[drv_num] = _drv_param[drv_num]._pnusar = NEW_NOTHROW AP_PNUSAR;
+            if (_drivers[drv_num] == nullptr) {
+                AP_BoardConfig::allocation_error("PNUSAR %d", drv_num + 1);
+                continue;
+            }
+            break;
+#endif
         default:
             continue;
         }

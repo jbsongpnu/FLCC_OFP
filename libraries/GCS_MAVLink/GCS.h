@@ -44,7 +44,7 @@
 // The same rule applies to FW_MAJOR/FW_MINOR/FW_PATCH in ArduCopter/version.h.
 #define OFP_VER_MAIN        5
 #define OFP_VER_SUB         1
-#define OFP_VER_REV         8
+#define OFP_VER_REV         9
 
 #ifndef HAL_GCS_ALLOW_PARAM_SET_DEFAULT
 #define HAL_GCS_ALLOW_PARAM_SET_DEFAULT 1
