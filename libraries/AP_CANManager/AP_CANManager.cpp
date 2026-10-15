@@ -230,6 +230,7 @@ void AP_CANManager::init()
                 AP_BoardConfig::allocation_error("PNUGimbal %d", drv_num + 1);
                 continue;
             }
+            AP_Param::load_object_from_eeprom((AP_PNUGimbal*)_drivers[drv_num], AP_PNUGimbal::var_info);
             break;
 #endif
 #if AP_PNUSAR_ENABLED

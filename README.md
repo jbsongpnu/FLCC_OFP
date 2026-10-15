@@ -1,10 +1,25 @@
 # PNU-KAL FLCC OFP Development Version
 - This branch currently developing PNU-KAL FLCC OFP after official version (TAG) PNU-KAL-FLCC-5.1.0 (this is same code as 5.0.15 dev)  
 - PNU-ISSUE 10 & 11 still remains : For Gremsy camera and general camera mount library structure  
-- IN THIS VERSION : V5.1.9 - **skeletons for two new CAN drivers : `AP_PNUGimbal` and `AP_PNUSAR`**  
+- NEXT : **CAN Update Plan Steps** - PMU, gimbal and SAR move onto **one CAN bus at 1 Mbit/s** behind a single `AP_PNUCAN` driver with three backends; CAN2 keeps the DroneCAN GPS to itself. Decided 2026-10-15, **not yet applied** - see the section near the end of this file for the bus map, the CAN id allocation and the four steps  
+- IN THIS VERSION : V5.1.10 - **`AP_PNUGimbal` gets a protocol backend : `AP_PNUGimbal_CubeMars`**  
+   - **The structure deviates from `AP_PMUCAN` deliberately.** The 5.1.9 skeleton was one class that would have held one protocol. It is now a **frontend plus an `AP_PNUGimbal_Backend`**, because the mount is expected to accommodate more than one motor type and only the protocol differs between them  
+   - The **frontend** keeps what does not depend on which motor is fitted : the interface, the thread, the parameters, the axis mapping, the public `set_target()` / `get_feedback()` interface, and the **one place a frame reaches the bus**. A **backend** owns the wire format and nothing else - it never touches `_can_iface`  
+   - **`AP_PNUGimbal_CubeMars`** implements the CubeMars GLII family protocol from `libraries/PNUGimbal_CAN_Protocol_Type_CubeMars.md` : all three control modes (MIT, position/velocity, velocity), the four universal commands (enable / disable / zero / clear errors), and the common feedback frame  
+   - **PROTOCOL LAYER ONLY.** There is no stabilisation loop and this is **not** an `AP_Mount` backend - that question is still open and the rule below still stands : decide it before writing the loop, not after. `set_target()` exists and **nothing in the tree calls it**, so the driver transmits nothing until a control layer does  
+   - **New parameters, `CAN_Dn_PG_*`** - a subgroup on `CANDriver_Params` at index 7, the same mechanism PiccoloCAN uses for `PC_`. `CAN_Dn_PG_TYPE` defaults to **0 (None)**, so `CAN_Dn_PROTOCOL = 16` on its own still does nothing : selecting a CAN protocol must not start commanding motors  
+   - The five encoding limits (`PMAX`/`VMAX`/`KPMAX`/`KDMAX`/`TMAX`) are **parameters, not constants**, because they MUST match what the vendor PC utility wrote to the motors. A host/device mismatch **does not fail** - it silently rescales every command and every reading, which is the worst failure mode this protocol has  
+   - **The codec is verified against the manual's own published command vectors**, in `libraries/AP_PNUGimbal/tests/` : four MIT, two position/velocity, two velocity, plus saturation, round-trip and feedback decode. 10 tests, all passing. Two of the manual's MIT vectors are **not** reproduced and cannot be - its ±6 rad/s rows do not decode to ±6 at the ±200 range it states. That divergence has its own test, so a bench disagreement points at the manual rather than at this code  
+   - **Feedback carries only four bits of motor identity** (the upper nibble of D0 is the status code), so motor IDs are restricted to **1..15 and required distinct** at init, and all three motors share one Master ID. Do not be tempted to read all eight bits of D0 as an ID - the manual's prose says you can and its own table says you cannot  
+   - **Nothing is commanded until a target is set, and nothing while disabled.** §9 of the protocol note requires position control to start from the measured current angle, so a zero-initialised target must never reach the wire. `set_enable(false)` also invalidates the targets, because the mount will have moved while disabled  
+   - **What the manual does not specify is not invented** : no command period, no feedback rate, no loss timeout, no watchdog interval, no acknowledgment, no runtime mode switch. All seven are listed at the top of the backend so a later session does not fill them in with a plausible default  
+   - `AP_PNUGIMBAL_LOOP_HZ` is **still 100 and still unchecked** - the manual specifies no command period at all, so it needs measuring  
+   - Builds : SITL copter clean, CubeOrangePlus **1,727,364 B**. With `--define AP_PNUGIMBAL_ENABLED=0` it still builds, at 1,722,636 B - so the whole driver, skeleton included, costs **4,724 B** of flash and the guard is intact  
+- For 5.1.9 version :  
+   - **skeletons for two new CAN drivers : `AP_PNUGimbal` and `AP_PNUSAR`**  
    - Both speak **private CAN protocols, NOT DroneCAN**, in the same shape as `AP_PMUCAN` - their own thread created in `init()`, nothing on the vehicle scheduler  
    - Registered as `AP_CAN::Protocol` **16** (`PNUGimbal`) and **17** (`PNUSAR`), so `CAN_Dn_PROTOCOL = 16` or `17` selects them. Slots in `AP_CANManager`, factory cases behind `#if`, and both listed in `ArduCopter/wscript`  
-   - **STRUCTURE ONLY.** The ICDs are not yet available, so `rx_spin()`, `tx_spin()`, `handle_frame()` and `send_frame()` are stubs marked `TODO`; no parameters, no `CAN_Dn_PROTOCOL` `@Values` entry, no vehicle-side consumers  
+   - **STRUCTURE ONLY** at 5.1.9; `rx_spin()`, `tx_spin()`, `handle_frame()` and `send_frame()` were stubs marked `TODO`, with no parameters, no `CAN_Dn_PROTOCOL` `@Values` entry and no vehicle-side consumers. **`AP_PNUGimbal` is implemented as of 5.1.10; `AP_PNUSAR` is still a skeleton**  
    - The skeletons carry this project's own lessons rather than copying `AP_PMUCAN` verbatim : **DLC validation before reading any field** with a rate-limited short-frame report (D6), **initialisers on every member** (D1/D10), a note **not to add write-only counters** (D6), and a reminder to **confirm endianness and say so at the site** if no byte swap is needed (D15)  
    - **Adding protocol enum values breaks exhaustive switches** - `-Werror=switch` caught `AP_Arming.cpp`, which now lists both beside PMUCAN's existing no-op case. Values 16/17 could collide with future upstream protocol numbers, exactly as `PMUCAN = 15` might; watch this on the next ArduPilot bump  
    - **Design intent recorded in both headers** (2026-10-15), see below - `AP_PNUGimbal` drives three CubeMars motors and carries **no camera**; it stabilises the SAR device that `AP_PNUSAR` will drive  
@@ -98,6 +113,7 @@ Residuals recorded against resolved issues
 - PNU-KAL Specific options  
    - **WARNING :** Do not use heli model. Only multicopter frames are supported  
    - CAN Driver Option for PMU : CAN_D1_PROTOCOL = 15  
+   - **CAN1 bitrate is 1,000,000 bit/s** (`CAN_P1_BITRATE` default). Forced by the CubeMars gimbal, which is fixed at 1 Mbit/s; **the PMU must be reconfigured from 500 k on the device**. See the CAN Update Plan Steps  
    - KGCS telemetry port : SERIALx_PROTOCOL = 2 (MAVLink2) - **never 1**. Every PNU-KAL ICD message is id >= 50001, which MAVLink1 cannot encode, so a port left on 1 carries no PMU/CAM telemetry and accepts no TC commands at all. See PNU-ISSUE D2  
 - Viewpro Mount Specific options  
    - MNT1_TYPE = 11 (Viewpro) / CAM1_TYPE = 4 (Mount) / SERIALx_BAUD = 115 (115,200 bps) / SERIALx_PROTOCOL = 8 (Viewpro)  
@@ -976,7 +992,9 @@ If it shows deletions, apply targeted edits only.
 | `libraries/AP_Q30/AP_Q30_config.h` | PNU-only file - the `AP_Q30_ENABLED` flag (D13), which also requires `AP_CAMERA_ENABLED` since Stage 2a |
 | `libraries/AP_Camera/AP_Camera_MAVLinkCamV2.{h,cpp}` | the one-shot guard on the `"Camera: ..."` statustext; the `CAMERA_SETTINGS` decode, 1 Hz poll, `get_reported_zoom_level()` and the `send_camera_settings()` override (D10 Stage 3). All of it upstream-submittable rather than PNU-specific |
 | `libraries/AP_Camera/AP_Camera.{h,cpp}`, `AP_Camera_Backend.h` | the `get_reported_zoom_level()` accessor and its backend virtual (D10 Stage 3) - deliberately unit-neutral |
-| `libraries/AP_PNUGimbal/*`, `libraries/AP_PNUSAR/*` | PNU-only files - CAN driver skeletons (5.1.9), structure only until the ICDs arrive |
+| `libraries/AP_PNUGimbal/*` | PNU-only files - CAN gimbal driver. Frontend + `AP_PNUGimbal_Backend` + `AP_PNUGimbal_CubeMars` + codec tests (5.1.10); protocol layer only, no control loop |
+| `libraries/AP_PNUSAR/*` | PNU-only files - CAN driver skeleton (5.1.9), structure only until the ICD arrives |
+| `libraries/AP_CANManager/AP_CANManager_CANDriver_Params.cpp` | the `CAN_Dn_PG_` subgroup at index 7, and 15/16 added to the `PROTOCOL` `@Values` list |
 | `libraries/AP_CANManager/AP_CAN.h`, `AP_CANManager.{h,cpp}` | `PMUCAN = 15`, `PNUGimbal = 16`, `PNUSAR = 17` plus their driver slots and factory cases |
 | `libraries/AP_Arming/AP_Arming.cpp` | the three PNU protocols listed in the `AP_CAN::Protocol` switch - required to compile under `-Werror=switch`, zero runtime effect |
 | `Tools/scripts/build_options.py` | the `Camera / Q30` build option (D13) |
@@ -994,7 +1012,7 @@ make a wholesale copy a regression.
 | 4 `pmucan_*.hpp` deleted (1163 lines) | vendored libuavcan v0; only 3 constants were used, all identical in `AP_HAL::CANFrame` / `CANIface` |
 | Mount task kept at 50 Hz | `AP_Mount_Viewpro::update()` self-throttles to 100 ms, so gimbal traffic is 10 Hz either way; at a 10 Hz task rate the period *equals* the throttle and late ticks cause 5 Hz bursts. See D8 |
 | msg 285 suppression made opt-in | V5.0.8 suppressed it for every gimbal, not just Viewpro. See D8 |
-| `version.h` is **5.1.9 DEV** | 5.1.0 OFFICIAL closed the migration; the 5.1.x DEV series carries the post-release D10 work - Stage 1 in 5.1.1, the Gremsy analysis and pitch relocation in 5.1.2, Stage 2a routing in 5.1.3, Gremsy hardware validation in 5.1.4, Stage 2b closure in 5.1.5, Stage 3 in 5.1.6, its bench confirmation in 5.1.7, the KGCS backward-compatibility fix in 5.1.8, and the `AP_PNUGimbal` / `AP_PNUSAR` CAN driver skeletons in 5.1.9 - and goes OFFICIAL when D10/D11 land |
+| `version.h` is **5.1.10 DEV** | 5.1.0 OFFICIAL closed the migration; the 5.1.x DEV series carries the post-release D10 work - Stage 1 in 5.1.1, the Gremsy analysis and pitch relocation in 5.1.2, Stage 2a routing in 5.1.3, Gremsy hardware validation in 5.1.4, Stage 2b closure in 5.1.5, Stage 3 in 5.1.6, its bench confirmation in 5.1.7, the KGCS backward-compatibility fix in 5.1.8, the `AP_PNUGimbal` / `AP_PNUSAR` CAN driver skeletons in 5.1.9, and `AP_PNUGimbal`'s CubeMars protocol backend in 5.1.10 - and goes OFFICIAL when D10/D11 land |
 | `GCS.h` dead CAM macros removed, `OFP_VER_*` tracked against `version.h` | were stale/unused; guarded by `static_assert` in `Copter.cpp` |
 | `AP_PMUCAN` fixes | dropped-frame at RX budget, dead branch, `&`->`&&`, `RXdrain()` extraction, named constants, ctor init, `TXspin` void. See git log |
 | `send_proximity()` upward-distance block **not** commented out | V5.0.8 wrapped it in `/* Currently, no upward sensor */`. `AP_Proximity::get_upward_distance()` already returns false when no backend supplies one (`AP_Proximity.cpp:498`), and TeraRanger Tower Evo is not one of the backends that does - so the comment-out is a no-op here and a silent regression for `AP_Proximity_RangeFinder` / `_MAV` / scripting users. Not applied |
@@ -1531,8 +1549,10 @@ TC2/TM2 have no field.
 
 **AP_PNUGimbal and AP_PNUSAR - design intent, recorded 2026-10-15**
 
-*Skeletons only at 5.1.9. This is what the next session needs to know before writing code;
-the same notes are at the top of each header, which is where you will actually look.*
+*Written when both were skeletons at 5.1.9. `AP_PNUGimbal`'s protocol layer landed in
+5.1.10 - see the structure note after this section for what changed and what did not.
+`AP_PNUSAR` is still a skeleton and everything below still applies to it unchanged. The
+same notes are at the top of each header, which is where you will actually look.*
 
 | | `AP_PNUGimbal` | `AP_PNUSAR` |
 |---|---|---|
@@ -1568,6 +1588,204 @@ of the driver, so settle it first.
 are coupled at the vehicle level even though neither needs to include the other. Whether the
 gimbal needs anything **from** the SAR - a boresight offset, a scan-synchronised rate - is
 itself an open question.
+
+---
+
+**AP_PNUGimbal structure - what 5.1.10 settled, and what it deliberately did not**
+
+*The protocol layer is done. The control layer is not started, and the decision that gates
+it is still open.*
+
+| Layer | File | State |
+|---|---|---|
+| frontend - interface, thread, parameters, axis mapping, the one `send_frame()` | `AP_PNUGimbal.{h,cpp}` | done |
+| protocol interface - axis-oriented, no CAN in it anywhere | `AP_PNUGimbal_Backend.{h,cpp}` | done |
+| CubeMars GLII protocol - 3 modes, 4 universal commands, feedback | `AP_PNUGimbal_CubeMars.{h,cpp}` | done, **not bench-tested** |
+| codec tests against the manual's published vectors | `AP_PNUGimbal/tests/` | 10 tests, passing |
+| **stabilisation loop** | - | **not started** |
+| **`AP_Mount` backend, or a standalone interface** | - | **still the open question** |
+
+**Why a backend split and not one class, as `AP_PMUCAN` is.** `AP_PMUCAN` talks to one
+complete device over one fixed protocol, so a second class would buy nothing. This mount is
+expected to accommodate more than one motor type, and between them *only the wire format
+differs* - the thread, the interface, the parameters, the axis mapping and the way a control
+layer asks for an angle are all the same. So the split is along that line and no other: a
+backend owns the wire format and **never touches `_can_iface`**, which keeps one place that
+validates an outgoing frame and one place that counts a failed send.
+
+**The parameters are `CAN_Dn_PG_*`**, a subgroup on `CANDriver_Params` at index 7 - the same
+mechanism PiccoloCAN uses for `PC_`. They are frontend parameters even though the encoding
+limits are CubeMars-specific; a second backend would ignore the ones it does not need and
+add its own at new indices. `CAN_Dn_PG_TYPE` defaults to **0 (None)** on purpose:
+`CAN_Dn_PROTOCOL = 16` alone must not start commanding motors.
+
+**`CAN_Dn_PROTOCOL` now lists 15 and 16** in its `@Values`. 17 (`PNUSAR`) is deliberately
+absent until that driver does something - offering a no-op in a dropdown is worse than
+offering nothing.
+
+**Five protocol facts worth not rediscovering**, all from
+`libraries/PNUGimbal_CAN_Protocol_Type_CubeMars.md`:
+
+1. **The encoding limits are device configuration, not constants.** A host/device mismatch
+   does not fail - it silently rescales every command and every reading. That is why they
+   are parameters.
+2. **MIT fields are unsigned offset integers**, not two's complement and not float32. Packed
+   zero sits near the middle of the range, so an all-zero MIT payload is *not* a zero
+   command.
+3. **The manual's transmit function uses `1 << bits` and its receive function `(1 << bits) - 1`.**
+   This driver uses the receive form in both directions, so encode and decode are inverses
+   and the maximum saturates instead of overflowing into the next field.
+4. **Feedback carries only four bits of motor identity** - D0's upper nibble is the status
+   code. Motor IDs are restricted to 1..15 and required distinct, which makes that nibble a
+   complete demultiplexer. The prose claims eight bits; its own table does not.
+5. **Position feedback must be read through an unsigned intermediate.** The manual's
+   `int16_t` example misrepresents every value at or above 0x8000, which is half the travel.
+
+**Seven things the manual does not specify, and which were not invented:** command period,
+feedback trigger, feedback rate, loss timeout, watchdog interval, acknowledgment of the
+universal commands, and any runtime mode-switch command. They are listed at the top of
+`AP_PNUGimbal_CubeMars.h` so a later session does not fill one in with a plausible default.
+`AP_PNUGIMBAL_LOOP_HZ` is still the skeleton's 100 for the same reason - nothing has said
+what rate the chosen mode wants.
+
+**Bench checklist, when the motors are available.** None of this has met hardware:
+
+1. Confirm the configured mode, CAN ID and Master ID of each motor in the PC utility, and
+   that `CAN_Dn_PG_MODE` / `*ID` match. Confirm the P/V/T/KP/KD ranges and set `PG_*MAX` to
+   the same numbers.
+2. **Velocity units.** The manual mixes rad/s and rev/s. Measure one slow rotation before
+   any physical-unit control is exposed, and do not silently multiply by 2*pi.
+3. **Quantization.** Send the four MIT vectors the tests already pin and check what the
+   motor does. The +-6 rad/s rows in the manual are the ones expected to disagree.
+4. **Universal commands in velocity mode.** They are DLC 8 on an ID whose ordinary command
+   is DLC 4, and the manual gives no example. This is the single most likely thing to be
+   wrong.
+5. Zero-setting persistence and what clearing a fault actually recovers - both unspecified.
+
+---
+
+**CAN Update Plan Steps - one bus, three protocols - PLANNED, NOT YET APPLIED**
+
+*Decided 2026-10-15, after 5.1.10. The tree is still at 5.1.10; nothing below is in the code
+yet. This supersedes the 5.1.9 assumption that each PNU CAN device would get its own
+`AP_CAN::Protocol` value and its own bus.*
+
+**The bus map.**
+
+| Port | Bitrate | Carries | Driver |
+|---|---|---|---|
+| **CAN1** | **1,000,000 bit/s** | PMU + gimbal (3 CubeMars) + SAR | one `AP_PNUCAN`, three backends |
+| **CAN2** | 1,000,000 bit/s | DroneCAN GPS (Here4) only | `AP_DroneCAN`, unchanged |
+
+**The bitrate is forced by the gimbal, not chosen.** The CubeMars GLII is **fixed at
+1 Mbit/s** - the manual lists bitrate as a bus property and *not* among the things the vendor
+PC utility can set (`PNUGimbal_CAN_Protocol_Type_CubeMars.md`, sec 1). A 500 kbit/s CAN1 was
+planned and **abandoned for this reason**; **the PMU is reconfigured from 500 k up to
+1 Mbit/s** instead. `CAN_P1_BITRATE` therefore stays at its default of 1000000 and needs no
+parameter change - but the PMU does, on the device.
+
+Secondary benefit, worth recording because it bears on the stabilisation loop: 1 Mbit/s
+roughly **halves** the bus cost of gimbal traffic. Three 8-byte standard frames out and three
+back is ~0.8 ms, so 100 Hz costs ~8% of the bus and 500 Hz ~39%; at 500 kbit/s those were
+~16% and ~78%, the latter unusable. PMU traffic is ~1.8%. The note that
+`AP_PNUGIMBAL_LOOP_HZ = 100` "is very likely too slow for motor control" is therefore no
+longer constrained by the wire.
+
+**Why one driver and not three.** `AP_CANManager::init()` loops over *interfaces*, and each
+interface carries exactly one driver number (`AP_CANManager.cpp:139-152`). Many interfaces to
+one driver is supported; **one interface to many drivers is not**, and a driver with no
+interface is never allocated at all, so it fails silently. `CAN_Dn_PROTOCOL2` does not help:
+it is a DroneCAN-hosted auxiliary slot, it requires the primary driver to implement
+`add_11bit_driver()` - **only `AP_DroneCAN` does** (`AP_CANDriver.h:39`) - it accepts **one**
+aux driver, and that driver must be a `CANSensor` with no thread of its own
+(`AP_CANSensor.cpp:34-43`). Three protocols on one wire means one driver with three backends.
+
+**CAN ID allocation - SETTLE THIS BEFORE THE SAR ICD IS WRITTEN.**
+
+The PMU is 29-bit extended and everything else is 11-bit standard, so `isExtended()` separates
+the PMU for free. **It does NOT separate the gimbal from the SAR** - both are 11-bit, so they
+must be told apart by ID, and the SAR ICD is still being written. Reserve as follows:
+
+| Range | Owner | Notes |
+|---|---|---|
+| `0x000` | gimbal feedback (Master ID) | CubeMars default; configurable via `CAN_D1_PG_MSTID` |
+| `0x001`-`0x00F` | gimbal MIT commands | `(0 << 8) \| motor_id`, motor ids 1..15 |
+| `0x101`-`0x10F` | gimbal position/velocity commands | `(1 << 8) \| motor_id` |
+| `0x201`-`0x20F` | gimbal velocity commands | `(2 << 8) \| motor_id` |
+| `0x300`-`0x3FF` | **reserved** | headroom for a second gimbal Master ID or a 4th axis |
+| **`0x400`-`0x7FF`** | **SAR** | assign every SAR message a distinct id in here |
+| `0x10000000`+ | PMU | 29-bit extended, `FlagEFF` set on every id |
+
+The gimbal occupies `0x000`-`0x2FF` because its command id is `(mode << 8) | motor_id` and all
+three modes must stay addressable without re-allocating. **Do not give the SAR an id below
+`0x400`.** `AP_PNUCAN::init()` will reject a configuration where a SAR id collides with the
+gimbal Master ID or any gimbal command id, rather than letting the demux be ambiguous.
+
+**The steps.** Each is independently revertable and each builds on its own.
+
+| # | Step | Files | Risk | Verified by |
+|:--:|---|---|:--:|---|
+| **0** | Confirm device bitrates and the SAR id plan | - | - | **DONE 2026-10-15** - bus is 1 Mbit/s, SAR is 11-bit with distinct ids per message |
+| **1** | **`AP_PNUCAN` multi-backend driver.** Generalise the 5.1.10 frontend: array of backends rather than one pointer, `AP_PNUGimbal_Backend` becomes the protocol-neutral `AP_PNUCAN_Backend`, `handle_frame()` returns `bool` (first backend to claim a frame wins, the `MultiCAN` pattern at `AP_CANSensor.h:94`), `send_frame()` carries flags. CubeMars becomes a backend. Registered on protocol **16 for now**, PMUCAN untouched on 15 | new `AP_PNUCAN/`, `AP_PNUGimbal/` | **none to flying code** | SITL + CubeOrangePlus build, 10 codec tests |
+| **2** | **PMU becomes a backend.** `AP_PMUCAN` changes base class; protocol **15** instantiates `AP_PNUCAN` with the backend bitmask defaulting to PMU-only; **make the 10 Hz per-message rate explicit** (see below); health becomes id-based; drop protocols 16 and 17 | `AP_PMUCAN/`, `AP_PNUCAN/`, `AP_CAN.h`, `AP_CANManager.{h,cpp}`, `AP_Arming.cpp` | **HIGH** | **bench against the real PMU before flight** - Start/Stop interlock timing, failsafe trigger and recovery, TM1/TM1x |
+| **3** | **SAR backend** under the same driver, 11-bit, ids `0x400`-`0x7FF` | `AP_PNUSAR/` | low | build; real work waits on the ICD |
+| **4** | Bus documentation, bitrate note, README and `version.h` | `README.md`, `version.h` | none | - |
+
+**Protocol number: 15 is kept.** The enumerator is renamed `PMUCAN = 15` -> `PNUCAN = 15`; the
+**value is unchanged**, so no deployed aircraft needs a parameter change. 16 and 17 are
+removed - they were added at 5.1.9 and never left the bench. Backend selection is a bitmask,
+`CAN_D1_PNU_BACKEND`, bit 0 PMU / bit 1 gimbal / bit 2 SAR, **defaulting to 1 (PMU only)** so
+that an aircraft upgrading from 5.1.x behaves exactly as it does today.
+
+**The directory layout does not change, and that is deliberate.** Every reference to
+`AP_PMUCAN` from outside its own folder goes through two globals - `PMU_Status` and
+`PMU_Ctrl_Echo` - plus `gcs().PMU_Ctrl` / `PMU_Ctrl_Seq`:
+
+| File | Uses |
+|---|---|
+| `ArduCopter/events.cpp` | `PMU_Ctrl_Echo.PMUCAN_Fail` |
+| `ArduCopter/AP_Arming_Copter.cpp` | `PMU_Ctrl_Echo.PMUCAN_Fail` |
+| `libraries/GCS_MAVLink/GCS_PNU.cpp` | `PMU_Status.*`, `PMU_Ctrl_Echo.*` |
+| `AP_CANManager.{h,cpp}` | factory case and driver slot |
+
+Keep the globals' names and keep them declared in `AP_PMUCAN/AP_PMUCAN.h`, and **those three
+vehicle files need no change at all** - the failsafe, the prearm check and TM1/TM1x keep
+working, and PNU-ISSUE(D14)'s declaration-beside-definition rule survives. That is the
+largest single piece of de-risking available on step 2, so do not "tidy" the layout.
+
+**Four things that break silently - the risk register for step 2.**
+
+1. **The PMU's 10 Hz is currently an accident of the code, and must be made explicit.**
+   `TXspin()` runs at 50 Hz and rotates `_cmd_idx` through 5 commands, so each command happens
+   to go out at 10 Hz; `_rtr_idx` rotates 5 RTR polls the same way. **The PMU ICD specifies
+   10 Hz** - confirmed by PNU 2026-10-15 - so the rate is correct but nothing in the source
+   says so. PNU-ISSUE(D7)'s engine interlock is calibrated on it: `engineonoffstate()` is
+   reached once per rotation, which is why its threshold of 10 ticks means ~1.0 s. Define the
+   rate as a named constant and derive the rotation from it, so the behaviour is byte
+   identical and the intent is readable. **Do not let a shared loop change the rotation** -
+   that changes what Start and Stop mean, with nothing failing visibly.
+2. **PMU health must become id-based.** `RXspin()` treats *any* `receive() > 0` as proof the
+   PMU is alive (`AP_PMUCAN.cpp:303-325`). On a shared bus, gimbal traffic would hold
+   `PMUCAN_Fail = CONNECTED` with the PMU dead, and `failsafe_pmucan_check()` would never
+   fire. Liveness has to key on the five PMU status ids. **This fix is not optional and is the
+   reason step 2 cannot be a mechanical move.**
+3. **`send_frame()` must carry flags.** The 5.1.10 version rejects `can_id > MaskStdID`.
+   `pmucan_rtr()` sends **extended + RTR** frames with the flags baked into the id
+   (`AP_PMUCAN.cpp:69-73`), so the shared sender takes the full 32-bit id and each backend
+   validates its own frame shape.
+4. **Sub-rate hooks.** PMU needs `send2gcs()` at 10 Hz and `sendchanges()` at 1 Hz off the
+   shared tick. The driver hands backends the tick count rather than each inventing a timer.
+
+**What this costs from 5.1.10 - about 15% of that diff.**
+
+- **Kept unchanged:** the CubeMars codec and all 10 tests, the backend-interface concept, the
+  bounded RX drain, the per-cause rate-limited reporting, the startup-report and init-error
+  mechanism, the `CAN_Dn_PG_*` parameters.
+- **Changed:** class and file names, `send_frame()` signature, `handle_frame()` return type,
+  one backend pointer becomes an array, the `PG_` group gains a sibling.
+- **Reverted:** `PNUGimbal = 16` and `PNUSAR = 17` in `AP_CAN.h`, their two cases in
+  `AP_Arming.cpp`, their factory cases, and `16:PNUGimbal` in the `PROTOCOL` `@Values`. 15
+  stays.
 
 ---
 

@@ -20,6 +20,7 @@
 
 #include <AP_DroneCAN/AP_DroneCAN.h>
 #include <AP_PiccoloCAN/AP_PiccoloCAN.h>
+#include <AP_PNUGimbal/AP_PNUGimbal.h>     // PNU
 
 // table of user settable CAN bus parameters
 const AP_Param::GroupInfo AP_CANManager::CANDriver_Params::var_info[] = {
@@ -28,7 +29,7 @@ const AP_Param::GroupInfo AP_CANManager::CANDriver_Params::var_info[] = {
     // @DisplayName: Enable use of specific protocol over virtual driver
     // @Description: Enabling this option starts selected protocol that will use this virtual driver
     // @SortValues: AlphabeticalZeroAtTop
-    // @Values: 0:Disabled,1:DroneCAN,4:PiccoloCAN,6:EFI_NWPMU,7:USD1,8:KDECAN,10:Scripting,11:Benewake,12:Scripting2,13:TOFSenseP,14:RadarCAN (NanoRadar/Hexsoon)
+    // @Values: 0:Disabled,1:DroneCAN,4:PiccoloCAN,6:EFI_NWPMU,7:USD1,8:KDECAN,10:Scripting,11:Benewake,12:Scripting2,13:TOFSenseP,14:RadarCAN (NanoRadar/Hexsoon),15:PMUCAN,16:PNUGimbal
     // @User: Advanced
     // @RebootRequired: True
     AP_GROUPINFO("PROTOCOL", 1, AP_CANManager::CANDriver_Params, _driver_type, float(AP_CAN::Protocol::DroneCAN)),
@@ -47,6 +48,15 @@ const AP_Param::GroupInfo AP_CANManager::CANDriver_Params::var_info[] = {
     // @Group: PC_
     // @Path: ../AP_PiccoloCAN/AP_PiccoloCAN.cpp
     AP_SUBGROUPPTR(_piccolocan, "PC_", 5, AP_CANManager::CANDriver_Params, AP_PiccoloCAN),
+#endif
+
+#if AP_PNUGIMBAL_ENABLED
+    // PNU : the PNU gimbal's own settings.  17 (PNUSAR) is deliberately absent from the
+    // PROTOCOL list above and has no group here - it is still a skeleton, and offering
+    // it in a dropdown would let an operator select a driver that does nothing.
+    // @Group: PG_
+    // @Path: ../AP_PNUGimbal/AP_PNUGimbal.cpp
+    AP_SUBGROUPPTR(_pnugimbal, "PG_", 7, AP_CANManager::CANDriver_Params, AP_PNUGimbal),
 #endif
 
     // @Param: PROTOCOL2

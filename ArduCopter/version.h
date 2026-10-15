@@ -7,7 +7,7 @@
 #include "ap_version.h"
 
 // PNU : This is a custom code modified by PNU Drone
-#define THISFIRMWARE "PNU_OFP V5.1.9"
+#define THISFIRMWARE "PNU_OFP V5.1.10"
 
 // NOTE: 5.1.6 is a DEV build on top of the 5.1.0 OFFICIAL release, which closed the
 // Copter-4.7.1 -> FLCC migration.  It closes D10 Stage 3: TM2's Zoom_POS_FB now carries
@@ -22,6 +22,33 @@
 // and a send_camera_settings() override that forwards real values instead of upstream's
 // NaN placeholders are all vendor-neutral and worth submitting to ArduPilot; only
 // AP_Q30 decides the value means times, which is where PNU-specific facts belong.
+//
+// 5.1.10 gives AP_PNUGimbal a protocol backend.  The 5.1.9 skeleton was one class that
+// would have held one protocol; it is now a frontend plus an AP_PNUGimbal_Backend, because
+// the mount is expected to accommodate more than one motor type and only the protocol
+// differs between them.  The frontend keeps the interface, the thread, the parameters, the
+// axis mapping and the single place a frame reaches the bus; a backend owns the wire format
+// and nothing else.  AP_PNUGimbal_CubeMars is the first, implementing the CubeMars GLII
+// family protocol recorded in libraries/PNUGimbal_CAN_Protocol_Type_CubeMars.md: all three
+// control modes (MIT, position/velocity, velocity), the four universal commands, and the
+// common feedback frame.
+//
+// It is the PROTOCOL LAYER ONLY.  There is no stabilisation loop and this is not an
+// AP_Mount backend - whether it becomes one is still the open question, and the README's
+// rule that it be decided before the loop is written still stands.  set_target() exists and
+// nothing in the tree calls it, so the driver transmits nothing until a control layer does.
+//
+// New parameters, CAN_Dn_PG_*.  CAN_Dn_PG_TYPE defaults to 0 (None), so CAN_Dn_PROTOCOL=16
+// on its own still does nothing - selecting a CAN protocol must not start commanding
+// motors.  The five encoding limits (PMAX/VMAX/KPMAX/KDMAX/TMAX) are parameters rather than
+// constants because they MUST match what the vendor PC utility wrote to the motors: a
+// host/device mismatch does not fail, it silently rescales every command and every reading.
+//
+// The codec is verified against the manual's own published command vectors - four MIT, two
+// position/velocity, two velocity - in libraries/AP_PNUGimbal/tests/.  Two of the manual's
+// MIT vectors are NOT reproduced and cannot be: its +-6 rad/s rows do not decode to +-6 at
+// the +-200 range it states.  That divergence is pinned down by its own test so a bench
+// disagreement points at the manual rather than at this code.
 //
 // 5.1.9 adds skeletons for two new CAN drivers: AP_PNUGimbal (a PNU-developed gimbal
 // mount) and AP_PNUSAR (a SAR radar payload).  Both speak private CAN protocols, NOT
@@ -110,11 +137,11 @@
 // must stay in step with the three defines below (static_assert in Copter.cpp, D4).
 
 // the following line is parsed by the autotest scripts
-#define FIRMWARE_VERSION 5,1,9,FIRMWARE_VERSION_TYPE_DEV
+#define FIRMWARE_VERSION 5,1,10,FIRMWARE_VERSION_TYPE_DEV
 
 #define FW_MAJOR 5
 #define FW_MINOR 1
-#define FW_PATCH 9
+#define FW_PATCH 10
 #define FW_TYPE FIRMWARE_VERSION_TYPE_DEV
 
 #include <AP_Common/AP_FWVersionDefine.h>
