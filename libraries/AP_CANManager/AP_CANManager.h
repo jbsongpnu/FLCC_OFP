@@ -147,7 +147,7 @@ private:
         AP_CANDriver* _uavcan;
         AP_CANDriver* _piccolocan;
         AP_CANDriver* _pmucan;  // PNU
-        AP_CANDriver* _pnugimbal;   // PNU
+        AP_CANDriver* _pnu_can;      // PNU
         AP_CANDriver* _pnusar;      // PNU
     };
 

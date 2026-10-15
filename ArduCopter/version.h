@@ -7,7 +7,7 @@
 #include "ap_version.h"
 
 // PNU : This is a custom code modified by PNU Drone
-#define THISFIRMWARE "PNU_OFP V5.1.10"
+#define THISFIRMWARE "PNU_OFP V5.1.11"
 
 // NOTE: 5.1.6 is a DEV build on top of the 5.1.0 OFFICIAL release, which closed the
 // Copter-4.7.1 -> FLCC migration.  It closes D10 Stage 3: TM2's Zoom_POS_FB now carries
@@ -22,6 +22,52 @@
 // and a send_camera_settings() override that forwards real values instead of upstream's
 // NaN placeholders are all vendor-neutral and worth submitting to ArduPilot; only
 // AP_Q30 decides the value means times, which is where PNU-specific facts belong.
+//
+// 5.1.11 is CAN Update Plan step 1: AP_PNU_CAN, the multi-backend CAN driver.
+//
+// The PMU, the gimbal and the SAR share one 1 Mbit/s bus, and AP_CANManager binds each
+// interface to exactly ONE driver - one interface to many drivers is not supported, and a
+// driver with no interface is never allocated at all, so it fails silently.  CAN_Dn_PROTOCOL2
+// does not help either: it is a DroneCAN-hosted auxiliary slot taking one CANSensor with no
+// thread.  So three protocols on one wire means one driver with three backends.
+//
+// AP_PNU_CAN owns the interface, the thread, the parameters and the one place a frame reaches
+// the bus.  AP_PNU_CAN_Backend owns a wire format and nothing else.  handle_frame() now returns
+// bool and the driver stops at the first backend to claim a frame, the MultiCAN pattern
+// upstream already uses for the CAN rangefinder; an unclaimed frame is counted and reported,
+// which is how a mis-assigned CAN id gets noticed.  send_frame() takes the FULL 32-bit id
+// including FlagEFF/FlagRTR, because the PMU polls with extended RTR frames.  update() is
+// handed the driver's tick count so every backend derives its rate from one clock - the PMU's
+// 10 Hz turned out to be an accident of an undocumented command rotation, and that must not
+// happen twice.
+//
+// The name carries an underscore on purpose: PNU_CAN, never PNUCAN.  The two drivers sit
+// beside each other wherever an operator looks - 15:PMUCAN and 16:PNU_CAN in one
+// CAN_Dn_PROTOCOL dropdown, "PMUCAN:" and "PNU_CAN:" statustexts on one GCS screen - and M
+// and N are one letter apart in a sans-serif font.  The underscore is the only thing telling
+// them apart at a glance; do not tidy it away.
+//
+// Registered on AP_CAN::Protocol 16 (renamed PNUGimbal -> PNU_CAN).  THE PMU IS UNTOUCHED on
+// protocol 15 and nothing that flies changes in this version; the PMU becomes a backend in
+// step 2, which needs a bench against real hardware first.
+//
+// New CAN_Dn_PNU_* parameters replace 5.1.10's CAN_Dn_PG_*.  CAN_Dn_PNU_OPTS is a device
+// bitmask - bit 0 PMU, bit 1 gimbal, bit 2 SAR, default 1 - and it exists because "no PMU"
+// used to mean not setting CAN_Dn_PROTOCOL, which one shared driver takes away.  An aircraft
+// with a gimbal and a SAR but no PMU is a configuration that will fly.  One flat group rather
+// than a per-device subgroup: AP_SUBGROUPPTR resolves var_info from the class, so two sibling
+// subgroups pointing at this one object would get the same table.  Parameter index 7 (the old
+// PG_ group) is retired and NOT reused - AP_Param stores by index, not by name.
+//
+// CAN_Dn_PNU_TYPE drops 0:None and defaults to 1:CubeMars; bit 1 of PNU_OPTS now answers
+// whether a gimbal is fitted.  Two switches for one thing is how a mount ends up silently
+// disabled by the one nobody looked at.
+//
+// A one-per-boot line names the backends that are running, e.g. "PNU_CAN: CAN_D1 Gimbal ready,
+// no PMU".  That is what makes a forgotten PNU_OPTS bit visible: with bit 0 clear,
+// PMU_Ctrl_Echo.PMUCAN_Fail stays 0 and reads as healthy, so a missing PMU is otherwise
+// completely silent.  Raising that global to 2 "for honesty" would instead fire a prearm
+// warning on every arm of a PMU-less aircraft - the problem 5.1.8 removed.
 //
 // 5.1.10 gives AP_PNUGimbal a protocol backend.  The 5.1.9 skeleton was one class that
 // would have held one protocol; it is now a frontend plus an AP_PNUGimbal_Backend, because
@@ -137,11 +183,11 @@
 // must stay in step with the three defines below (static_assert in Copter.cpp, D4).
 
 // the following line is parsed by the autotest scripts
-#define FIRMWARE_VERSION 5,1,10,FIRMWARE_VERSION_TYPE_DEV
+#define FIRMWARE_VERSION 5,1,11,FIRMWARE_VERSION_TYPE_DEV
 
 #define FW_MAJOR 5
 #define FW_MINOR 1
-#define FW_PATCH 10
+#define FW_PATCH 11
 #define FW_TYPE FIRMWARE_VERSION_TYPE_DEV
 
 #include <AP_Common/AP_FWVersionDefine.h>

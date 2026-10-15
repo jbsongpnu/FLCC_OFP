@@ -30,7 +30,7 @@ public:
         TOFSenseP = 13,
         RadarCAN = 14,  // used by NanoRadar and Hexsoon
         PMUCAN = 15,    // PNU : PNU-KAL HD PMUCAN
-        PNUGimbal = 16, // PNU : PNU-developed gimbal mount, private CAN protocol
+        PNU_CAN = 16,   // PNU : PMU / gimbal / SAR on one bus, private CAN protocols
         PNUSAR = 17,    // PNU : SAR radar payload, private CAN protocol
     };
 };

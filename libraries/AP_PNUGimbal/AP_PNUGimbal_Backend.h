@@ -4,33 +4,21 @@
 
 #if AP_PNUGIMBAL_ENABLED
 
-#include <AP_Common/AP_Common.h>
-#include <AP_HAL/CANIface.h>
+#include <AP_PNU_CAN/AP_PNU_CAN_Backend.h>
 
-class AP_PNUGimbal;
-
-// PNU : protocol backend for AP_PNUGimbal.
+// PNU : the gimbal-shaped view of an AP_PNU_CAN backend.
 //
-// AP_PNUGimbal owns the CAN interface, the thread and the parameters; a backend owns the
-// protocol spoken on that interface.  The split exists because the mount is expected to
-// accommodate more than one motor type, and between them only the protocol differs - the
-// thread, the interface, the axis mapping and the way the vehicle asks for an angle are
-// the same either way.  AP_PMUCAN has no such split because it only ever talks to one
-// device.
+// AP_PNU_CAN_Backend says what every protocol on the bus must do - init, update, claim a
+// frame.  This adds what a *gimbal* must do, and it is deliberately a separate layer:
+// the mount is expected to accommodate more than one motor type, and a control layer
+// above should be able to drive any of them without naming CubeMars.
 //
-// Everything in this interface is axis-oriented and protocol-free: the caller asks for a
-// per-axis position / velocity / torque and reads back per-axis feedback.  Nothing here
-// mentions CAN ids, bit packing or DLCs, and nothing above this line should have to.
-//
-// What a backend must NOT do:
-//   - touch _can_iface.  All CAN access goes through send_frame() below, so there is one
-//     place that validates an outgoing frame and one place that counts a failed send.
-//   - command a motor before the caller has set a target for it.  A zero-initialised
-//     target is not a safe command on any of these protocols.
+// Everything here is axis-oriented and protocol-free.  Nothing mentions CAN ids, bit
+// packing or DLCs, and nothing above this line should have to.
 
 #define AP_PNUGIMBAL_NUM_AXES 3U
 
-// Axis order is fixed, and it is the order of the three CAN_Dn_PG_*ID parameters.
+// Axis order is fixed, and it is the order of the three CAN_Dn_PNU_*ID parameters.
 enum AP_PNUGimbal_Axis : uint8_t {
     AP_PNUGIMBAL_AXIS_ROLL  = 0,
     AP_PNUGIMBAL_AXIS_PITCH = 1,
@@ -61,29 +49,15 @@ struct AP_PNUGimbal_Feedback {
     bool valid = false;             // false until the axis has reported at least once
 };
 
-class AP_PNUGimbal_Backend {
+class AP_PNUGimbal_Backend : public AP_PNU_CAN_Backend {
 public:
-    AP_PNUGimbal_Backend(AP_PNUGimbal &frontend) : _frontend(frontend) {}
-    virtual ~AP_PNUGimbal_Backend() {}
+    using AP_PNU_CAN_Backend::AP_PNU_CAN_Backend;
 
     CLASS_NO_COPY(AP_PNUGimbal_Backend);
 
-    // Validate the configuration and prepare to run.  Returning false means the driver
-    // must not transmit; the backend has already recorded why through
-    // AP_PNUGimbal::set_init_error(), which is reported once the GCS is listening.
-    virtual bool init(void) = 0;
-
-    // Called from the driver thread at AP_PNUGIMBAL_LOOP_HZ, after rx_spin().
-    virtual void update(void) = 0;
-
-    // Called for every frame received on the interface.  The frontend has already
-    // discarded loopback frames and nothing else: IDE / RTR / DLC validation belongs
-    // here, because only the backend knows what its protocol accepts.
-    virtual void handle_frame(const AP_HAL::CANFrame &frame) = 0;
-
     // Per-axis command.  Implementations must reject a non-finite field rather than
     // store it, so a bad value can never be encoded or left behind as the last good
-    // target.
+    // target.  Nothing is sent to a motor until a target has been set for it.
     virtual void set_target(uint8_t axis, const AP_PNUGimbal_Target &target) = 0;
 
     // Most recent decoded feedback for one axis.  false if that axis has never reported,
@@ -95,23 +69,6 @@ public:
     virtual void set_enable(bool enable) = 0;
     virtual void request_zero(uint8_t axis) = 0;
     virtual void request_clear_errors(uint8_t axis) = 0;
-
-    // True when every configured axis is reporting fresh feedback.
-    virtual bool healthy(void) const = 0;
-
-    // Short name for GCS messages, e.g. "CubeMars".
-    virtual const char *name(void) const = 0;
-
-protected:
-    // CAN access, provided by the frontend.  Returns true if the frame was accepted by
-    // the interface; a false return is already counted and reported by the frontend, so
-    // a backend only has to decide whether to retry.
-    bool send_frame(uint32_t can_id, const uint8_t *data, uint8_t dlc);
-
-    // Report a frame rejected for a short DLC, rate limited in the frontend.
-    void report_short_frame(uint32_t frame_id, uint8_t dlc);
-
-    AP_PNUGimbal &_frontend;
 };
 
 #endif  // AP_PNUGIMBAL_ENABLED

@@ -1,8 +1,23 @@
 # PNU-KAL FLCC OFP Development Version
 - This branch currently developing PNU-KAL FLCC OFP after official version (TAG) PNU-KAL-FLCC-5.1.0 (this is same code as 5.0.15 dev)  
 - PNU-ISSUE 10 & 11 still remains : For Gremsy camera and general camera mount library structure  
-- NEXT : **CAN Update Plan Steps** - PMU, gimbal and SAR move onto **one CAN bus at 1 Mbit/s** behind a single `AP_PNUCAN` driver with three backends; CAN2 keeps the DroneCAN GPS to itself. Decided 2026-10-15, **not yet applied** - see the section near the end of this file for the bus map, the CAN id allocation and the four steps  
-- IN THIS VERSION : V5.1.10 - **`AP_PNUGimbal` gets a protocol backend : `AP_PNUGimbal_CubeMars`**  
+- NEXT : **CAN Update Plan step 2** - the PMU becomes a backend and protocol 15 moves to `AP_PNU_CAN`. **Needs a bench against real PMU hardware before it flies.** See the CAN Update Plan Steps section near the end of this file  
+- IN THIS VERSION : V5.1.11 - **CAN Update Plan step 1 : `AP_PNU_CAN`, the multi-backend CAN driver**  
+   - **Three protocols, one bus, one driver.** `AP_CANManager` binds each interface to exactly **one** driver - one interface to many drivers is not supported, and a driver with no interface is never allocated at all, so it fails *silently*. `CAN_Dn_PROTOCOL2` does not help: it is a DroneCAN-hosted auxiliary slot taking one `CANSensor` with no thread of its own  
+   - `AP_PNU_CAN` owns the interface, the thread, the parameters and the one place a frame reaches the bus; `AP_PNU_CAN_Backend` owns a wire format and nothing else. `AP_PNUGimbal_Backend` sits between them as the gimbal-shaped view, so a control layer can drive any motor protocol without naming CubeMars  
+   - **`handle_frame()` now returns `bool`** and the driver stops at the first backend to claim a frame - the `MultiCAN` pattern upstream already uses for the CAN rangefinder. **An unclaimed frame is counted and reported**, which is how a mis-assigned CAN id gets noticed instead of vanishing  
+   - **`send_frame()` takes the FULL 32-bit id** including `FlagEFF` / `FlagRTR`, because the PMU polls with extended RTR frames and the gimbal sends standard data frames. The shape of a frame is the backend's business  
+   - **`update()` is handed the driver's tick count**, so every backend derives its rate from one clock. The PMU's 10 Hz turned out to be an accident of an undocumented command rotation; that must not happen twice  
+   - **The PMU is untouched on protocol 15 and nothing that flies changes in this version.** `AP_PNU_CAN` is on protocol 16 (`PNUGimbal` renamed `PNU_CAN`) so the gimbal stays benchable while the PMU conversion waits for hardware  
+   - **The name carries an underscore on purpose : `PNU_CAN`, never `PNUCAN`.** The two drivers sit beside each other everywhere an operator looks - `15:PMUCAN` and `16:PNU_CAN` in the same `CAN_Dn_PROTOCOL` dropdown, `PMUCAN:` and `PNU_CAN:` statustexts on the same GCS screen - and **M and N are one letter apart in a sans-serif font**. The underscore is the only thing making them distinguishable at a glance. Do not "tidy" it away  
+   - **New `CAN_Dn_PNU_*` parameters replace 5.1.10's `CAN_Dn_PG_*`**, including **`CAN_Dn_PNU_OPTS`**, the device bitmask - bit 0 PMU, bit 1 gimbal, bit 2 SAR, **default 1**  
+   - **One flat group, not the sibling subgroups the plan assumed.** `AP_SUBGROUPPTR` resolves `var_info` from the *class* (`AP_Param.h:165`), so two subgroups pointing at this one object would get the same table, and nesting eats so much of the 16-character budget that the gimbal parameters become unreadable. All 12 names fit under `CAN_Dn_PNU_`  
+   - **Parameter index 7 - the old `PG_` group - is retired and NOT reused.** AP_Param stores by index rather than by name, so a bench aircraft that saved a `PG_` value would have it read back as a different parameter  
+   - **`CAN_Dn_PNU_TYPE` drops `0:None` and defaults to `1:CubeMars`.** Bit 1 of `PNU_OPTS` now answers whether a gimbal is fitted. Two switches for one thing is how a mount ends up silently disabled by the one nobody looked at  
+   - **A one-per-boot line names the running backends** - `PNU_CAN: CAN_D1 Gimbal ready, no PMU`. That is what makes a forgotten `PNU_OPTS` bit visible: with bit 0 clear, `PMU_Ctrl_Echo.PMUCAN_Fail` stays 0 and reads as **healthy**, so a missing PMU is otherwise completely silent  
+   - Builds : SITL copter clean, CubeOrangePlus **1,727,948 B**; with `--define AP_PNU_CAN_ENABLED=0` it still builds at 1,722,636 B, so the driver costs **5,312 B**. The 10 CubeMars codec tests still pass unchanged  
+- For 5.1.10 version :  
+   - **`AP_PNUGimbal` gets a protocol backend : `AP_PNUGimbal_CubeMars`**  
    - **The structure deviates from `AP_PMUCAN` deliberately.** The 5.1.9 skeleton was one class that would have held one protocol. It is now a **frontend plus an `AP_PNUGimbal_Backend`**, because the mount is expected to accommodate more than one motor type and only the protocol differs between them  
    - The **frontend** keeps what does not depend on which motor is fitted : the interface, the thread, the parameters, the axis mapping, the public `set_target()` / `get_feedback()` interface, and the **one place a frame reaches the bus**. A **backend** owns the wire format and nothing else - it never touches `_can_iface`  
    - **`AP_PNUGimbal_CubeMars`** implements the CubeMars GLII family protocol from `libraries/PNUGimbal_CAN_Protocol_Type_CubeMars.md` : all three control modes (MIT, position/velocity, velocity), the four universal commands (enable / disable / zero / clear errors), and the common feedback frame  
@@ -992,10 +1007,11 @@ If it shows deletions, apply targeted edits only.
 | `libraries/AP_Q30/AP_Q30_config.h` | PNU-only file - the `AP_Q30_ENABLED` flag (D13), which also requires `AP_CAMERA_ENABLED` since Stage 2a |
 | `libraries/AP_Camera/AP_Camera_MAVLinkCamV2.{h,cpp}` | the one-shot guard on the `"Camera: ..."` statustext; the `CAMERA_SETTINGS` decode, 1 Hz poll, `get_reported_zoom_level()` and the `send_camera_settings()` override (D10 Stage 3). All of it upstream-submittable rather than PNU-specific |
 | `libraries/AP_Camera/AP_Camera.{h,cpp}`, `AP_Camera_Backend.h` | the `get_reported_zoom_level()` accessor and its backend virtual (D10 Stage 3) - deliberately unit-neutral |
-| `libraries/AP_PNUGimbal/*` | PNU-only files - CAN gimbal driver. Frontend + `AP_PNUGimbal_Backend` + `AP_PNUGimbal_CubeMars` + codec tests (5.1.10); protocol layer only, no control loop |
+| `libraries/AP_PNU_CAN/*` | PNU-only files - the shared CAN driver for PNU devices (5.1.11). Owns the interface, the thread, the `CAN_Dn_PNU_*` parameters and the one `send_frame()`; protocols live in backends |
+| `libraries/AP_PNUGimbal/*` | PNU-only files - `AP_PNUGimbal_Backend` (the gimbal-shaped view of an `AP_PNU_CAN` backend) + `AP_PNUGimbal_CubeMars` + codec tests. Protocol layer only, no control loop |
 | `libraries/AP_PNUSAR/*` | PNU-only files - CAN driver skeleton (5.1.9), structure only until the ICD arrives |
-| `libraries/AP_CANManager/AP_CANManager_CANDriver_Params.cpp` | the `CAN_Dn_PG_` subgroup at index 7, and 15/16 added to the `PROTOCOL` `@Values` list |
-| `libraries/AP_CANManager/AP_CAN.h`, `AP_CANManager.{h,cpp}` | `PMUCAN = 15`, `PNUGimbal = 16`, `PNUSAR = 17` plus their driver slots and factory cases |
+| `libraries/AP_CANManager/AP_CANManager_CANDriver_Params.cpp` | the `CAN_Dn_PNU_` subgroup at index 8 (index 7 retired, not reused), and 15/16 added to the `PROTOCOL` `@Values` list |
+| `libraries/AP_CANManager/AP_CAN.h`, `AP_CANManager.{h,cpp}` | `PMUCAN = 15`, `PNU_CAN = 16`, `PNUSAR = 17` plus their driver slots and factory cases |
 | `libraries/AP_Arming/AP_Arming.cpp` | the three PNU protocols listed in the `AP_CAN::Protocol` switch - required to compile under `-Werror=switch`, zero runtime effect |
 | `Tools/scripts/build_options.py` | the `Camera / Q30` build option (D13) |
 | `ArduCopter/version.h` | **5.1.9 DEV** and the release note describing what it carries |
@@ -1012,7 +1028,7 @@ make a wholesale copy a regression.
 | 4 `pmucan_*.hpp` deleted (1163 lines) | vendored libuavcan v0; only 3 constants were used, all identical in `AP_HAL::CANFrame` / `CANIface` |
 | Mount task kept at 50 Hz | `AP_Mount_Viewpro::update()` self-throttles to 100 ms, so gimbal traffic is 10 Hz either way; at a 10 Hz task rate the period *equals* the throttle and late ticks cause 5 Hz bursts. See D8 |
 | msg 285 suppression made opt-in | V5.0.8 suppressed it for every gimbal, not just Viewpro. See D8 |
-| `version.h` is **5.1.10 DEV** | 5.1.0 OFFICIAL closed the migration; the 5.1.x DEV series carries the post-release D10 work - Stage 1 in 5.1.1, the Gremsy analysis and pitch relocation in 5.1.2, Stage 2a routing in 5.1.3, Gremsy hardware validation in 5.1.4, Stage 2b closure in 5.1.5, Stage 3 in 5.1.6, its bench confirmation in 5.1.7, the KGCS backward-compatibility fix in 5.1.8, the `AP_PNUGimbal` / `AP_PNUSAR` CAN driver skeletons in 5.1.9, and `AP_PNUGimbal`'s CubeMars protocol backend in 5.1.10 - and goes OFFICIAL when D10/D11 land |
+| `version.h` is **5.1.11 DEV** | 5.1.0 OFFICIAL closed the migration; the 5.1.x DEV series carries the post-release D10 work - Stage 1 in 5.1.1, the Gremsy analysis and pitch relocation in 5.1.2, Stage 2a routing in 5.1.3, Gremsy hardware validation in 5.1.4, Stage 2b closure in 5.1.5, Stage 3 in 5.1.6, its bench confirmation in 5.1.7, the KGCS backward-compatibility fix in 5.1.8, the `AP_PNUGimbal` / `AP_PNUSAR` CAN driver skeletons in 5.1.9, `AP_PNUGimbal`'s CubeMars protocol backend in 5.1.10, and CAN Update Plan step 1 in 5.1.11 - and goes OFFICIAL when D10/D11 land |
 | `GCS.h` dead CAM macros removed, `OFP_VER_*` tracked against `version.h` | were stale/unused; guarded by `static_assert` in `Copter.cpp` |
 | `AP_PMUCAN` fixes | dropped-frame at RX budget, dead branch, `&`->`&&`, `RXdrain()` extraction, named constants, ctor init, `TXspin` void. See git log |
 | `send_proximity()` upward-distance block **not** commented out | V5.0.8 wrapped it in `/* Currently, no upward sensor */`. `AP_Proximity::get_upward_distance()` already returns false when no backend supplies one (`AP_Proximity.cpp:498`), and TeraRanger Tower Evo is not one of the backends that does - so the comment-out is a no-op here and a silent regression for `AP_Proximity_RangeFinder` / `_MAV` / scripting users. Not applied |
@@ -1674,7 +1690,7 @@ yet. This supersedes the 5.1.9 assumption that each PNU CAN device would get its
 
 | Port | Bitrate | Carries | Driver |
 |---|---|---|---|
-| **CAN1** | **1,000,000 bit/s** | PMU + gimbal (3 CubeMars) + SAR | one `AP_PNUCAN`, three backends |
+| **CAN1** | **1,000,000 bit/s** | PMU + gimbal (3 CubeMars) + SAR | one `AP_PNU_CAN`, three backends |
 | **CAN2** | 1,000,000 bit/s | DroneCAN GPS (Here4) only | `AP_DroneCAN`, unchanged |
 
 **The bitrate is forced by the gimbal, not chosen.** The CubeMars GLII is **fixed at
@@ -1718,7 +1734,7 @@ must be told apart by ID, and the SAR ICD is still being written. Reserve as fol
 
 The gimbal occupies `0x000`-`0x2FF` because its command id is `(mode << 8) | motor_id` and all
 three modes must stay addressable without re-allocating. **Do not give the SAR an id below
-`0x400`.** `AP_PNUCAN::init()` will reject a configuration where a SAR id collides with the
+`0x400`.** `AP_PNU_CAN::init()` will reject a configuration where a SAR id collides with the
 gimbal Master ID or any gimbal command id, rather than letting the demux be ambiguous.
 
 **The steps.** Each is independently revertable and each builds on its own.
@@ -1726,16 +1742,136 @@ gimbal Master ID or any gimbal command id, rather than letting the demux be ambi
 | # | Step | Files | Risk | Verified by |
 |:--:|---|---|:--:|---|
 | **0** | Confirm device bitrates and the SAR id plan | - | - | **DONE 2026-10-15** - bus is 1 Mbit/s, SAR is 11-bit with distinct ids per message |
-| **1** | **`AP_PNUCAN` multi-backend driver.** Generalise the 5.1.10 frontend: array of backends rather than one pointer, `AP_PNUGimbal_Backend` becomes the protocol-neutral `AP_PNUCAN_Backend`, `handle_frame()` returns `bool` (first backend to claim a frame wins, the `MultiCAN` pattern at `AP_CANSensor.h:94`), `send_frame()` carries flags. CubeMars becomes a backend. Registered on protocol **16 for now**, PMUCAN untouched on 15 | new `AP_PNUCAN/`, `AP_PNUGimbal/` | **none to flying code** | SITL + CubeOrangePlus build, 10 codec tests |
-| **2** | **PMU becomes a backend.** `AP_PMUCAN` changes base class; protocol **15** instantiates `AP_PNUCAN` with the backend bitmask defaulting to PMU-only; **make the 10 Hz per-message rate explicit** (see below); health becomes id-based; drop protocols 16 and 17 | `AP_PMUCAN/`, `AP_PNUCAN/`, `AP_CAN.h`, `AP_CANManager.{h,cpp}`, `AP_Arming.cpp` | **HIGH** | **bench against the real PMU before flight** - Start/Stop interlock timing, failsafe trigger and recovery, TM1/TM1x |
+| **1** | **DONE in 5.1.11.** **`AP_PNU_CAN` multi-backend driver.** Generalise the 5.1.10 frontend: array of backends rather than one pointer, `AP_PNUGimbal_Backend` becomes the protocol-neutral `AP_PNU_CAN_Backend`, `handle_frame()` returns `bool` (first backend to claim a frame wins, the `MultiCAN` pattern at `AP_CANSensor.h:94`), `send_frame()` carries flags. CubeMars becomes a backend. **`CAN_Dn_PNU_OPTS` lands here** (see the device selection section below), and `CAN_Dn_PG_TYPE` drops `0:None` and defaults to `1:CubeMars`. Registered on protocol **16 for now**, PMUCAN untouched on 15 | new `AP_PNU_CAN/`, `AP_PNUGimbal/` | **none to flying code** | **DONE** - SITL + CubeOrangePlus build, `AP_PNU_CAN_ENABLED=0` builds, 10 codec tests pass |
+| **2** | **PMU becomes a backend.** `AP_PMUCAN` changes base class; protocol **15** instantiates `AP_PNU_CAN`, so `CAN_Dn_PNU_OPTS` bit 0 becomes live; **make the 10 Hz per-message rate explicit** (see below); health becomes id-based; drop protocol 17 and keep **16 as a deprecated alias** (see below) | `AP_PMUCAN/`, `AP_PNU_CAN/`, `AP_CAN.h`, `AP_CANManager.{h,cpp}`, `AP_Arming.cpp` | **HIGH** | **bench against the real PMU before flight** - Start/Stop interlock timing, failsafe trigger and recovery, TM1/TM1x |
 | **3** | **SAR backend** under the same driver, 11-bit, ids `0x400`-`0x7FF` | `AP_PNUSAR/` | low | build; real work waits on the ICD |
 | **4** | Bus documentation, bitrate note, README and `version.h` | `README.md`, `version.h` | none | - |
 
-**Protocol number: 15 is kept.** The enumerator is renamed `PMUCAN = 15` -> `PNUCAN = 15`; the
-**value is unchanged**, so no deployed aircraft needs a parameter change. 16 and 17 are
-removed - they were added at 5.1.9 and never left the bench. Backend selection is a bitmask,
-`CAN_D1_PNU_BACKEND`, bit 0 PMU / bit 1 gimbal / bit 2 SAR, **defaulting to 1 (PMU only)** so
-that an aircraft upgrading from 5.1.x behaves exactly as it does today.
+**Protocol number: 15 is kept.** The enumerator is renamed `PMUCAN = 15` -> `PNU_CAN = 15`; the
+**value is unchanged**, so no deployed aircraft needs a parameter change. 17 is removed - it
+was added at 5.1.9 and never left the bench.
+
+**16 survives step 2 as a deprecated alias - decided 2026-10-15.**
+
+Step 1 put `AP_PNU_CAN` on **16** so that the PMU could stay undisturbed on 15. Step 2 moves
+it to 15, which leaves every bench aircraft configured during step 1 pointing at a value that
+no longer exists - and the factory's `default: continue` skips an unknown protocol **in
+silence**. No driver, no parameters, no message, nothing on the PNU bus at all. That is the
+same shape of failure as PNU-ISSUE(D6) and D10 Stage 1, and it is not worth re-learning on a
+bench at midnight.
+
+So step 2 keeps 16 working and says so:
+
+```text
+AP_CAN.h            PNU_CAN        = 15,   // was PMUCAN
+                    PNU_CAN_LEGACY = 16,   // deprecated; delete when 5.1.x goes OFFICIAL
+                    // 17 was PNUSAR -- do not re-use
+
+AP_CANManager.cpp   case AP_CAN::Protocol::PNU_CAN:
+                    case AP_CAN::Protocol::PNU_CAN_LEGACY:
+                        ... allocate AP_PNU_CAN ...
+
+AP_Arming.cpp       both enumerators listed, or -Werror=switch fails the build
+
+AP_PNU_CAN.cpp      get_pnu_can() accepts either value
+                    report_startup() adds, at MAV_SEVERITY_WARNING and once per boot:
+                      "PNU_CAN: CAN_D%u_PROTOCOL 16 is deprecated, use 15"
+```
+
+**16 is removed from the `PROTOCOL` `@Values` list** at the same time. The dropdown is for
+what an operator should *choose*; the enum and the factory case are for what already exists
+in a stored configuration. Anyone still on 16 keeps flying and is told to move, and nobody
+picks it fresh.
+
+It rides the existing one-shot startup report, so it costs no new rate limiter and no new
+state - about six lines in total. **Delete the enumerator, the factory case, the arming case
+and the warning when the 5.1.x DEV series goes OFFICIAL.**
+
+**Device selection - `CAN_Dn_PNU_OPTS`, settled 2026-10-15, lands in step 1.**
+
+Until now, "no PMU" meant not setting `CAN_Dn_PROTOCOL = 15`. One driver carrying all three
+protocols takes that away, because 15 is also how the gimbal and the SAR are reached - and an
+aircraft with a gimbal and a SAR but **no PMU** is a configuration that will certainly fly.
+So presence becomes a bitmask.
+
+| Param | Chars | Meaning |
+|---|---:|---|
+| **`CAN_Dn_PNU_OPTS`** | 15 | bit 0 PMU, bit 1 gimbal, bit 2 SAR. **Default 1** (PMU only) |
+| `CAN_Dn_PG_*` | <=15 | gimbal settings, **names unchanged from 5.1.10** |
+| `CAN_Dn_PS_*` | - | SAR settings, added with the SAR backend |
+
+It is a **new `PNU_` subgroup** on `CANDriver_Params` at index 8, and it holds **everything** -
+the device bitmask and the gimbal settings in one flat group. The plan originally said `PG_`
+would survive as a sibling; **that turned out to be impossible** and was corrected while
+implementing step 1. `AP_SUBGROUPPTR` resolves `var_info` from the *class*
+(`AP_Param.h:165`), so two sibling subgroups both pointing at the one `AP_PNU_CAN` object would
+get the same table, and nesting a per-device group eats so much of the 16-character name
+budget that the gimbal parameters become unreadable (`CAN_D1_PNU_G` leaves four characters).
+One flat group fits all twelve names: `CAN_D1_PNU_` is 11 characters, leaving 5.
+
+**Index 7, the 5.1.10 `PG_` group, is retired and NOT reused.** AP_Param stores by index
+rather than by name, so reusing it would make a `PG_` value saved on a bench aircraft read
+back as a different parameter. PNU's own earlier suggestion, `PNUOPTION`, is **not usable**
+either - any suffix must fit the 16-character total.
+
+**The default is 1 so that step 2 is a no-op for every existing aircraft:** `CAN_D1_PROTOCOL
+= 15` with nothing stored gives PMU-only, exactly today's behaviour. One consequence to
+accept: during step 1 `AP_PNU_CAN` sits on protocol 16 and the PMU backend does not exist yet,
+so gimbal bench work uses `PNU_OPTS = 2`. Better one awkward step than a default that changes
+between steps.
+
+**`CAN_Dn_PG_TYPE` stops being a second on/off switch.** `0:None` is dropped and the default
+becomes `1:CubeMars`; the parameter now only answers *which* gimbal protocol, while bit 1
+answers *whether a gimbal is fitted*. Two switches for one thing is how a mount ends up
+silently disabled by the one nobody looked at. This is free to change because `PG_TYPE`
+shipped in 5.1.10 and is on no aircraft.
+
+**What happens with no PMU - verified against the code, not assumed.**
+
+| `PNU_OPTS` | Result |
+|---|---|
+| `0` | Driver allocated, **zero backends**. Valid - bus wired, everything disabled. The startup report says so |
+| `1` (default) | PMU only. Identical to today |
+| `2` / `4` / `6` | Gimbal and/or SAR, **no PMU**. No PMU failsafe, no prearm warning |
+| `7` | All three |
+
+With no PMU backend, nothing ever writes `PMU_Ctrl_Echo.PMUCAN_Fail`, so it stays at its
+static-init value of **0**, and `failsafe_pmucan_check()` takes the `== 0` branch and returns
+(`events.cpp:561`). `AP_Arming_Copter::pmucan_checks()` likewise returns true at `== 0`. So
+**no failsafe and no prearm warning**, which is correct for an aircraft deliberately flown
+without a PMU. The gimbal and the SAR have no failsafe of their own at all -
+`AP_PNUGimbal::healthy()` exists and nothing in the tree consumes it.
+
+That safety rests on `PMUCAN_Fail` only ever becoming 1 from inside the PMU backend's own
+code. True by construction, but **comment it at the site**: raising the global's static
+initialiser to 2 "for honesty" would fire `"PMU not healthy (state 2)"` on every prearm of a
+PMU-less aircraft - the permanent-warning-crowds-out-real-faults problem 5.1.8 removed.
+
+**The residual, accepted:** with bit 0 clear, KGCS is told `PMUCAN_Fail = 0`, i.e. a healthy
+PMU that is not fitted. That is exactly today's behaviour when `CAN_Dn_PROTOCOL` is not 15,
+so it is not a regression - but one forgotten bit now produces it where a whole wrong protocol
+number used to be needed. The mitigation is free and belongs in step 1: **the startup report
+names the enabled backends once per boot**, e.g. `PNU_CAN: CAN_D1 Gimbal+SAR ready (no PMU)`
+or `PNU_CAN: CAN_D1 no backends enabled (PNU_OPTS=0)`. A forgotten bit is then visible at
+once, with no recurring warning and no ICD change.
+
+**When the parameters actually appear.** `AP_SUBGROUPPTR` is a *pointer* subgroup, and
+`AP_Param::adjust_group_offset()` returns false while that pointer is null
+(`AP_Param.cpp:417-428`), so `PNU_OPTS` and `PG_*` **do not exist** - they are skipped during
+enumeration, not merely hidden - until `AP_CANManager::init()` has allocated the driver. That
+needs three things, not one:
+
+1. `CAN_Dn_PROTOCOL = 15`
+2. `CAN_Pn_DRIVER = n` - **defaults to 0 (Disabled)** on CubeOrangePlus, since
+   `HAL_CAN_DRIVER_DEFAULT` is 0 and the hwdef does not override it
+3. **a reboot** - `PROTOCOL` is `@RebootRequired: True` and allocation happens once in `init()`
+
+A GCS parameter refresh before the reboot shows nothing. That is the step most likely to look
+like a bug when it is not. Appearing at defaults also does not mean written to EEPROM - normal
+AP_Param behaviour, only non-default values are stored.
+
+Note that `PNU_OPTS = 0` still allocates the driver. It has to: otherwise the subgroup would
+vanish and the bitmask could never be set back.
 
 **The directory layout does not change, and that is deliberate.** Every reference to
 `AP_PMUCAN` from outside its own folder goes through two globals - `PMU_Status` and

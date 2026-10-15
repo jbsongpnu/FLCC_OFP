@@ -42,7 +42,7 @@
 #include <AP_Common/sorting.h>
 #include <AP_Logger/AP_Logger.h>
 #include <AP_PMUCAN/AP_PMUCAN.h>    // PNU
-#include <AP_PNUGimbal/AP_PNUGimbal.h>  // PNU
+#include <AP_PNU_CAN/AP_PNU_CAN.h>        // PNU
 #include <AP_PNUSAR/AP_PNUSAR.h>        // PNU
 
 extern const AP_HAL::HAL& hal;
@@ -223,14 +223,14 @@ void AP_CANManager::init()
                 continue;
             }
             break;
-#if AP_PNUGIMBAL_ENABLED
-        case AP_CAN::Protocol::PNUGimbal : // PNU : gimbal mount, private CAN protocol
-            _drivers[drv_num] = _drv_param[drv_num]._pnugimbal = NEW_NOTHROW AP_PNUGimbal;
+#if AP_PNU_CAN_ENABLED
+        case AP_CAN::Protocol::PNU_CAN : // PNU : PMU / gimbal / SAR, private CAN protocols
+            _drivers[drv_num] = _drv_param[drv_num]._pnu_can = NEW_NOTHROW AP_PNU_CAN;
             if (_drivers[drv_num] == nullptr) {
-                AP_BoardConfig::allocation_error("PNUGimbal %d", drv_num + 1);
+                AP_BoardConfig::allocation_error("PNU_CAN %d", drv_num + 1);
                 continue;
             }
-            AP_Param::load_object_from_eeprom((AP_PNUGimbal*)_drivers[drv_num], AP_PNUGimbal::var_info);
+            AP_Param::load_object_from_eeprom((AP_PNU_CAN*)_drivers[drv_num], AP_PNU_CAN::var_info);
             break;
 #endif
 #if AP_PNUSAR_ENABLED

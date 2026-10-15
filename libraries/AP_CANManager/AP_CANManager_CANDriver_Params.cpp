@@ -20,7 +20,7 @@
 
 #include <AP_DroneCAN/AP_DroneCAN.h>
 #include <AP_PiccoloCAN/AP_PiccoloCAN.h>
-#include <AP_PNUGimbal/AP_PNUGimbal.h>     // PNU
+#include <AP_PNU_CAN/AP_PNU_CAN.h>           // PNU
 
 // table of user settable CAN bus parameters
 const AP_Param::GroupInfo AP_CANManager::CANDriver_Params::var_info[] = {
@@ -29,7 +29,7 @@ const AP_Param::GroupInfo AP_CANManager::CANDriver_Params::var_info[] = {
     // @DisplayName: Enable use of specific protocol over virtual driver
     // @Description: Enabling this option starts selected protocol that will use this virtual driver
     // @SortValues: AlphabeticalZeroAtTop
-    // @Values: 0:Disabled,1:DroneCAN,4:PiccoloCAN,6:EFI_NWPMU,7:USD1,8:KDECAN,10:Scripting,11:Benewake,12:Scripting2,13:TOFSenseP,14:RadarCAN (NanoRadar/Hexsoon),15:PMUCAN,16:PNUGimbal
+    // @Values: 0:Disabled,1:DroneCAN,4:PiccoloCAN,6:EFI_NWPMU,7:USD1,8:KDECAN,10:Scripting,11:Benewake,12:Scripting2,13:TOFSenseP,14:RadarCAN (NanoRadar/Hexsoon),15:PMUCAN,16:PNU_CAN
     // @User: Advanced
     // @RebootRequired: True
     AP_GROUPINFO("PROTOCOL", 1, AP_CANManager::CANDriver_Params, _driver_type, float(AP_CAN::Protocol::DroneCAN)),
@@ -50,13 +50,17 @@ const AP_Param::GroupInfo AP_CANManager::CANDriver_Params::var_info[] = {
     AP_SUBGROUPPTR(_piccolocan, "PC_", 5, AP_CANManager::CANDriver_Params, AP_PiccoloCAN),
 #endif
 
-#if AP_PNUGIMBAL_ENABLED
-    // PNU : the PNU gimbal's own settings.  17 (PNUSAR) is deliberately absent from the
-    // PROTOCOL list above and has no group here - it is still a skeleton, and offering
-    // it in a dropdown would let an operator select a driver that does nothing.
-    // @Group: PG_
-    // @Path: ../AP_PNUGimbal/AP_PNUGimbal.cpp
-    AP_SUBGROUPPTR(_pnugimbal, "PG_", 7, AP_CANManager::CANDriver_Params, AP_PNUGimbal),
+    // index 7 was PG_, the 5.1.10 gimbal-only group.  NOT reused: AP_Param stores by
+    // index rather than by name, so a bench aircraft that saved a PG_ value would have
+    // it read back as a different parameter.
+
+#if AP_PNU_CAN_ENABLED
+    // PNU : every PNU device on this bus shares one driver and one parameter group.
+    // 17 (PNUSAR) is deliberately absent from the PROTOCOL list above - the SAR is a
+    // backend here, not a protocol of its own.
+    // @Group: PNU_
+    // @Path: ../AP_PNU_CAN/AP_PNU_CAN.cpp
+    AP_SUBGROUPPTR(_pnu_can, "PNU_", 8, AP_CANManager::CANDriver_Params, AP_PNU_CAN),
 #endif
 
     // @Param: PROTOCOL2

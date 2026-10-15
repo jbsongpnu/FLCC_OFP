@@ -9,7 +9,7 @@
 #include <AP_Math/AP_Math.h>
 #include <GCS_MAVLink/GCS.h>
 
-#include "AP_PNUGimbal.h"
+#include <AP_PNU_CAN/AP_PNU_CAN.h>
 
 // ---------------------------------------------------------------------------
 // Pure codec
@@ -146,16 +146,16 @@ const char *AP_PNUGimbal_CubeMars::axis_name(uint8_t axis)
 
 bool AP_PNUGimbal_CubeMars::init(void)
 {
-    const uint8_t mode = _frontend.get_mode();
+    const uint8_t mode = _frontend.get_gimbal_mode();
     if (mode > uint8_t(Mode::VEL)) {
-        _frontend.set_init_error("PG_MODE %u is not 0/1/2", (unsigned)mode);
+        _frontend.set_init_error("PNU_MODE %u is not 0/1/2", (unsigned)mode);
         return false;
     }
     _mode = Mode(mode);
 
     _master_id = _frontend.get_master_id();
     if (_master_id > AP_HAL::CANFrame::MaskStdID) {
-        _frontend.set_init_error("PG_MSTID %u exceeds 11 bits", (unsigned)_master_id);
+        _frontend.set_init_error("PNU_MSTID %u exceeds 11 bits", (unsigned)_master_id);
         return false;
     }
 
@@ -182,7 +182,7 @@ bool AP_PNUGimbal_CubeMars::init(void)
     // feedback id must not also be a command id for any of them
     for (uint8_t axis = 0; axis < AP_PNUGIMBAL_NUM_AXES; axis++) {
         if (command_id(_mode, _motor_id[axis]) == _master_id) {
-            _frontend.set_init_error("PG_MSTID %u collides with the %s command id",
+            _frontend.set_init_error("PNU_MSTID %u collides with the %s command id",
                                      (unsigned)_master_id, axis_name(axis));
             return false;
         }
@@ -199,7 +199,7 @@ bool AP_PNUGimbal_CubeMars::init(void)
         !isfinite(kp_max) || !is_positive(kp_max) ||
         !isfinite(kd_max) || !is_positive(kd_max) ||
         !isfinite(t_max)  || !is_positive(t_max)) {
-        _frontend.set_init_error("PG_PMAX/VMAX/KPMAX/KDMAX/TMAX must all be > 0");
+        _frontend.set_init_error("PNU_PMAX/VMAX/KPMAX/KDMAX/TMAX must all be > 0");
         return false;
     }
 
@@ -219,8 +219,13 @@ bool AP_PNUGimbal_CubeMars::init(void)
 // Transmit
 // ---------------------------------------------------------------------------
 
-void AP_PNUGimbal_CubeMars::update(void)
+void AP_PNUGimbal_CubeMars::update(uint32_t tick)
 {
+    // one clock for the whole driver; see AP_PNUGIMBAL_CUBEMARS_CMD_DIVISOR
+    if ((tick % AP_PNUGIMBAL_CUBEMARS_CMD_DIVISOR) != 0) {
+        return;
+    }
+
     for (uint8_t axis = 0; axis < AP_PNUGIMBAL_NUM_AXES; axis++) {
         AxisState &state = _axis[axis];
 
@@ -313,25 +318,27 @@ void AP_PNUGimbal_CubeMars::send_motion(uint8_t axis)
 // Receive
 // ---------------------------------------------------------------------------
 
-void AP_PNUGimbal_CubeMars::handle_frame(const AP_HAL::CANFrame &frame)
+bool AP_PNUGimbal_CubeMars::handle_frame(const AP_HAL::CANFrame &frame)
 {
     // sec 1 / sec 9 : classical CAN, standard 11-bit data frames.  Anything else is not this
-    // protocol and must be rejected before the payload is looked at.
+    // protocol and must be rejected before the payload is looked at.  Returning false
+    // rather than true matters on a shared bus: the PMU's extended frames must reach the
+    // backend after this one.
     if (frame.isExtended() || frame.isRemoteTransmissionRequest() || frame.isErrorFrame()) {
-        return;
+        return false;
     }
 
     if ((frame.id & AP_HAL::CANFrame::MaskStdID) != _master_id) {
-        // another device sharing the bus, or our own command seen by a monitor.  Not an
-        // error and not worth counting.
-        return;
+        // not our feedback id - the SAR, or another device sharing the bus
+        return false;
     }
 
     // PNU-ISSUE(D6) lesson from AP_PMUCAN: validate the DLC before reading any field.
     // A short frame parsed from fixed offsets yields values that look live and are not.
+    // It is still OUR frame, so it is claimed - reporting it twice would be worse.
     if (frame.dlc < AP_PNUGIMBAL_CUBEMARS_FB_DLC) {
         report_short_frame(frame.id, frame.dlc);
-        return;
+        return true;
     }
 
     AP_PNUGimbal_Feedback feedback;
@@ -359,10 +366,14 @@ void AP_PNUGimbal_CubeMars::handle_frame(const AP_HAL::CANFrame &frame)
         if (status != prev_status) {
             report_status_change(axis, status);
         }
-        return;
+        return true;
     }
 
+    // arrived on our Master ID but with a motor id we do not drive.  Claimed anyway:
+    // the id is ours, so letting it fall through to the driver's unclaimed-frame
+    // warning would report the same frame under two different causes.
     report_unmatched_feedback(motor_id_low4);
+    return true;
 }
 
 void AP_PNUGimbal_CubeMars::check_feedback_timeout(void)

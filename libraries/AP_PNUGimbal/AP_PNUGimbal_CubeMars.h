@@ -44,6 +44,12 @@
 // that several permanent warnings sharing one limiter crowd out genuine faults.
 #define AP_PNUGIMBAL_CUBEMARS_WARN_MS       (10000U)
 
+// Motion commands go out on every driver tick.  Named rather than implied, because the
+// PMU's rate turned out to be an accident of a command rotation that nobody had written
+// down - see the CAN Update Plan in README.md.  The CubeMars manual specifies no command
+// period at all, so this is a host choice awaiting measurement, not a protocol fact.
+#define AP_PNUGIMBAL_CUBEMARS_CMD_DIVISOR   (1U)
+
 class AP_PNUGimbal_CubeMars : public AP_PNUGimbal_Backend {
 public:
     using AP_PNUGimbal_Backend::AP_PNUGimbal_Backend;
@@ -75,17 +81,17 @@ public:
         float t_min = 0.0f, t_max = 0.0f;
     };
 
-    // AP_PNUGimbal_Backend
+    // AP_PNU_CAN_Backend
     bool init(void) override;
-    void update(void) override;
-    void handle_frame(const AP_HAL::CANFrame &frame) override;
+    void update(uint32_t tick) override;
+    bool handle_frame(const AP_HAL::CANFrame &frame) override;
     void set_target(uint8_t axis, const AP_PNUGimbal_Target &target) override;
     bool get_feedback(uint8_t axis, AP_PNUGimbal_Feedback &feedback) const override;
     void set_enable(bool enable) override;
     void request_zero(uint8_t axis) override;
     void request_clear_errors(uint8_t axis) override;
     bool healthy(void) const override;
-    const char *name(void) const override { return "CubeMars"; }
+    const char *name(void) const override { return "Gimbal"; }
 
     // ---------------------------------------------------------------------------
     // Pure codec.  No CAN, no parameters, no state - everything below is a function of

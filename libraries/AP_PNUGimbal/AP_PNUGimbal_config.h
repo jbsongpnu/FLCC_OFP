@@ -1,18 +1,16 @@
 #pragma once
 
-#include <AP_HAL/AP_HAL_Boards.h>
-#include <AP_CANManager/AP_CANManager_config.h>
+#include <AP_PNU_CAN/AP_PNU_CAN_config.h>
 
-// PNU : AP_PNUGimbal is a CAN driver for the PNU-developed gimbal mount.  It speaks a
-// private CAN protocol, NOT DroneCAN, in the same shape as AP_PMUCAN.  Enabled only where
-// there is a CAN interface to speak it on.
+// PNU : the gimbal is one of the protocols AP_PNU_CAN speaks on the shared bus.  It is
+// present when CAN_Dn_PNU_OPTS bit 1 is set; these flags decide whether the code is in
+// the build at all.
 #ifndef AP_PNUGIMBAL_ENABLED
-#define AP_PNUGIMBAL_ENABLED (HAL_MAX_CAN_PROTOCOL_DRIVERS > 0)
+#define AP_PNUGIMBAL_ENABLED AP_PNU_CAN_ENABLED
 #endif
 
-// PNU : the protocol spoken on that interface lives in a backend, because the mount is
-// expected to accommodate more than one motor type.  Each backend has its own flag so a
-// build that only ever flies one of them does not carry the others.
+// One flag per motor protocol, so a build that only ever flies one of them does not
+// carry the others.
 #ifndef AP_PNUGIMBAL_CUBEMARS_ENABLED
 #define AP_PNUGIMBAL_CUBEMARS_ENABLED AP_PNUGIMBAL_ENABLED
 #endif
