@@ -21,28 +21,20 @@
 //   - any loss timeout, watchdog interval or recovery sequence
 //   - acknowledgement of the universal commands
 //   - a runtime mode-switch command.  The mode is written by the vendor PC utility and
-//     the motor is power-cycled; CAN_Dn_PG_MODE only tells this backend what the motors
+//     the motor is power-cycled; CAN_Dn_PNU_MODE only tells this backend what the motors
 //     were already configured for, and a mismatch is undefined behaviour.
 //
-// The motors are enabled at power-up per the manual (sec 1), so this backend does not send
-// an enable at startup either - it would be commanding a state it cannot read back.
-// set_enable() is an explicit action from the layer above.
+// THIS BACKEND OWNS THE WIRE FORMAT AND NOTHING ELSE.  The lifecycle - INIT, HOMING,
+// ALIGN, RUN, MAINTENANCE, FAULT - the mechanical limits, the slew limit, the per-axis
+// target and feedback storage and the arming interlock all live one layer up in
+// AP_PNUGimbal_Backend, because a second motor protocol would need all of it unchanged.
+// Everything here is either a CAN id, a bit layout or a DLC.
 
 #define AP_PNUGIMBAL_CUBEMARS_FB_DLC        (8U)        // sec 7, feedback is always 8 bytes
 #define AP_PNUGIMBAL_CUBEMARS_MIT_DLC       (8U)        // sec 4
 #define AP_PNUGIMBAL_CUBEMARS_POSVEL_DLC    (8U)        // sec 5
 #define AP_PNUGIMBAL_CUBEMARS_VEL_DLC       (4U)        // sec 6, deliberately not 8
 #define AP_PNUGIMBAL_CUBEMARS_UNIVERSAL_DLC (8U)        // sec 3
-
-// How long an axis may go without feedback before get_feedback() stops reporting it as
-// valid.  sec 9 leaves the stale-feedback policy to the application; this backend's policy
-// is to invalidate and say so once, and to do nothing else - disabling a motor or
-// changing a target on a feedback gap is a control-layer decision, not a protocol one.
-#define AP_PNUGIMBAL_CUBEMARS_FB_TIMEOUT_MS (500U)
-
-// Rate limits.  Deliberately one per cause: a 2026-10-14 lesson from the camera path is
-// that several permanent warnings sharing one limiter crowd out genuine faults.
-#define AP_PNUGIMBAL_CUBEMARS_WARN_MS       (10000U)
 
 // Motion commands go out on every driver tick.  Named rather than implied, because the
 // PMU's rate turned out to be an accident of a command rotation that nobody had written
@@ -82,16 +74,20 @@ public:
     };
 
     // AP_PNU_CAN_Backend
-    bool init(void) override;
-    void update(uint32_t tick) override;
     bool handle_frame(const AP_HAL::CANFrame &frame) override;
-    void set_target(uint8_t axis, const AP_PNUGimbal_Target &target) override;
-    bool get_feedback(uint8_t axis, AP_PNUGimbal_Feedback &feedback) const override;
-    void set_enable(bool enable) override;
-    void request_zero(uint8_t axis) override;
-    void request_clear_errors(uint8_t axis) override;
-    bool healthy(void) const override;
-    const char *name(void) const override { return "Gimbal"; }
+
+protected:
+    // AP_PNUGimbal_Backend protocol primitives
+    bool protocol_init(void) override;
+    void queue_enable(bool enable) override;
+    void queue_zero(uint8_t axis) override;
+    void queue_clear_errors(uint8_t axis) override;
+    bool any_pending(void) const override;
+    void transmit(uint32_t tick) override;
+    bool status_is_enabled(uint8_t status) const override { return status == STATUS_ENABLED; }
+    bool status_is_fault(uint8_t status) const override;
+
+public:
 
     // ---------------------------------------------------------------------------
     // Pure codec.  No CAN, no parameters, no state - everything below is a function of
@@ -134,6 +130,9 @@ public:
     // table does not list is reported by its raw value rather than guessed at.
     static const char *status_str(uint8_t status);
 
+    static const uint8_t STATUS_DISABLED = 0x0;
+    static const uint8_t STATUS_ENABLED  = 0x1;
+
     // sec 3 universal commands, the last payload byte of FF FF FF FF FF FF FF xx.
     static const uint8_t UNIVERSAL_ENABLE  = 0xFC;
     static const uint8_t UNIVERSAL_DISABLE = 0xFD;
@@ -148,40 +147,22 @@ private:
     static const uint8_t PENDING_ENABLE  = 1U << 2;
     static const uint8_t PENDING_ZERO    = 1U << 3;
 
-    // PNU-ISSUE(D1/D10) lesson: every member carries an initialiser, including the ones
-    // inside this struct.
-    struct AxisState {
-        AP_PNUGimbal_Target target;
-        AP_PNUGimbal_Feedback feedback;
-        uint8_t pending = 0;
-        bool target_valid = false;      // nothing is commanded until a target arrives
-        bool timeout_reported = false;
-    };
-
     bool send_universal(uint8_t axis);
     void send_motion(uint8_t axis);
-    void check_feedback_timeout(void);
 
     void report_unmatched_feedback(uint8_t motor_id_low4);
-    void report_rejected_target(uint8_t axis);
     void report_status_change(uint8_t axis, uint8_t status);
-    static const char *axis_name(uint8_t axis);
 
-    AxisState _axis[AP_PNUGIMBAL_NUM_AXES];
+    // queued universal commands, one bitmask per axis, sent one per axis per transmit()
+    uint8_t _pending[AP_PNUGIMBAL_NUM_AXES] = {};
 
     Mode _mode = Mode::MIT;
     Limits _limits;
     uint16_t _master_id = 0;                        // feedback arbitration id (sec 7)
     uint8_t _motor_id[AP_PNUGIMBAL_NUM_AXES] = {};  // 1..15, distinct (sec 7 ID conflict)
-    bool _enabled = false;
-
-    // mechanical travel bounds, radians, symmetric.  See set_target().
-    float _mech_limit_rad[AP_PNUGIMBAL_NUM_AXES] = {};
 
     uint32_t _unmatched_fb_cnt = 0;
     uint32_t _last_unmatched_fb_warn_ms = 0;
-    uint32_t _rejected_target_cnt = 0;
-    uint32_t _last_rejected_target_warn_ms = 0;
 };
 
 #endif  // AP_PNUGIMBAL_CUBEMARS_ENABLED

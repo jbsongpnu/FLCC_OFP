@@ -12,7 +12,10 @@
 #include <GCS_MAVLink/GCS_MAVLink.h>
 
 #include "AP_PNU_CAN_Backend.h"
+#include <AP_PNUGimbal/AP_PNUGimbal_config.h>
+#if AP_PNUGIMBAL_ENABLED
 #include <AP_PNUGimbal/AP_PNUGimbal_Backend.h>
+#endif
 
 // PNU : CAN driver for PNU's own devices.
 //
@@ -90,7 +93,9 @@ public:
     // layer takes this once and drives it through the AP_PNUGimbal_Backend interface,
     // which names no motor protocol.  Callers must hold get_semaphore() across any call,
     // because the driver thread writes the same state.
+#if AP_PNUGIMBAL_ENABLED
     AP_PNUGimbal_Backend *get_gimbal(void) const { return _gimbal; }
+#endif
 
     // guards every backend's state.  The driver thread writes it from its own loop; a
     // control layer reads and writes it from the vehicle thread.
@@ -117,6 +122,8 @@ public:
     uint16_t get_master_id(void) const  { return uint16_t(_master_id.get()); }
     uint8_t  get_motor_id(uint8_t axis) const;
     float    get_mech_limit_rad(uint8_t axis) const;
+    float    get_slew_rate_degs(void) const { return _slew_rate_degs.get(); }
+    bool     get_maintenance(void) const;
     float    get_p_max(void) const      { return _p_max.get(); }
     float    get_v_max(void) const      { return _v_max.get(); }
     float    get_kp_max(void) const     { return _kp_max.get(); }
@@ -150,8 +157,10 @@ private:
     AP_PNU_CAN_Backend *_backends[AP_PNU_CAN_MAX_BACKENDS] = {};
     uint8_t _num_backends = 0;
 
+#if AP_PNUGIMBAL_ENABLED
     // typed alias into _backends, so a control layer does not have to search
     AP_PNUGimbal_Backend *_gimbal = nullptr;
+#endif
 
     HAL_Semaphore _sem;
 
@@ -188,6 +197,8 @@ private:
     AP_Float _kd_max;
     AP_Float _t_max;
     AP_Float _mech_limit_deg[AP_PNUGIMBAL_NUM_AXES];
+    AP_Float _slew_rate_degs;
+    AP_Int8  _maintenance;
 };
 
 namespace AP {

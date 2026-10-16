@@ -130,21 +130,11 @@ const char *AP_PNUGimbal_CubeMars::status_str(uint8_t status)
     return "unknown";
 }
 
-const char *AP_PNUGimbal_CubeMars::axis_name(uint8_t axis)
-{
-    switch (axis) {
-    case AP_PNUGIMBAL_AXIS_ROLL:  return "roll";
-    case AP_PNUGIMBAL_AXIS_PITCH: return "pitch";
-    case AP_PNUGIMBAL_AXIS_YAW:   return "yaw";
-    }
-    return "?";
-}
-
 // ---------------------------------------------------------------------------
 // Configuration
 // ---------------------------------------------------------------------------
 
-bool AP_PNUGimbal_CubeMars::init(void)
+bool AP_PNUGimbal_CubeMars::protocol_init(void)
 {
     const uint8_t mode = _frontend.get_gimbal_mode();
     if (mode > uint8_t(Mode::VEL)) {
@@ -203,12 +193,9 @@ bool AP_PNUGimbal_CubeMars::init(void)
         return false;
     }
 
+    // the base layer has already read and range-checked the mechanical limits; what only
+    // this layer can check is whether the encoding range can express them
     for (uint8_t axis = 0; axis < AP_PNUGIMBAL_NUM_AXES; axis++) {
-        _mech_limit_rad[axis] = _frontend.get_mech_limit_rad(axis);
-        if (!isfinite(_mech_limit_rad[axis]) || !is_positive(_mech_limit_rad[axis])) {
-            _frontend.set_init_error("%s mechanical limit must be > 0", axis_name(axis));
-            return false;
-        }
         if (_mech_limit_rad[axis] > p_max) {
             // the limit is unreachable: the encoding range cannot express it, so the
             // clamp would never fire and the stops would be the only protection
@@ -233,7 +220,7 @@ bool AP_PNUGimbal_CubeMars::init(void)
 // Transmit
 // ---------------------------------------------------------------------------
 
-void AP_PNUGimbal_CubeMars::update(uint32_t tick)
+void AP_PNUGimbal_CubeMars::transmit(uint32_t tick)
 {
     // one clock for the whole driver; see AP_PNUGIMBAL_CUBEMARS_CMD_DIVISOR
     if ((tick % AP_PNUGIMBAL_CUBEMARS_CMD_DIVISOR) != 0) {
@@ -241,43 +228,66 @@ void AP_PNUGimbal_CubeMars::update(uint32_t tick)
     }
 
     for (uint8_t axis = 0; axis < AP_PNUGIMBAL_NUM_AXES; axis++) {
-        AxisState &state = _axis[axis];
-
-        if (state.pending != 0) {
-            // a universal command takes the whole tick for that axis.  They are rare,
-            // and nothing is gained by also sending a motion command in the same tick.
+        if (_pending[axis] != 0) {
+            // a universal command takes the whole tick for that axis.  They are rare, and
+            // nothing is gained by also sending a motion command in the same tick.
             // PNU-ISSUE(D1) lesson: the request is cleared only on a successful send, so
             // a momentarily full TX buffer retries next tick instead of dropping it.
             send_universal(axis);
             continue;
         }
 
-        if (!_enabled || !state.target_valid) {
-            // sec 9 : position control starts from the measured current angle.  Until the
-            // layer above has set a target, there is no angle this driver could command
-            // that would be correct, so it commands nothing.
+        // allow_motion() is the state machine's gate and it is true only in RUN.  Nothing
+        // moves in INIT, ALIGN, MAINTENANCE or FAULT, whatever targets are sitting here.
+        if (!allow_motion() || !commanded_valid(axis)) {
             continue;
         }
 
         send_motion(axis);
     }
+}
 
-    check_feedback_timeout();
+bool AP_PNUGimbal_CubeMars::any_pending(void) const
+{
+    for (uint8_t axis = 0; axis < AP_PNUGIMBAL_NUM_AXES; axis++) {
+        if (_pending[axis] != 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// sec 7 : 0 is disabled and 1 is enabled; everything the table lists above that is a
+// fault.  Codes the table does not list are deliberately NOT treated as faults - they are
+// unknown, and guessing either way would be worse than reporting the raw value.
+bool AP_PNUGimbal_CubeMars::status_is_fault(uint8_t status) const
+{
+    switch (status) {
+    case 0x8:   // overvoltage
+    case 0x9:   // undervoltage
+    case 0xA:   // overcurrent
+    case 0xB:   // MOS overtemperature
+    case 0xC:   // winding overtemperature
+    case 0xD:   // communication loss
+    case 0xE:   // overload
+        return true;
+    }
+    return false;
 }
 
 bool AP_PNUGimbal_CubeMars::send_universal(uint8_t axis)
 {
-    AxisState &state = _axis[axis];
+    uint8_t &pending = _pending[axis];
 
     uint8_t bit;
     uint8_t action;
-    if (state.pending & PENDING_CLEAR) {
+    if (pending & PENDING_CLEAR) {
         bit = PENDING_CLEAR;   action = UNIVERSAL_CLEAR;
-    } else if (state.pending & PENDING_DISABLE) {
+    } else if (pending & PENDING_DISABLE) {
         bit = PENDING_DISABLE; action = UNIVERSAL_DISABLE;
-    } else if (state.pending & PENDING_ENABLE) {
+    } else if (pending & PENDING_ENABLE) {
         bit = PENDING_ENABLE;  action = UNIVERSAL_ENABLE;
-    } else if (state.pending & PENDING_ZERO) {
+    } else if (pending & PENDING_ZERO) {
         bit = PENDING_ZERO;    action = UNIVERSAL_ZERO;
     } else {
         return false;
@@ -294,30 +304,32 @@ bool AP_PNUGimbal_CubeMars::send_universal(uint8_t axis)
     if (!send_frame(command_id(_mode, _motor_id[axis]), data, sizeof(data))) {
         return false;
     }
-    state.pending &= ~bit;
+    pending &= ~bit;
     return true;
 }
 
 void AP_PNUGimbal_CubeMars::send_motion(uint8_t axis)
 {
-    const AxisState &state = _axis[axis];
+    // commanded(), not the raw target: the slew limit lives one layer up and bounds how
+    // fast a bulky payload can be told to move
+    const AP_PNUGimbal_Target &target = commanded(axis);
 
     uint8_t data[8] = {};
     uint8_t dlc;
 
     switch (_mode) {
     case Mode::MIT:
-        encode_mit(state.target, _limits, data);
+        encode_mit(target, _limits, data);
         dlc = AP_PNUGIMBAL_CUBEMARS_MIT_DLC;
         break;
     case Mode::POS_VEL:
         // the second field is a maximum absolute travel speed, not a signed velocity
         // target, and the manual does not define a negative one (sec 5)
-        encode_pos_vel(state.target.position_rad, fabsf(state.target.velocity_rads), data);
+        encode_pos_vel(target.position_rad, fabsf(target.velocity_rads), data);
         dlc = AP_PNUGIMBAL_CUBEMARS_POSVEL_DLC;
         break;
     case Mode::VEL:
-        encode_vel(state.target.velocity_rads, data);
+        encode_vel(target.velocity_rads, data);
         dlc = AP_PNUGIMBAL_CUBEMARS_VEL_DLC;
         break;
     default:
@@ -390,126 +402,43 @@ bool AP_PNUGimbal_CubeMars::handle_frame(const AP_HAL::CANFrame &frame)
     return true;
 }
 
-void AP_PNUGimbal_CubeMars::check_feedback_timeout(void)
-{
-    const uint32_t now_ms = AP_HAL::millis();
-
-    for (uint8_t axis = 0; axis < AP_PNUGIMBAL_NUM_AXES; axis++) {
-        AxisState &state = _axis[axis];
-        if (!state.feedback.valid) {
-            continue;
-        }
-        if ((now_ms - state.feedback.last_update_ms) < AP_PNUGIMBAL_CUBEMARS_FB_TIMEOUT_MS) {
-            continue;
-        }
-
-        state.feedback.valid = false;
-        if (!state.timeout_reported) {
-            state.timeout_reported = true;
-            GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "PNUGimbal: %s feedback lost after %u frames",
-                          axis_name(axis), (unsigned)state.feedback.frame_cnt);
-        }
-    }
-}
-
 // ---------------------------------------------------------------------------
-// Interface to the layer above
+// Protocol primitives for the lifecycle in AP_PNUGimbal_Backend
 // ---------------------------------------------------------------------------
 
-void AP_PNUGimbal_CubeMars::set_target(uint8_t axis, const AP_PNUGimbal_Target &target)
+void AP_PNUGimbal_CubeMars::queue_enable(bool enable)
 {
-    if (axis >= AP_PNUGIMBAL_NUM_AXES) {
-        return;
-    }
-
-    // sec 9 : reject non-finite command floats.  Rejecting here rather than at encode time
-    // means a bad value never becomes the last good target either.
-    if (!isfinite(target.position_rad) || !isfinite(target.velocity_rads) ||
-        !isfinite(target.kp) || !isfinite(target.kd) || !isfinite(target.torque_nm)) {
-        report_rejected_target(axis);
-        return;
-    }
-
-    _axis[axis].target = target;
-
-    // MECHANICAL LIMIT - the last clamp before anything is encoded.
-    //
-    // MNT1_ROLL/PITCH/YAW_MIN/MAX carry the OPERATING limits and AP_Mount has already
-    // applied them; this is the hard stop, 5 degrees further out, and it is applied again
-    // here on purpose.  The targeting layer and the layer that owns the wire are different
-    // layers, and a bug in the first must not be able to drive a bulky payload into the
-    // landing skid struts.
-    //
-    // It only means anything once homing has put zero at the centre of travel: the encoder
-    // is relative and its zero is assumed not to persist, so before homing these bounds
-    // are relative to wherever the mount powered up.
-    const float mech_rad = _mech_limit_rad[axis];
-    if (is_positive(mech_rad)) {
-        _axis[axis].target.position_rad = constrain_float(target.position_rad,
-                                                          -mech_rad, mech_rad);
-    }
-
-    _axis[axis].target_valid = true;
-}
-
-bool AP_PNUGimbal_CubeMars::get_feedback(uint8_t axis, AP_PNUGimbal_Feedback &feedback) const
-{
-    if (axis >= AP_PNUGIMBAL_NUM_AXES) {
-        return false;
-    }
-    feedback = _axis[axis].feedback;
-    return feedback.valid;
-}
-
-void AP_PNUGimbal_CubeMars::set_enable(bool enable)
-{
-    _enabled = enable;
-
     for (uint8_t axis = 0; axis < AP_PNUGIMBAL_NUM_AXES; axis++) {
-        AxisState &state = _axis[axis];
         if (enable) {
-            state.pending = (state.pending & ~PENDING_DISABLE) | PENDING_ENABLE;
+            _pending[axis] = (_pending[axis] & ~PENDING_DISABLE) | PENDING_ENABLE;
         } else {
-            state.pending = (state.pending & ~PENDING_ENABLE) | PENDING_DISABLE;
-            // a target that was valid for the previous enable is not a safe starting
-            // point for the next one - the mount will have moved while disabled
-            state.target_valid = false;
+            _pending[axis] = (_pending[axis] & ~PENDING_ENABLE) | PENDING_DISABLE;
         }
     }
 }
 
-void AP_PNUGimbal_CubeMars::request_zero(uint8_t axis)
+void AP_PNUGimbal_CubeMars::queue_zero(uint8_t axis)
 {
     if (axis >= AP_PNUGIMBAL_NUM_AXES) {
         return;
     }
-    // sec 3 : zero-setting persistence is unspecified, which is exactly why this is an
-    // explicit request and never a startup step.
-    _axis[axis].pending |= PENDING_ZERO;
+    // sec 3 : zero-setting persistence is unspecified, which is exactly why the layer
+    // above only permits this in MAINTENANCE or FAULT.
+    _pending[axis] |= PENDING_ZERO;
 }
 
-void AP_PNUGimbal_CubeMars::request_clear_errors(uint8_t axis)
+void AP_PNUGimbal_CubeMars::queue_clear_errors(uint8_t axis)
 {
     if (axis >= AP_PNUGIMBAL_NUM_AXES) {
         return;
     }
-    _axis[axis].pending |= PENDING_CLEAR;
-}
-
-bool AP_PNUGimbal_CubeMars::healthy(void) const
-{
-    for (uint8_t axis = 0; axis < AP_PNUGIMBAL_NUM_AXES; axis++) {
-        if (!_axis[axis].feedback.valid) {
-            return false;
-        }
-    }
-    return true;
+    _pending[axis] |= PENDING_CLEAR;
 }
 
 // ---------------------------------------------------------------------------
 // Reporting.  One rate limiter per cause, deliberately: sharing one lets a permanent
 // condition crowd out a genuine fault, which is the 2026-10-14 lesson from the camera
-// path.  Each counter below is read by the message that reports it - PNU-ISSUE(D6) says
+// path.  The counter below is read by the message that reports it - PNU-ISSUE(D6) says
 // not to accumulate counters nobody surfaces.
 // ---------------------------------------------------------------------------
 
@@ -519,28 +448,13 @@ void AP_PNUGimbal_CubeMars::report_unmatched_feedback(uint8_t motor_id_low4)
 
     const uint32_t now_ms = AP_HAL::millis();
     if ((_unmatched_fb_cnt > 1) &&
-        ((now_ms - _last_unmatched_fb_warn_ms) < AP_PNUGIMBAL_CUBEMARS_WARN_MS)) {
+        ((now_ms - _last_unmatched_fb_warn_ms) < AP_PNUGIMBAL_WARN_MS)) {
         return;
     }
     _last_unmatched_fb_warn_ms = now_ms;
 
     GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "PNUGimbal: feedback from motor id ?%u (%u dropped)",
                   (unsigned)motor_id_low4, (unsigned)_unmatched_fb_cnt);
-}
-
-void AP_PNUGimbal_CubeMars::report_rejected_target(uint8_t axis)
-{
-    _rejected_target_cnt++;
-
-    const uint32_t now_ms = AP_HAL::millis();
-    if ((_rejected_target_cnt > 1) &&
-        ((now_ms - _last_rejected_target_warn_ms) < AP_PNUGIMBAL_CUBEMARS_WARN_MS)) {
-        return;
-    }
-    _last_rejected_target_warn_ms = now_ms;
-
-    GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "PNUGimbal: %s target not finite (%u dropped)",
-                  axis_name(axis), (unsigned)_rejected_target_cnt);
 }
 
 void AP_PNUGimbal_CubeMars::report_status_change(uint8_t axis, uint8_t status)

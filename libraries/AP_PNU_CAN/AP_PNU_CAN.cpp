@@ -155,6 +155,22 @@ const AP_Param::GroupInfo AP_PNU_CAN::var_info[] = {
     // @RebootRequired: True
     AP_GROUPINFO("MYAW", 15, AP_PNU_CAN, _mech_limit_deg[AP_PNUGIMBAL_AXIS_YAW], 20.0f),
 
+    // @Param: SLEW
+    // @DisplayName: PNU gimbal slew rate limit
+    // @Description: Maximum rate at which the gimbal angle command may change, in degrees per second. Bounds how fast anything can tell a bulky payload to move, and is what makes the first target after startup safe - it is approached from the measured angle rather than arriving as a step. 0 disables the limit. Provisional default, needs bench tuning.
+    // @Units: deg/s
+    // @Range: 0 360
+    // @User: Advanced
+    // @RebootRequired: True
+    AP_GROUPINFO("SLEW", 16, AP_PNU_CAN, _slew_rate_degs, 45.0f),
+
+    // @Param: MAINT
+    // @DisplayName: PNU gimbal maintenance mode
+    // @Description: Set to 1 to take the flight controller completely off the CAN bus for the gimbal, so a PC can be connected to a motor's UART to run the vendor configuration utility. The motors are disabled and nothing is transmitted. Entering is immediate; LEAVING REQUIRES A REBOOT, because the utility can change the CAN ID, the control mode and the encoding ranges, and a host/device mismatch does not fail - it silently rescales every command and every reading.
+    // @Values: 0:Normal,1:Maintenance
+    // @User: Advanced
+    AP_GROUPINFO("MAINT", 17, AP_PNU_CAN, _maintenance, 0),
+
     AP_GROUPEND
 };
 
@@ -500,6 +516,14 @@ void AP_PNU_CAN::report_unclaimed(uint32_t can_id)
 // this limit means nothing until the Appendix 1 homing sequence has put zero at the centre
 // of travel.  Until step 1d runs that sequence, the only thing protecting the payload is
 // the bounded stiffness and torque used during homing itself.
+// True while CAN_Dn_PNU_MAINT asks for maintenance.  The gimbal layer LATCHES this at
+// init rather than following it live, so clearing the parameter does not silently put a
+// reconfigured motor back on the bus - see the parameter description.
+bool AP_PNU_CAN::get_maintenance(void) const
+{
+    return _maintenance.get() != 0;
+}
+
 float AP_PNU_CAN::get_mech_limit_rad(uint8_t axis) const
 {
     if (axis >= AP_PNUGIMBAL_NUM_AXES) {

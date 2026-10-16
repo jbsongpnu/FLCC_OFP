@@ -1,9 +1,22 @@
 # PNU-KAL FLCC OFP Development Version
 - This branch currently developing PNU-KAL FLCC OFP after official version (TAG) PNU-KAL-FLCC-5.1.0 (this is same code as 5.0.15 dev)  
 - PNU-ISSUE 10 & 11 still remains : For Gremsy camera and general camera mount library structure  
-- NEXT : **Gimbal stabilisation and the mount state machine** - designed 2026-10-16. `AP_Mount` does stabilise against FC attitude and needs no camera, so it becomes an `AP_Mount` backend. PNU answered the structural questions and the homing detail; the encoder zero is **assumed non-persistent, so HOMING runs every boot**. **4 bench-measured values still open**. See the section near the end of this file  
-- ALSO NEXT : **CAN Update Plan step 2** - the PMU becomes a backend and protocol 15 moves to `AP_PNU_CAN`. **Needs a bench against real PMU hardware before it flies.** See the CAN Update Plan Steps section near the end of this file  
-- IN THIS VERSION : V5.1.12 - **CAN Update Plan step 1b : `AP_Mount_PNUGimbal`, the mount backend**  
+- NEXT : **CAN Update Plan step 1d - HOMING**, the Appendix 1 endpoint search. **The highest-risk routine in this driver** : it deliberately drives a bulky payload into three sets of hard stops, and the encoder zero is assumed non-persistent so it runs **every boot**. **Blocked on 4 bench-measured values** - stall thresholds, approach velocity, homing stiffness and the travel tolerances. Until it lands the zero must be set by hand on the bench, and the mechanical clamp protects nothing. See "Gimbal stabilisation and the mount state machine" near the end of this file  
+- ALSO NEXT : **CAN Update Plan step 2** - the PMU becomes a backend and protocol 15 moves to `AP_PNU_CAN`. **Needs a bench against real PMU hardware before it flies.** Independent of the gimbal track; either order. See the CAN Update Plan Steps section near the end of this file  
+- *Done in the gimbal track :* step 1b (`AP_Mount_PNUGimbal`, 5.1.12) and step 1c (lifecycle state machine, 5.1.13). `AP_Mount` does stabilise against FC attitude and needs no camera, which is why the gimbal is an `AP_Mount` backend  
+- IN THIS VERSION : V5.1.13 - **CAN Update Plan step 1c : the gimbal lifecycle state machine**  
+   - **INIT -> ALIGN -> RUN, plus MAINTENANCE and FAULT.** `HOMING` is in the enum and **deliberately not implemented** - that is step 1d, and until the Appendix 1 endpoint search runs, **the zero must be set by hand on the bench**  
+   - **It lives one layer BELOW the mount**, in `AP_PNUGimbal_Backend`: it runs in the CAN thread where feedback arrives, so a fault transition happens *on the frame* rather than a 50 Hz mount tick later; it survives `HAL_MOUNT_ENABLED=0` (D13); and a second motor protocol would need the same lifecycle unchanged  
+   - That meant **moving the per-axis target and feedback storage, the mechanical limits and the stale-feedback policy up out of `AP_PNUGimbal_CubeMars`**, which now owns the wire format and nothing else - every remaining member is a CAN id, a bit layout or a DLC  
+   - **The lifecycle is NOT the mount mode.** `MAV_MOUNT_MODE_*` says *where to point*; the state says *whether the hardware can be pointed*. RETRACT is a targeting mode, not "motors off". Conflating them would have been the easy mistake  
+   - **ALIGN exists because §9 requires position control to start from the measured angle.** It seeds the command from feedback so the first mount target is approached from where the mount *is*, instead of arriving as a step from zero - with a heavy SAR payload that is the one thing here that could break hardware  
+   - **New `CAN_Dn_PNU_SLEW`** (deg/s, default 45, provisional) bounds the approach *and* every later move. One mechanism, two jobs, cheaper than ramping stiffness  
+   - **New `CAN_Dn_PNU_MAINT`** takes the FC completely off the bus so a PC can configure a motor over UART. Entering is immediate; **leaving requires a reboot**, and the state is latched at `init()` for exactly that reason - the utility can change the CAN id, the mode and the encoding ranges, and a mismatch *silently rescales everything*  
+   - **Arming interlock : `healthy()` is now true only in RUN with every axis fresh.** `AP_Mount::pre_arm_checks()` fails on `!healthy()` as `Check::CAMERA`, so an unhomed or faulted mount **cannot be armed**. Override is `ARMING_SKIPCHK` **bit 16** (Camera, decimal 65536) - the same escape hatch D9(b) established for the PMU  
+   - **Also fixed, and it predated this step : `AP_PNUGIMBAL_ENABLED=0` did not compile**, because `AP_PNU_CAN` sizes its parameter arrays from `AP_PNUGIMBAL_NUM_AXES`. The axis identity moved out of the enable guard into `AP_PNUGimbal_config.h` - an aircraft with a PMU and a SAR but no gimbal is a real configuration, and AGENTS.md requires the base system to compile with optional features disabled  
+   - Builds : CubeOrangePlus **1,730,780 B**. **All five guards compile out** - `AP_PNU_CAN_ENABLED=0` 1,717,984 / `AP_PNUGIMBAL_ENABLED=0` 1,719,824 / `AP_PNUGIMBAL_CUBEMARS_ENABLED=0` 1,721,392 / `HAL_MOUNT_PNUGIMBAL_ENABLED=0` 1,724,660 / `HAL_MOUNT_ENABLED=0` 1,656,240. The 10 codec tests still pass  
+- For 5.1.12 version :  
+   - **CAN Update Plan step 1b : `AP_Mount_PNUGimbal`, the mount backend**  
    - **`MNT1_TYPE = 15`** selects a new `AP_Mount` backend for the PNU 3-axis gimbal. `AP_Mount` already does FC-attitude stabilisation and **needs no camera**, so the backend inherits mount modes, RC targeting, the MAVLink gimbal manager, ROI, the `MNT1_*_MIN/MAX` limits and the lead filter, and adds only the stabilisation maths  
    - **IT COMMANDS NO MOTORS.** Targets are written all the way through to `AP_PNUGimbal_CubeMars`, but that backend transmits nothing until `set_enable(true)` and **nothing in the tree calls that yet** - the lifecycle state machine is step 1c. The whole path is exercised with the motors silent  
    - **Provable from a log with no new logging code.** `AP_Mount_Backend::write_log()` already writes `MNT`, whose *desired* columns are the earth-frame target and whose *actual* columns this backend fills with the body-frame demand. **`MNT.DRoll` against `MNT.Roll` is the AHRS correction**  
@@ -1041,7 +1054,7 @@ make a wholesale copy a regression.
 | 4 `pmucan_*.hpp` deleted (1163 lines) | vendored libuavcan v0; only 3 constants were used, all identical in `AP_HAL::CANFrame` / `CANIface` |
 | Mount task kept at 50 Hz | `AP_Mount_Viewpro::update()` self-throttles to 100 ms, so gimbal traffic is 10 Hz either way; at a 10 Hz task rate the period *equals* the throttle and late ticks cause 5 Hz bursts. See D8 |
 | msg 285 suppression made opt-in | V5.0.8 suppressed it for every gimbal, not just Viewpro. See D8 |
-| `version.h` is **5.1.12 DEV** | 5.1.0 OFFICIAL closed the migration; the 5.1.x DEV series carries the post-release D10 work - Stage 1 in 5.1.1, the Gremsy analysis and pitch relocation in 5.1.2, Stage 2a routing in 5.1.3, Gremsy hardware validation in 5.1.4, Stage 2b closure in 5.1.5, Stage 3 in 5.1.6, its bench confirmation in 5.1.7, the KGCS backward-compatibility fix in 5.1.8, the `AP_PNUGimbal` / `AP_PNUSAR` CAN driver skeletons in 5.1.9, `AP_PNUGimbal`'s CubeMars protocol backend in 5.1.10, CAN Update Plan step 1 in 5.1.11 and step 1b in 5.1.12 - and goes OFFICIAL when D10/D11 land |
+| `version.h` is **5.1.13 DEV** | 5.1.0 OFFICIAL closed the migration; the 5.1.x DEV series carries the post-release D10 work - Stage 1 in 5.1.1, the Gremsy analysis and pitch relocation in 5.1.2, Stage 2a routing in 5.1.3, Gremsy hardware validation in 5.1.4, Stage 2b closure in 5.1.5, Stage 3 in 5.1.6, its bench confirmation in 5.1.7, the KGCS backward-compatibility fix in 5.1.8, the `AP_PNUGimbal` / `AP_PNUSAR` CAN driver skeletons in 5.1.9, `AP_PNUGimbal`'s CubeMars protocol backend in 5.1.10, CAN Update Plan step 1 in 5.1.11, step 1b in 5.1.12 and step 1c in 5.1.13 - and goes OFFICIAL when D10/D11 land |
 | `GCS.h` dead CAM macros removed, `OFP_VER_*` tracked against `version.h` | were stale/unused; guarded by `static_assert` in `Copter.cpp` |
 | `AP_PMUCAN` fixes | dropped-frame at RX budget, dead branch, `&`->`&&`, `RXdrain()` extraction, named constants, ctor init, `TXspin` void. See git log |
 | `send_proximity()` upward-distance block **not** commented out | V5.0.8 wrapped it in `/* Currently, no upward sensor */`. `AP_Proximity::get_upward_distance()` already returns false when no backend supplies one (`AP_Proximity.cpp:498`), and TeraRanger Tower Evo is not one of the backends that does - so the comment-out is a no-op here and a silent regression for `AP_Proximity_RangeFinder` / `_MAV` / scripting users. Not applied |
@@ -1691,10 +1704,11 @@ what rate the chosen mode wants.
 
 ---
 
-**CAN Update Plan Steps - one bus, three protocols - PLANNED, NOT YET APPLIED**
+**CAN Update Plan Steps - one bus, three protocols - PARTLY APPLIED**
 
-*Decided 2026-10-15, after 5.1.10. The tree is still at 5.1.10; nothing below is in the code
-yet. This supersedes the 5.1.9 assumption that each PNU CAN device would get its own
+*Decided 2026-10-15 after 5.1.10. **Steps 1, 1b and 1c are applied** (5.1.11 to 5.1.13);
+steps 1d, 2, 3 and 4 are not - see the status column in the steps table below. This
+supersedes the 5.1.9 assumption that each PNU CAN device would get its own
 `AP_CAN::Protocol` value and its own bus.*
 
 **The bus map.**
@@ -1754,6 +1768,7 @@ gimbal Master ID or any gimbal command id, rather than letting the demux be ambi
 |:--:|---|---|:--:|---|
 | **0** | Confirm device bitrates and the SAR id plan | - | - | **DONE 2026-10-15** - bus is 1 Mbit/s, SAR is 11-bit with distinct ids per message |
 | **1** | **DONE in 5.1.11.** **`AP_PNU_CAN` multi-backend driver.** Generalise the 5.1.10 frontend: array of backends rather than one pointer, `AP_PNUGimbal_Backend` becomes the protocol-neutral `AP_PNU_CAN_Backend`, `handle_frame()` returns `bool` (first backend to claim a frame wins, the `MultiCAN` pattern at `AP_CANSensor.h:94`), `send_frame()` carries flags. CubeMars becomes a backend. **`CAN_Dn_PNU_OPTS` lands here** (see the device selection section below), and `CAN_Dn_PG_TYPE` drops `0:None` and defaults to `1:CubeMars`. Registered on protocol **16 for now**, PMUCAN untouched on 15 | new `AP_PNU_CAN/`, `AP_PNUGimbal/` | **none to flying code** | **DONE** - SITL + CubeOrangePlus build, `AP_PNU_CAN_ENABLED=0` builds, 10 codec tests pass |
+| **1b-1d** | **The gimbal track**, branching off step 1 - mount backend, lifecycle state machine, HOMING. **1b and 1c are DONE (5.1.12, 5.1.13); 1d is not.** Its own table and risk notes are in "Gimbal stabilisation and the mount state machine" near the end of this file | `AP_Mount/AP_Mount_PNUGimbal.*`, `AP_PNUGimbal/` | low to **HIGH** for 1d | see that section |
 | **2** | **PMU becomes a backend.** `AP_PMUCAN` changes base class; protocol **15** instantiates `AP_PNU_CAN`, so `CAN_Dn_PNU_OPTS` bit 0 becomes live; **make the 10 Hz per-message rate explicit** (see below); health becomes id-based; drop protocol 17 and keep **16 as a deprecated alias** (see below) | `AP_PMUCAN/`, `AP_PNU_CAN/`, `AP_CAN.h`, `AP_CANManager.{h,cpp}`, `AP_Arming.cpp` | **HIGH** | **bench against the real PMU before flight** - Start/Stop interlock timing, failsafe trigger and recovery, TM1/TM1x |
 | **3** | **SAR backend** under the same driver, 11-bit, ids `0x400`-`0x7FF` | `AP_PNUSAR/` | low | build; real work waits on the ICD |
 | **4** | Bus documentation, bitrate note, README and `version.h` | `README.md`, `version.h` | none | - |
@@ -1936,10 +1951,12 @@ largest single piece of de-risking available on step 2, so do not "tidy" the lay
 
 ---
 
-**Gimbal stabilisation and the mount state machine - researched 2026-10-16, NOT YET APPLIED**
+**Gimbal stabilisation and the mount state machine - researched 2026-10-16, PARTLY APPLIED**
 
-*This answers the 5.1.9 open question "does `AP_PNUGimbal` back an `AP_Mount` backend?".
-It is a design record, not code - four questions below still have to be answered by PNU.*
+*This answered the 5.1.9 open question "does `AP_PNUGimbal` back an `AP_Mount` backend?" -
+it does. **The mount backend landed in 5.1.12 (step 1b) and the state machine in 5.1.13
+(step 1c).** What is still only a design record here is **HOMING (step 1d)**, which is
+blocked on the four bench-measured values in 6d.*
 
 **1. `AP_Mount` already stabilises against FC attitude, and the precedent is camera-less.**
 
@@ -2238,14 +2255,47 @@ More honest than assuming, but it is a choice - UNDECIDED.
    mapped explicitly onto the `MNT1_*` convention. This project has already been bitten once
    by a pitch-convention mismatch (5.1.2 / 5.1.3), so it gets written down this time.
 
+**6e. Bench finding 2026-10-16 - yaw looks broken and is not.**
+
+Roll and pitch confirmed on the first bench log: `MNT0.Roll` and `MNT0.Pitch` move opposite
+vehicle roll and pitch, which is the AHRS correction and the whole of what step 1b set out to
+prove. Yaw looked wrong and is not - **`MNT0.YawB` did not move, and `MNT0.YawE` read the same
+as `ANG.Yaw`.** Both are one cause:
+
+`AP_Mount_Backend::write_log()` computes `yaw_ef = wrap_180(yaw_bf + degrees(ahrs_yaw))`, so
+with `YawB` at zero, `YawE` equals the vehicle heading **by construction**. And `YawB` is zero
+because **yaw stabilisation is not in `AP_Mount_PNUGimbal` at all** - roll and pitch subtract
+AHRS explicitly, but yaw goes through `MountAngleTarget::get_bf_yaw()`
+(`AP_Mount_Backend.cpp:1013`), which subtracts heading **only when `yaw_is_ef` is set**:
+
+```text
+if (yaw_is_ef) { return wrap_PI(yaw - AP::ahrs().get_yaw_rad()); }   // earth -> body
+return yaw;                                                          // already body-frame
+```
+
+and `yaw_is_ef` comes straight from the yaw lock (`AP_Mount_Backend.cpp:120`). With the lock
+off - "follow", the default - the target is body-frame, nothing subtracts heading, and `YawB`
+sits at the target forever. **That is the "yaw fix" not being switched on, not a defect.**
+
+*Diagnosing it from a log without touching the code:* `write_log()` puts the desired yaw in
+`DYawB` **or** `DYawE` depending on the frame, leaving the other NaN. `DYawB` populated and
+`DYawE` NaN means the target is body-frame, so the lock is off.
+
+*Turning it on:* `RCn_OPTION = 163` (`MOUNT_YAW_LOCK`), switch HIGH, with the mount in
+RC_TARGETING (`MNT1_DEFLT_MODE = 3`). Or `GIMBAL_MANAGER_FLAGS_YAW_LOCK` over MAVLink. Note
+that `set_yaw_lock()` **captures the heading at the moment it is switched** - the lock holds
+whatever direction you were facing, not north - and that at `MNT1_YAW_MIN/MAX` of +-15 degrees
+it clips after about 15 degrees of heading change, which is the expected behaviour recorded in
+6a(iii).
+
 **7. Suggested steps, independent of the PMU track.**
 
 Neither track touches the other, so they can run in either order.
 
 | # | Step | Risk | Verified by |
 |:--:|---|:--:|---|
-| **1b** | **DONE in 5.1.12.** `AP_Mount_PNUGimbal` backend and the stabilisation maths, **commanding nothing**. Mechanical-limit clamp in the gimbal backend; `MNT1_*` carry the operating limits | low | **DONE** - builds, both guards compile out, 10 codec tests pass. Log proof needs bench hardware |
-| **1c** | the lifecycle state machine - INIT, ALIGN, RUN, MAINTENANCE, FAULT - the arming interlock and the slew-rate limit. **No HOMING yet** | medium | bench, with the SAR mass fitted, zero set by hand |
+| **1b** | **DONE in 5.1.12.** `AP_Mount_PNUGimbal` backend and the stabilisation maths, **commanding nothing**. Mechanical-limit clamp in the gimbal backend; `MNT1_*` carry the operating limits | low | **DONE and BENCH-CONFIRMED 2026-10-16** - `MNT0.Roll` and `MNT0.Pitch` move opposite vehicle roll and pitch in a log. Yaw needs the earth-frame lock enabled, see below |
+| **1c** | **DONE in 5.1.13.** the lifecycle state machine - INIT, ALIGN, RUN, MAINTENANCE, FAULT - the arming interlock and the slew-rate limit. **No HOMING yet** | medium | **DONE** - builds, all five guards compile out, 10 codec tests pass. Bench needs the SAR mass fitted and the zero set by hand |
 | **1d** | **HOMING**, the Appendix 1 sequence - roll then pitch then yaw, idle axes held, travel validated | **HIGH** - drives the payload into hard stops, and the mechanical clamp cannot protect it until this completes | bench only; arming blocked until it succeeds |
 
 ---

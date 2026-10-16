@@ -7,7 +7,7 @@
 #include "ap_version.h"
 
 // PNU : This is a custom code modified by PNU Drone
-#define THISFIRMWARE "PNU_OFP V5.1.12"
+#define THISFIRMWARE "PNU_OFP V5.1.13"
 
 // NOTE: 5.1.6 is a DEV build on top of the 5.1.0 OFFICIAL release, which closed the
 // Copter-4.7.1 -> FLCC migration.  It closes D10 Stage 3: TM2's Zoom_POS_FB now carries
@@ -22,6 +22,46 @@
 // and a send_camera_settings() override that forwards real values instead of upstream's
 // NaN placeholders are all vendor-neutral and worth submitting to ArduPilot; only
 // AP_Q30 decides the value means times, which is where PNU-specific facts belong.
+//
+// 5.1.13 is CAN Update Plan step 1c: the gimbal lifecycle state machine.
+//
+// INIT -> ALIGN -> RUN, plus MAINTENANCE and FAULT.  HOMING is defined in the enum and
+// deliberately NOT implemented - that is step 1d, and until it runs the Appendix 1 endpoint
+// search the zero must be set by hand on the bench.
+//
+// The state machine lives in AP_PNUGimbal_Backend, one layer BELOW the mount: it runs in the
+// CAN thread where feedback actually arrives, so a fault transition happens on the frame
+// rather than a 50 Hz mount tick later; it survives HAL_MOUNT_ENABLED=0 (PNU-ISSUE D13); and
+// a second motor protocol would need the same lifecycle unchanged.  That meant moving the
+// per-axis target and feedback storage, the mechanical limits and the stale-feedback policy
+// up out of AP_PNUGimbal_CubeMars, which now owns the wire format and nothing else.
+//
+// THE LIFECYCLE IS NOT THE MOUNT MODE.  MAV_MOUNT_MODE_* says where to point; the state says
+// whether the hardware can be pointed.  RETRACT is a targeting mode, not "motors off".
+//
+// ALIGN exists because section 9 of the protocol note requires position control to start from
+// the measured current angle.  It seeds the command from feedback so the first mount target
+// is approached from where the mount actually is instead of arriving as a step from zero -
+// with a heavy SAR payload that is the one thing in this design that could break hardware.
+// The new CAN_Dn_PNU_SLEW rate limit then bounds the approach, and bounds every later move
+// as well: one mechanism, two jobs, and cheaper than ramping stiffness.
+//
+// CAN_Dn_PNU_MAINT takes the FC completely off the bus so a PC can configure a motor over
+// UART.  Entering is immediate; LEAVING REQUIRES A REBOOT, because the vendor utility can
+// change the CAN id, the control mode and the encoding ranges, and a host/device mismatch
+// does not fail - it silently rescales every command and every reading.  The state is
+// latched at init() for exactly that reason.
+//
+// ARMING INTERLOCK: healthy() is now true only in RUN with every axis reporting fresh
+// feedback, and AP_Mount::pre_arm_checks() fails on !healthy() as Check::CAMERA - so an
+// unhomed or faulted mount cannot be armed.  The documented override is ARMING_SKIPCHK bit 16
+// (Camera, decimal 65536), the same escape hatch PNU-ISSUE(D9b) established for the PMU.
+//
+// Also fixed here, and it predated this step: AP_PNUGIMBAL_ENABLED=0 did not compile, because
+// AP_PNU_CAN sizes its parameter arrays from AP_PNUGIMBAL_NUM_AXES.  The axis identity moved
+// out of the enable guard into AP_PNUGimbal_config.h - an aircraft with a PMU and a SAR but no
+// gimbal is a real configuration, and AGENTS.md requires the base system to compile with
+// optional features disabled.
 //
 // 5.1.12 is CAN Update Plan step 1b: AP_Mount_PNUGimbal, the mount backend.
 //
@@ -219,11 +259,11 @@
 // must stay in step with the three defines below (static_assert in Copter.cpp, D4).
 
 // the following line is parsed by the autotest scripts
-#define FIRMWARE_VERSION 5,1,12,FIRMWARE_VERSION_TYPE_DEV
+#define FIRMWARE_VERSION 5,1,13,FIRMWARE_VERSION_TYPE_DEV
 
 #define FW_MAJOR 5
 #define FW_MINOR 1
-#define FW_PATCH 12
+#define FW_PATCH 13
 #define FW_TYPE FIRMWARE_VERSION_TYPE_DEV
 
 #include <AP_Common/AP_FWVersionDefine.h>
