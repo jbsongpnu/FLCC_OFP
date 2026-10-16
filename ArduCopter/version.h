@@ -7,7 +7,7 @@
 #include "ap_version.h"
 
 // PNU : This is a custom code modified by PNU Drone
-#define THISFIRMWARE "PNU_OFP V5.1.11"
+#define THISFIRMWARE "PNU_OFP V5.1.12"
 
 // NOTE: 5.1.6 is a DEV build on top of the 5.1.0 OFFICIAL release, which closed the
 // Copter-4.7.1 -> FLCC migration.  It closes D10 Stage 3: TM2's Zoom_POS_FB now carries
@@ -22,6 +22,42 @@
 // and a send_camera_settings() override that forwards real values instead of upstream's
 // NaN placeholders are all vendor-neutral and worth submitting to ArduPilot; only
 // AP_Q30 decides the value means times, which is where PNU-specific facts belong.
+//
+// 5.1.12 is CAN Update Plan step 1b: AP_Mount_PNUGimbal, the mount backend.
+//
+// MNT1_TYPE = 15 selects a new AP_Mount backend for the PNU 3-axis gimbal.  AP_Mount already
+// does FC-attitude stabilisation - AP_Mount_Servo::update_angle_outputs() is the whole of it,
+// and the requires_stabilization flag is what separates a dumb servo mount from a
+// self-stabilising brushless one.  The CubeMars drives are the "true" case.  AP_Mount also
+// needs no camera: its only pure virtuals are has_pan_control() and
+// get_attitude_quaternion(), and every camera method defaults to returning false.  So the
+// backend inherits mount modes, RC targeting, the MAVLink gimbal manager, ROI, the
+// MNT1_*_MIN/MAX limits and the lead filter, and this file adds only the stabilisation maths.
+//
+// IT COMMANDS NO MOTORS.  Targets are written all the way through to AP_PNUGimbal_CubeMars,
+// but that backend transmits nothing until set_enable(true) and nothing in the tree calls
+// that yet - the lifecycle state machine is step 1c.  So the whole path is exercised with the
+// motors silent, and it is provable from a log: AP_Mount_Backend::write_log() already records
+// the MNT message, whose "desired" columns are the earth-frame target and whose "actual"
+// columns this backend fills with the body-frame demand.  The difference between them IS the
+// AHRS correction.  No new log message was needed.
+//
+// LIMITS ARE SPLIT ACROSS TWO LAYERS on purpose.  MNT1_ROLL/PITCH/YAW_MIN/MAX carry the
+// OPERATING limits (+-25 / +-25 / +-15 deg) and AP_Mount clamps to them; the new
+// CAN_Dn_PNU_MRLL/MPIT/MYAW carry the MECHANICAL limits (+-30 / +-30 / +-20 deg) and the
+// gimbal backend clamps again as the last thing before a frame is built.  A bug in the
+// targeting layer therefore cannot drive a bulky payload into the landing skid struts.  The
+// 5 degree margin absorbs stabilisation overshoot.
+//
+// NOTE that the mechanical clamp means nothing until homing has put zero at the centre of
+// travel: the encoder is relative and its zero is assumed not to persist.  Until step 1d runs
+// the Appendix 1 endpoint search, plus or minus 30 in encoder terms is not plus or minus 30
+// mechanically.
+//
+// Found while implementing: ArduPlane has been unbuildable on this branch since ed055d2f24
+// (5.0.10) - GCS_PNU.cpp references PMU_Ctrl_Echo and AP::ac_avoid(), both Copter-only.  A
+// vehicle gate on the new backend was written and then REMOVED as unnecessary: it would have
+// protected a build configuration this branch has never supported.  See README.
 //
 // 5.1.11 is CAN Update Plan step 1: AP_PNU_CAN, the multi-backend CAN driver.
 //
@@ -183,11 +219,11 @@
 // must stay in step with the three defines below (static_assert in Copter.cpp, D4).
 
 // the following line is parsed by the autotest scripts
-#define FIRMWARE_VERSION 5,1,11,FIRMWARE_VERSION_TYPE_DEV
+#define FIRMWARE_VERSION 5,1,12,FIRMWARE_VERSION_TYPE_DEV
 
 #define FW_MAJOR 5
 #define FW_MINOR 1
-#define FW_PATCH 11
+#define FW_PATCH 12
 #define FW_TYPE FIRMWARE_VERSION_TYPE_DEV
 
 #include <AP_Common/AP_FWVersionDefine.h>

@@ -203,6 +203,20 @@ bool AP_PNUGimbal_CubeMars::init(void)
         return false;
     }
 
+    for (uint8_t axis = 0; axis < AP_PNUGIMBAL_NUM_AXES; axis++) {
+        _mech_limit_rad[axis] = _frontend.get_mech_limit_rad(axis);
+        if (!isfinite(_mech_limit_rad[axis]) || !is_positive(_mech_limit_rad[axis])) {
+            _frontend.set_init_error("%s mechanical limit must be > 0", axis_name(axis));
+            return false;
+        }
+        if (_mech_limit_rad[axis] > p_max) {
+            // the limit is unreachable: the encoding range cannot express it, so the
+            // clamp would never fire and the stops would be the only protection
+            _frontend.set_init_error("%s mech limit exceeds PNU_PMAX", axis_name(axis));
+            return false;
+        }
+    }
+
     // symmetric about zero for p, v and torque; 0 .. max for the two gains, which have
     // no meaning below zero.  See the Limits comment in the header for why asymmetric
     // device ranges are not supported.
@@ -417,6 +431,24 @@ void AP_PNUGimbal_CubeMars::set_target(uint8_t axis, const AP_PNUGimbal_Target &
     }
 
     _axis[axis].target = target;
+
+    // MECHANICAL LIMIT - the last clamp before anything is encoded.
+    //
+    // MNT1_ROLL/PITCH/YAW_MIN/MAX carry the OPERATING limits and AP_Mount has already
+    // applied them; this is the hard stop, 5 degrees further out, and it is applied again
+    // here on purpose.  The targeting layer and the layer that owns the wire are different
+    // layers, and a bug in the first must not be able to drive a bulky payload into the
+    // landing skid struts.
+    //
+    // It only means anything once homing has put zero at the centre of travel: the encoder
+    // is relative and its zero is assumed not to persist, so before homing these bounds
+    // are relative to wherever the mount powered up.
+    const float mech_rad = _mech_limit_rad[axis];
+    if (is_positive(mech_rad)) {
+        _axis[axis].target.position_rad = constrain_float(target.position_rad,
+                                                          -mech_rad, mech_rad);
+    }
+
     _axis[axis].target_valid = true;
 }
 

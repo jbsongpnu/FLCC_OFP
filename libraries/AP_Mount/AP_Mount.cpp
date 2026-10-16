@@ -8,6 +8,7 @@
 
 #include "AP_Mount_Backend.h"
 #include "AP_Mount_Servo.h"
+#include "AP_Mount_PNUGimbal.h"   // PNU
 #include "AP_Mount_SoloGimbal.h"
 #include "AP_Mount_Alexmos.h"
 #include "AP_Mount_SToRM32.h"
@@ -124,6 +125,15 @@ void AP_Mount::init()
         // check for BrushlessPWM mounts (uses Servo backend)
         case Type::BrushlessPWM:
             _backends[instance] = NEW_NOTHROW AP_Mount_Servo(*this, _params[instance], false, instance);
+            _num_instances++;
+            break;
+#endif
+
+#if HAL_MOUNT_PNUGIMBAL_ENABLED
+        // PNU : 3-axis CubeMars gimbal.  The motors are on the shared PNU CAN bus, so
+        // this backend takes no serial instance - it reaches them through AP_PNU_CAN.
+        case Type::PNUGimbal:
+            _backends[instance] = NEW_NOTHROW AP_Mount_PNUGimbal(*this, _params[instance], instance);
             _num_instances++;
             break;
 #endif

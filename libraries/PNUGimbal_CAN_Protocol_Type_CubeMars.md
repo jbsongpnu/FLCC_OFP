@@ -216,3 +216,21 @@ motor_id=1; preset scaling. MIT values in descriptions are nominal and quantized
 Suggested host structure: immutable configured mode + explicit IDs + per-motor encoding limits; separate MIT/float encoders; one feedback decoder; raw-frame logging; explicit enable/disable/zero/clear APIs.
 Reject wrong IDE/RTR/DLC, nonfinite command floats and invalid configured ranges. Start position control from the measured current angle; stale feedback must be handled by an application-defined policy.
 
+## Appendix 1. (For PNUGimbal Specific Application) Gimbal Payload Initialization Procedure Definition
+1. Purpose: Set the motor encoder position to zero to establish the initial neutral angular alignment of the gimbal payload.  
+2. Control mode: MIT mode.  
+3. Mechanical limits: Roll: -30 to +30 degrees; Tilt (Pitch): -30 to +30 degrees; Pan (Yaw): -20 to +20 degrees. All angles are defined in the gimbal frame coordinate system.  
+4. Feedback used for detection, as received by the flight controller (FC): Angle only. The Overcurrent, Undervoltage, and Overload status codes are emergency stop conditions, not endpoint detection criteria.  
+5. Zero-setting sequence:  
+- Find and reconfirm the CW endpoint, then record Theta_CW.
+- Find and reconfirm the CCW endpoint, then record Theta_CCW.
+- Validate the angular travel range between the endpoints.
+- Calculate Theta_mid = (Theta_CW + Theta_CCW) / 2.
+- Move to Theta_mid.
+- Confirm that the midpoint has been reached and motion has stopped.
+- Send the Zero Setting command.
+- Verify that the zero position has been updated.
+- Apply the target position expressed in the new coordinate system.
+- Enter normal operation.
+6. Abort condition during initialization: Abort if the feedback Status/Error value is not 1.  
+7. Normal operating limits: Roll: -25 to +25 degrees; Tilt (Pitch): -25 to +25 degrees; Pan (Yaw): -15 to +15 degrees. All angles are defined in the gimbal frame coordinate system.  

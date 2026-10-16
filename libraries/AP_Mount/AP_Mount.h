@@ -129,6 +129,9 @@ public:
 #if HAL_MOUNT_XFROBOT_ENABLED
         XFRobot = 14,        /// XFRobot gimbal using a custom serial protocol
 #endif
+#if HAL_MOUNT_PNUGIMBAL_ENABLED
+        PNUGimbal = 15,      /// PNU : 3-axis CubeMars gimbal driven over CAN by AP_PNU_CAN
+#endif
     };
 
     // init - detect and initialise all mounts

@@ -4,6 +4,7 @@
 #include <AP_Terrain/AP_Terrain_config.h>
 #include <GCS_MAVLink/GCS_config.h>
 #include <AP_Scripting/AP_Scripting_config.h>
+#include <AP_PNUGimbal/AP_PNUGimbal_config.h>   // PNU
 
 #ifndef HAL_MOUNT_ENABLED
 #define HAL_MOUNT_ENABLED 1
@@ -56,6 +57,11 @@
 
 #ifndef HAL_MOUNT_CADDX_ENABLED
 #define HAL_MOUNT_CADDX_ENABLED AP_MOUNT_BACKEND_DEFAULT_ENABLED && HAL_PROGRAM_SIZE_LIMIT_KB > 1024
+#endif
+
+// PNU : the PNU 3-axis gimbal, three CubeMars motors driven over CAN by AP_PNU_CAN.
+#ifndef HAL_MOUNT_PNUGIMBAL_ENABLED
+#define HAL_MOUNT_PNUGIMBAL_ENABLED (AP_MOUNT_BACKEND_DEFAULT_ENABLED && AP_PNUGIMBAL_ENABLED)
 #endif
 
 #ifndef HAL_MOUNT_XFROBOT_ENABLED

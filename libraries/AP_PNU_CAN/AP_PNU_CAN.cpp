@@ -8,6 +8,7 @@
 
 #include <AP_HAL/AP_HAL.h>
 #include <AP_CANManager/AP_CANManager.h>
+#include <AP_Math/AP_Math.h>
 #include <GCS_MAVLink/GCS.h>
 
 #include <AP_PNUGimbal/AP_PNUGimbal_CubeMars.h>
@@ -126,6 +127,33 @@ const AP_Param::GroupInfo AP_PNU_CAN::var_info[] = {
     // @User: Advanced
     // @RebootRequired: True
     AP_GROUPINFO("TMAX", 12, AP_PNU_CAN, _t_max, 10.0f),
+
+    // @Param: MRLL
+    // @DisplayName: PNU gimbal roll mechanical limit
+    // @Description: Mechanical travel limit of the roll axis, used as plus and minus this value. This is the hard stop, not the operating range - keep MNT1_ROLL_MIN/MAX inside it with a margin for stabilisation overshoot. Applied as the last clamp before a motor frame is built, so a fault in the targeting layer cannot drive the payload into its stops.
+    // @Units: deg
+    // @Range: 1 180
+    // @User: Advanced
+    // @RebootRequired: True
+    AP_GROUPINFO("MRLL", 13, AP_PNU_CAN, _mech_limit_deg[AP_PNUGIMBAL_AXIS_ROLL], 30.0f),
+
+    // @Param: MPIT
+    // @DisplayName: PNU gimbal pitch mechanical limit
+    // @Description: Mechanical travel limit of the pitch axis, used as plus and minus this value. See MRLL.
+    // @Units: deg
+    // @Range: 1 180
+    // @User: Advanced
+    // @RebootRequired: True
+    AP_GROUPINFO("MPIT", 14, AP_PNU_CAN, _mech_limit_deg[AP_PNUGIMBAL_AXIS_PITCH], 30.0f),
+
+    // @Param: MYAW
+    // @DisplayName: PNU gimbal yaw mechanical limit
+    // @Description: Mechanical travel limit of the yaw axis, used as plus and minus this value. See MRLL.
+    // @Units: deg
+    // @Range: 1 180
+    // @User: Advanced
+    // @RebootRequired: True
+    AP_GROUPINFO("MYAW", 15, AP_PNU_CAN, _mech_limit_deg[AP_PNUGIMBAL_AXIS_YAW], 20.0f),
 
     AP_GROUPEND
 };
@@ -464,6 +492,20 @@ void AP_PNU_CAN::report_unclaimed(uint32_t can_id)
 
     GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "PNU_CAN: unclaimed frame 0x%x (%u seen)",
                   (unsigned)can_id, (unsigned)_unclaimed_cnt);
+}
+
+// Mechanical travel limit for one axis, in radians, as a symmetric plus/minus bound.
+//
+// NOTE, and it matters: the encoder is relative and its zero is assumed NOT to persist, so
+// this limit means nothing until the Appendix 1 homing sequence has put zero at the centre
+// of travel.  Until step 1d runs that sequence, the only thing protecting the payload is
+// the bounded stiffness and torque used during homing itself.
+float AP_PNU_CAN::get_mech_limit_rad(uint8_t axis) const
+{
+    if (axis >= AP_PNUGIMBAL_NUM_AXES) {
+        return 0.0f;
+    }
+    return radians(_mech_limit_deg[axis].get());
 }
 
 uint8_t AP_PNU_CAN::get_motor_id(uint8_t axis) const

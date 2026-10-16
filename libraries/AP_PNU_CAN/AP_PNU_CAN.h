@@ -116,6 +116,7 @@ public:
     uint8_t  get_gimbal_mode(void) const{ return uint8_t(_gimbal_mode.get()); }
     uint16_t get_master_id(void) const  { return uint16_t(_master_id.get()); }
     uint8_t  get_motor_id(uint8_t axis) const;
+    float    get_mech_limit_rad(uint8_t axis) const;
     float    get_p_max(void) const      { return _p_max.get(); }
     float    get_v_max(void) const      { return _v_max.get(); }
     float    get_kp_max(void) const     { return _kp_max.get(); }
@@ -186,6 +187,7 @@ private:
     AP_Float _kp_max;
     AP_Float _kd_max;
     AP_Float _t_max;
+    AP_Float _mech_limit_deg[AP_PNUGIMBAL_NUM_AXES];
 };
 
 namespace AP {

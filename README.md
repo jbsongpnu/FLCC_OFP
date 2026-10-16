@@ -1,8 +1,18 @@
 # PNU-KAL FLCC OFP Development Version
 - This branch currently developing PNU-KAL FLCC OFP after official version (TAG) PNU-KAL-FLCC-5.1.0 (this is same code as 5.0.15 dev)  
 - PNU-ISSUE 10 & 11 still remains : For Gremsy camera and general camera mount library structure  
-- NEXT : **CAN Update Plan step 2** - the PMU becomes a backend and protocol 15 moves to `AP_PNU_CAN`. **Needs a bench against real PMU hardware before it flies.** See the CAN Update Plan Steps section near the end of this file  
-- IN THIS VERSION : V5.1.11 - **CAN Update Plan step 1 : `AP_PNU_CAN`, the multi-backend CAN driver**  
+- NEXT : **Gimbal stabilisation and the mount state machine** - designed 2026-10-16. `AP_Mount` does stabilise against FC attitude and needs no camera, so it becomes an `AP_Mount` backend. PNU answered the structural questions and the homing detail; the encoder zero is **assumed non-persistent, so HOMING runs every boot**. **4 bench-measured values still open**. See the section near the end of this file  
+- ALSO NEXT : **CAN Update Plan step 2** - the PMU becomes a backend and protocol 15 moves to `AP_PNU_CAN`. **Needs a bench against real PMU hardware before it flies.** See the CAN Update Plan Steps section near the end of this file  
+- IN THIS VERSION : V5.1.12 - **CAN Update Plan step 1b : `AP_Mount_PNUGimbal`, the mount backend**  
+   - **`MNT1_TYPE = 15`** selects a new `AP_Mount` backend for the PNU 3-axis gimbal. `AP_Mount` already does FC-attitude stabilisation and **needs no camera**, so the backend inherits mount modes, RC targeting, the MAVLink gimbal manager, ROI, the `MNT1_*_MIN/MAX` limits and the lead filter, and adds only the stabilisation maths  
+   - **IT COMMANDS NO MOTORS.** Targets are written all the way through to `AP_PNUGimbal_CubeMars`, but that backend transmits nothing until `set_enable(true)` and **nothing in the tree calls that yet** - the lifecycle state machine is step 1c. The whole path is exercised with the motors silent  
+   - **Provable from a log with no new logging code.** `AP_Mount_Backend::write_log()` already writes `MNT`, whose *desired* columns are the earth-frame target and whose *actual* columns this backend fills with the body-frame demand. **`MNT.DRoll` against `MNT.Roll` is the AHRS correction**  
+   - **Limits split across two layers, deliberately.** `MNT1_ROLL/PITCH/YAW_MIN/MAX` carry the **operating** limits (±25/±25/±15) and `AP_Mount` clamps to them; the new **`CAN_Dn_PNU_MRLL/MPIT/MYAW`** carry the **mechanical** limits (±30/±30/±20) and the gimbal backend clamps again as the last thing before a frame is built. A bug in the targeting layer cannot drive the payload into the landing skid struts  
+   - **The mechanical clamp means nothing until homing runs.** The encoder is relative and its zero is assumed not to persist, so until step 1d ±30 in encoder terms is not ±30 mechanically. `init()` also rejects a mechanical limit larger than `PNU_PMAX`, which would be unreachable and leave the stops as the only protection  
+   - **Found while implementing : ArduPlane has been unbuildable on this branch since `ed055d2f24` (5.0.10)** - `GCS_PNU.cpp` references `PMU_Ctrl_Echo` and `AP::ac_avoid()`, both Copter-only. A vehicle gate on the new backend was written and then **removed as unnecessary**: it would have protected a build configuration this branch has never supported. See the note below  
+   - Builds : CubeOrangePlus **1,729,440 B**; `HAL_MOUNT_PNUGIMBAL_ENABLED=0` builds at 1,728,304 B so the backend costs **1,136 B**, and `HAL_MOUNT_ENABLED=0` still builds at 1,659,580 B (PNU-ISSUE D13 intact). Registered in `build_options.py` as `Gimbal / PNUGIMBAL`. The 10 codec tests still pass  
+- For 5.1.11 version :  
+   - **CAN Update Plan step 1 : `AP_PNU_CAN`, the multi-backend CAN driver**  
    - **Three protocols, one bus, one driver.** `AP_CANManager` binds each interface to exactly **one** driver - one interface to many drivers is not supported, and a driver with no interface is never allocated at all, so it fails *silently*. `CAN_Dn_PROTOCOL2` does not help: it is a DroneCAN-hosted auxiliary slot taking one `CANSensor` with no thread of its own  
    - `AP_PNU_CAN` owns the interface, the thread, the parameters and the one place a frame reaches the bus; `AP_PNU_CAN_Backend` owns a wire format and nothing else. `AP_PNUGimbal_Backend` sits between them as the gimbal-shaped view, so a control layer can drive any motor protocol without naming CubeMars  
    - **`handle_frame()` now returns `bool`** and the driver stops at the first backend to claim a frame - the `MultiCAN` pattern upstream already uses for the CAN rangefinder. **An unclaimed frame is counted and reported**, which is how a mis-assigned CAN id gets noticed instead of vanishing  
@@ -125,6 +135,7 @@ Residuals recorded against resolved issues
    - Issue D2 is resolved 
    - Issue D3 is resolved : Do not go back to previous version. This change is critical. See notes.
    - Viewpro related instructions are added as "bench findings" in this README.md
+- **This branch builds ArduCopter ONLY.** ArduPlane, Rover and Sub have been unbuildable since `ed055d2f24` (5.0.10) because `GCS_PNU.cpp` lives in the shared `GCS_MAVLink` library and references `PMU_Ctrl_Echo` and `AP::ac_avoid()`, both of which exist only for Copter. 5.1.11 added `AP_PNU_CAN::var_info` to the same list. This is **by construction, not an accident** - but it means a vehicle gate on PNU code in a shared library protects nothing, so do not add one  
 - PNU-KAL Specific options  
    - **WARNING :** Do not use heli model. Only multicopter frames are supported  
    - CAN Driver Option for PMU : CAN_D1_PROTOCOL = 15  
@@ -1009,11 +1020,13 @@ If it shows deletions, apply targeted edits only.
 | `libraries/AP_Camera/AP_Camera.{h,cpp}`, `AP_Camera_Backend.h` | the `get_reported_zoom_level()` accessor and its backend virtual (D10 Stage 3) - deliberately unit-neutral |
 | `libraries/AP_PNU_CAN/*` | PNU-only files - the shared CAN driver for PNU devices (5.1.11). Owns the interface, the thread, the `CAN_Dn_PNU_*` parameters and the one `send_frame()`; protocols live in backends |
 | `libraries/AP_PNUGimbal/*` | PNU-only files - `AP_PNUGimbal_Backend` (the gimbal-shaped view of an `AP_PNU_CAN` backend) + `AP_PNUGimbal_CubeMars` + codec tests. Protocol layer only, no control loop |
+| `libraries/AP_Mount/AP_Mount_PNUGimbal.{h,cpp}` | PNU-only files - the `MNT1_TYPE=15` mount backend (5.1.12). Targeting adapter and stabilisation maths only; no protocol, no CAN |
+| `libraries/AP_Mount/AP_Mount.{h,cpp}`, `AP_Mount_config.h`, `AP_Mount_Params.cpp` | `PNUGimbal = 15` in the `Type` enum, its factory case, `HAL_MOUNT_PNUGIMBAL_ENABLED`, and `15:PNUGimbal` in the `MNT1_TYPE` `@Values` |
 | `libraries/AP_PNUSAR/*` | PNU-only files - CAN driver skeleton (5.1.9), structure only until the ICD arrives |
 | `libraries/AP_CANManager/AP_CANManager_CANDriver_Params.cpp` | the `CAN_Dn_PNU_` subgroup at index 8 (index 7 retired, not reused), and 15/16 added to the `PROTOCOL` `@Values` list |
 | `libraries/AP_CANManager/AP_CAN.h`, `AP_CANManager.{h,cpp}` | `PMUCAN = 15`, `PNU_CAN = 16`, `PNUSAR = 17` plus their driver slots and factory cases |
 | `libraries/AP_Arming/AP_Arming.cpp` | the three PNU protocols listed in the `AP_CAN::Protocol` switch - required to compile under `-Werror=switch`, zero runtime effect |
-| `Tools/scripts/build_options.py` | the `Camera / Q30` build option (D13) |
+| `Tools/scripts/build_options.py` | the `Camera / Q30` build option (D13) and `Gimbal / PNUGIMBAL` (5.1.12) |
 | `ArduCopter/version.h` | **5.1.9 DEV** and the release note describing what it carries |
 | `README.md` | this file - never taken from the snapshot |
 
@@ -1028,7 +1041,7 @@ make a wholesale copy a regression.
 | 4 `pmucan_*.hpp` deleted (1163 lines) | vendored libuavcan v0; only 3 constants were used, all identical in `AP_HAL::CANFrame` / `CANIface` |
 | Mount task kept at 50 Hz | `AP_Mount_Viewpro::update()` self-throttles to 100 ms, so gimbal traffic is 10 Hz either way; at a 10 Hz task rate the period *equals* the throttle and late ticks cause 5 Hz bursts. See D8 |
 | msg 285 suppression made opt-in | V5.0.8 suppressed it for every gimbal, not just Viewpro. See D8 |
-| `version.h` is **5.1.11 DEV** | 5.1.0 OFFICIAL closed the migration; the 5.1.x DEV series carries the post-release D10 work - Stage 1 in 5.1.1, the Gremsy analysis and pitch relocation in 5.1.2, Stage 2a routing in 5.1.3, Gremsy hardware validation in 5.1.4, Stage 2b closure in 5.1.5, Stage 3 in 5.1.6, its bench confirmation in 5.1.7, the KGCS backward-compatibility fix in 5.1.8, the `AP_PNUGimbal` / `AP_PNUSAR` CAN driver skeletons in 5.1.9, `AP_PNUGimbal`'s CubeMars protocol backend in 5.1.10, and CAN Update Plan step 1 in 5.1.11 - and goes OFFICIAL when D10/D11 land |
+| `version.h` is **5.1.12 DEV** | 5.1.0 OFFICIAL closed the migration; the 5.1.x DEV series carries the post-release D10 work - Stage 1 in 5.1.1, the Gremsy analysis and pitch relocation in 5.1.2, Stage 2a routing in 5.1.3, Gremsy hardware validation in 5.1.4, Stage 2b closure in 5.1.5, Stage 3 in 5.1.6, its bench confirmation in 5.1.7, the KGCS backward-compatibility fix in 5.1.8, the `AP_PNUGimbal` / `AP_PNUSAR` CAN driver skeletons in 5.1.9, `AP_PNUGimbal`'s CubeMars protocol backend in 5.1.10, CAN Update Plan step 1 in 5.1.11 and step 1b in 5.1.12 - and goes OFFICIAL when D10/D11 land |
 | `GCS.h` dead CAM macros removed, `OFP_VER_*` tracked against `version.h` | were stale/unused; guarded by `static_assert` in `Copter.cpp` |
 | `AP_PMUCAN` fixes | dropped-frame at RX budget, dead branch, `&`->`&&`, `RXdrain()` extraction, named constants, ctor init, `TXspin` void. See git log |
 | `send_proximity()` upward-distance block **not** commented out | V5.0.8 wrapped it in `/* Currently, no upward sensor */`. `AP_Proximity::get_upward_distance()` already returns false when no backend supplies one (`AP_Proximity.cpp:498`), and TeraRanger Tower Evo is not one of the backends that does - so the comment-out is a no-op here and a silent regression for `AP_Proximity_RangeFinder` / `_MAV` / scripting users. Not applied |
@@ -1589,11 +1602,9 @@ starting shape.** `AP_PMUCAN` talks to one complete device that reports status. 
   thread the skeleton creates is very likely too slow for motor control. Check what rate the
   chosen CubeMars mode wants before keeping it.
 
-**The open question for `AP_PNUGimbal`:** does it back an **`AP_Mount` backend**, which would
-give targeting, mount modes, RC and MAVLink control for free - or stand alone with its own
-interface? `AP_Mount` assumes a camera in places but does not require one (`AP_Mount_Servo`
-has none), so a backend looks plausible and would avoid reimplementing targeting. **Decide
-before writing the loop, not after.**
+**The open question for `AP_PNUGimbal` - ANSWERED 2026-10-16, see "Gimbal stabilisation and
+the mount state machine" below.** `AP_Mount` does provide FC-attitude stabilisation and does
+not require a camera; `AP_Mount_Servo` is both. The recommendation is an `AP_Mount` backend.
 
 **The open question for `AP_PNUSAR`:** where does SAR data go? Candidates are `AP_Proximity`
 (if it yields range/bearing usable for avoidance), a PNU-KAL ICD message of its own in
@@ -1922,6 +1933,320 @@ largest single piece of de-risking available on step 2, so do not "tidy" the lay
 - **Reverted:** `PNUGimbal = 16` and `PNUSAR = 17` in `AP_CAN.h`, their two cases in
   `AP_Arming.cpp`, their factory cases, and `16:PNUGimbal` in the `PROTOCOL` `@Values`. 15
   stays.
+
+---
+
+**Gimbal stabilisation and the mount state machine - researched 2026-10-16, NOT YET APPLIED**
+
+*This answers the 5.1.9 open question "does `AP_PNUGimbal` back an `AP_Mount` backend?".
+It is a design record, not code - four questions below still have to be answered by PNU.*
+
+**1. `AP_Mount` already stabilises against FC attitude, and the precedent is camera-less.**
+
+`AP_Mount_Servo::update_angle_outputs()` (`AP_Mount_Servo.cpp:94-152`) is the whole of it, in
+about 40 lines: take the earth-frame target, rotate the AHRS lean angles into the gimbal's
+yaw frame (`ahrs_angle_rad.rotate(-yaw_bf_rad)`), subtract them from roll and pitch, then
+apply a **gyro lead filter** (`MNT1_LEAD_RLL` / `MNT1_LEAD_PTCH`). It correctly does no
+stabilisation in RETRACT or NEUTRAL.
+
+The `requires_stabilization` constructor flag is what separates the two cases:
+`Type::Servo = 1` passes **true** (`AP_Mount.cpp:80`) and `Type::BrushlessPWM = 7` passes
+**false** (line 126), because a self-stabilising brushless gimbal does its own. **We are the
+`true` case** - the CubeMars drives have no attitude reference of their own.
+
+**A camera is not required.** The only pure virtuals in `AP_Mount_Backend` are
+`has_pan_control()` and `get_attitude_quaternion()`. Every camera method - zoom, focus,
+record, tracking, lens, palette - has a `return false` default, and `AP_Mount_Servo`
+implements none of them. The 5.1.9 worry that "`AP_Mount` assumes a camera in places" is
+answered: it assumes nothing.
+
+**2. The rate worry from 5.1.9 is smaller than it looked.**
+
+| Hook | Rate | Used by |
+|---|---|---|
+| `AP_Mount::update()` | **50 Hz** SCHED_TASK (`Copter.cpp:230`) | every backend |
+| `AP_Mount::update_fast()` | **FAST_TASK**, main loop - 400 Hz on Copter (`Copter.cpp:153`) | only SoloGimbal, and only to accumulate gyro delta-angles for its own EKF |
+
+The framing matters more than the numbers: **the CubeMars closes its own position, velocity
+and current loops at the motor.** The FC feeds setpoints, it does not close a servo loop.
+`AP_Mount_Servo` does exactly this at 50 Hz into real RC servos. 100 Hz is very likely
+enough, 400 Hz is available through a hook nothing else contends for, and **the bus is not
+the constraint** - three command frames is ~0.4 ms at 1 Mbit/s, so 100 Hz costs ~4% and even
+400 Hz ~16%.
+
+**A split-rate option, worth measuring before adopting:** targeting (where to point, in earth
+frame) changes slowly; attitude compensation changes fast. `AP_Mount` could hand over an
+*earth-frame* target at 50 Hz and the `AP_PNU_CAN` thread could subtract AHRS at 100 Hz just
+before transmitting, giving fresh compensation without raising the mount task rate.
+**UNVERIFIED:** that calls `AP::ahrs()` from the CAN thread, and nothing here has checked
+that is safe. Verify before relying on it. The fallback costs nothing - do the subtraction in
+the mount task and let the CAN thread transmit the latched body-frame value, which is what
+the code already does.
+
+**3. Recommended structure.**
+
+```text
+AP_Mount  (50 Hz SCHED_TASK, update_fast available)
+  +- AP_Mount_PNUGimbal : AP_Mount_Backend      thin targeting adapter, MNT1_TYPE = 15
+       +- AP::pnu_can()->get_gimbal()           AP_PNUGimbal_Backend, protocol-neutral
+AP_PNU_CAN  (100 Hz thread)
+  +- AP_PNUGimbal_CubeMars                      protocol only
+```
+
+Free, with no new code: mount modes, RC targeting, the MAVLink gimbal manager, ROI /
+GPS_POINT / SYSID / HOME, the `MNT1_*_MIN/MAX` limits, the lead filter, `healthy()` feeding
+`AP_Mount::pre_arm_checks()` (`AP_Mount.cpp:733`), and the dual-GCS compatibility strategy
+recorded further down this file.
+
+To write: `has_pan_control()` returning true, `get_attitude_quaternion()`,
+`send_target_angles()`, `natively_supported_mount_target_types()` returning
+`NATIVE_ANGLES_ONLY`, `healthy()`, and the ~40 stabilisation lines adapted from
+`AP_Mount_Servo`. `MNT1_TYPE = 15` - 14 (XFRobot) is the highest today.
+
+*Bonus worth having:* `AP_Mount_Servo::get_attitude_quaternion()` admits "No feedback from
+gimbal so simply report demanded servo angles". **This mount has real measured angles**, so
+`GIMBAL_DEVICE_ATTITUDE_STATUS` (285) would carry truth rather than intent.
+
+**4. The state machine is NOT the mount mode, and conflating them would be a mistake.**
+
+`MAV_MOUNT_MODE_*` says **where to point**. The lifecycle state machine says **whether the
+hardware can be pointed at all**. RETRACT is a targeting mode - point at the retract angles -
+**not** "motors off". They are orthogonal and both are needed.
+
+| State | Motors | What it does |
+|---|---|---|
+| **INIT** | enabling | clear errors, enable, wait for status `ENABLED` and first feedback on all three axes |
+| **HOMING** | enabled, **MIT, low stiffness** | the Appendix 1 endpoint search - its own sub-sequence, see below |
+| **ALIGN** | enabled | at the new zero; ramp stiffness and slew-limit onto the first `AP_Mount` target |
+| **RUN** | enabled | normal stabilisation; `AP_Mount` targets accepted |
+| **MAINTENANCE** | **disabled, FC transmits nothing** | the PC utility is on a motor's UART; see below |
+| **FAULT** | disabled | reported, no commands; operator-cleared back to INIT |
+
+**ALIGN is not optional.** Section 9 of `PNUGimbal_CAN_Protocol_Type_CubeMars.md` requires
+position control to start from the measured current angle. Enable the motors and immediately
+apply an `AP_Mount` target at operating stiffness and the mount **snaps** to it - with a
+heavy SAR payload that is the one thing in this design that could break hardware. The backend
+already refuses to command until `set_target()` is called; ALIGN is what makes the *first*
+target safe.
+
+**MAINTENANCE must be blocked while armed.** Disabling the motors in flight drops the SAR
+onto its stops. That needs an arming interlock, and `healthy()` must return false in
+MAINTENANCE so `AP_Mount::pre_arm_checks()` catches it before anyone tries.
+
+**FAULT needs a policy PNU has to choose.** Status codes 0x8-0xE are all faults but they are
+not equivalent: comms loss (0xD) and MOS overtemperature (0xB) are recoverable, overcurrent
+(0xA) and overload (0xE) may not be. Feedback staleness belongs here too - the backend
+already detects it at 500 ms.
+
+**5. Where the state machine lives - lower than might be expected.**
+
+Not in `AP_Mount_Backend`: it is a shared library and AGENTS.md forbids PNU-specific logic
+there. Not in `AP_PNUGimbal_CubeMars`: a second motor protocol would need the same lifecycle.
+
+Put it in the **gimbal layer under `AP_PNU_CAN`**, with `AP_Mount_PNUGimbal` as a thin
+targeting adapter. Three reasons: it runs in the CAN thread where the feedback actually
+arrives, so transitions happen immediately rather than waiting for the next 50 Hz tick; it
+survives `HAL_MOUNT_ENABLED=0`, which this project supports (PNU-ISSUE D13); and it stays
+protocol-neutral.
+
+**6. The four questions - ANSWERED BY PNU 2026-10-16.**
+
+**(1) Both frames, with an earth-frame yaw lock.** The gimbal must switch between body frame
+and earth frame, and the intended normal mode is a **yaw fix** that holds the line of sight
+in earth frame regardless of vehicle heading, **clipped at the mechanical limit**.
+
+This maps straight onto existing `AP_Mount` machinery and needs no new concept:
+`MountAngleTarget` already carries `yaw_is_ef`, `roll_is_ef` and `pitch_is_ef` per axis, and
+`get_bf_yaw()` converts an earth-frame yaw target to body frame by subtracting vehicle
+heading. `AP_Mount_Servo` then constrains the result to `MNT1_YAW_MIN/MAX`. Clipping at the
+limit is what the existing code already does.
+
+**(2) Two limit sets, not one.**
+
+| Axis | Mechanical | Operating |
+|---|---|---|
+| Roll | -30 .. +30 deg | -25 .. +25 deg |
+| Pitch (tilt) | -30 .. +30 deg | -25 .. +25 deg |
+| Yaw (pan) | -20 .. +20 deg | -15 .. +15 deg |
+
+All in the **gimbal frame**. The payload is bulky and can foul the landing skid struts, which
+is what the limits exist to prevent.
+
+`AP_Mount` has only one set, so they are split by layer: **`MNT1_*_MIN/MAX` carry the
+OPERATING limits** and `AP_Mount` clamps targets to them, while the **mechanical limits live
+in the PNU gimbal backend as the last clamp before a frame is transmitted**. Defence in
+depth - a bug in the targeting layer cannot drive the payload into the struts, because the
+layer that owns the wire clamps again. The 5 degree margin is what absorbs stabilisation
+overshoot.
+
+**(3) No home switch and no index - zero is encoder-relative, so INIT must find it.**
+The procedure is **Appendix 1 of `PNUGimbal_CAN_Protocol_Type_CubeMars.md`**: drive to the CW
+endpoint and reconfirm, drive to the CCW endpoint and reconfirm, validate the travel between
+them, move to `Theta_mid = (Theta_CW + Theta_CCW) / 2`, confirm motion has stopped, send the
+zero-set command, verify, then apply targets in the new coordinate system.
+
+Two details from the appendix that are easy to miss and change the implementation:
+
+- **Endpoint detection is by ANGLE ONLY.** Overcurrent, undervoltage and overload are
+  **emergency stop conditions, not endpoint criteria**. So an endpoint is "the angle stopped
+  changing while motion was still commanded" - a stall detector with an angle-delta threshold
+  and a dwell time, neither of which the appendix specifies. Both need to be parameters and
+  both need bench measurement.
+- **MIT mode is mandatory for homing.** The appendix specifies it, and the reason is
+  almost certainly that MIT is the only mode where the host bounds the push into the hard
+  stop - low `kp` plus a small feed-forward torque. Position/velocity mode runs a cascaded
+  loop whose torque the host cannot limit from the CAN frame. So if `CAN_Dn_PNU_MODE` is not
+  0, the homing sequence **must refuse to run and say so**, rather than driving a bulky
+  payload into a mechanical stop at whatever torque the motor decides.
+
+The travel validation is more valuable than it looks: `Theta_CW - Theta_CCW` should be about
+60 / 60 / 40 degrees. Materially less means **something is obstructing the payload** - the
+landing-skid fouling case - and that is caught on the ground instead of in the air.
+
+Abort condition, per the appendix: **any feedback status other than 1 (ENABLED)**.
+
+**(4) MAINTENANCE is entered by a new parameter, and it means more than "motors off".**
+Its purpose is connecting a PC to one motor's **UART** with an external cable, to run the
+vendor configuration utility. So in MAINTENANCE the FC must **transmit nothing at all** on
+the bus - not commands, not enables. CAN has priority over PWM on these drives (manual p.38),
+and a live command stream while the utility is writing configuration is asking for trouble.
+Receiving is harmless and useful, so the driver keeps listening and keeps reporting.
+
+**The hazard is leaving MAINTENANCE, not entering it.** The utility can change the CAN ID,
+the control mode and the P/V/T/KP/KD ranges - and the central warning of the protocol note is
+that a host/device mismatch **does not fail, it silently rescales every command and every
+reading**. So: entering MAINTENANCE is live, but **leaving it requires a reboot**, which
+forces a fresh INIT and a fresh homing run against whatever the motor now believes. A
+parameter was the right choice over an RC switch for exactly this reason - a stray RC glitch
+must not be able to drop the FC off the bus.
+
+**6a. What the answers changed - five consequences, none of them obvious.**
+
+**(i) HOMING is the most hazardous routine in this driver, and it needs its own guards.**
+It deliberately drives a bulky payload into three sets of hard stops. Non-negotiable:
+**it must not run while armed**; the vehicle should be on the ground and level; each endpoint
+search needs a **timeout** as well as a stall threshold, because a motor that never reaches a
+stop must give up rather than push forever; and the whole sequence aborts on any status other
+than 1. The reconfirm pass in the appendix exists for the same reason - one reading can be a
+transient obstruction, two agreeing readings is an endpoint.
+
+**(ii) The axis order is a PNU decision, not a code decision.** Homing all three at once
+sweeps the largest volume and is the most likely to foul the struts. Sequential is safer, but
+which order is safe depends on the geometry - and parking the other two axes somewhere
+specific while one homes may be required. **Open.**
+
+**(iii) Stabilisation WILL saturate in normal flight, and that is physics, not a defect.**
+With roll and pitch operating at +-25 degrees, a vehicle leaning 25 degrees consumes the
+entire range, and a multicopter in forward flight leans 15-25 degrees routinely. Yaw is
+tighter still: an earth-frame yaw lock breaks as soon as the vehicle heading moves more than
+15 degrees from where the lock was set. Clipping at the limit is correct behaviour. It needs
+**recording here so nobody reports it as a bug**, and the mount should be able to say that it
+is on a limit rather than silently appearing to stop tracking.
+
+**(iv) Does the zero survive a power cycle? UNKNOWN, and it decides how often HOMING runs.**
+Section 3 of the protocol note states that zero-setting persistence is **unspecified**. If
+the zero persists, home once at commissioning and merely sanity-check the angle at boot. If
+it does not, the payload is driven into its stops **before every flight**, which is both wear
+and a daily hazard. **This is a one-hour bench test** - home, power cycle, read the angle -
+and it should be done before HOMING is written, because it changes whether homing is a
+startup step or a commanded action.
+
+**(v) A target slew-rate limit earns its place twice.** ALIGN needs one so that the first
+`AP_Mount` target - which may be 25 degrees away from the new zero - does not arrive as a
+step at full stiffness. RUN needs the same limit to bound how fast anything can command the
+payload to move. One mechanism, two jobs, and it is cheaper than ramping stiffness.
+
+**6b. HOMING detail - settled by PNU 2026-10-16.**
+
+**The zero does NOT persist. Assume it never does.** The drives use a **relative incremental
+encoder** and the manual does not state persistence either way, so the safe assumption is the
+pessimistic one. Three consequences, and the third is the important one:
+
+- **HOMING runs on every boot**, so it is on the critical path to being flight-ready and
+  **arming must be blocked until it completes** - `healthy()` returns false in every state but
+  RUN. The `ARMING_SKIPCHK` bypass that PNU-ISSUE(D9b) established for the PMU is the same
+  escape hatch for an operator who must launch anyway.
+- **At power-up the encoder reads 0 wherever the mount happens to be sitting**, so the boot
+  feedback angle is meaningless as an absolute angle.
+- Therefore **the mechanical-limit clamp protects nothing until homing completes** - plus or
+  minus 30 in encoder terms is not plus or minus 30 mechanically until zero is at centre.
+  During homing the *only* thing protecting the payload is the low `kp` and the bounded
+  feed-forward torque. That is why MIT mode is mandatory, and it makes that requirement the
+  single most load-bearing fact in this design.
+
+**Axis order: roll, then pitch, then yaw.** Roll first because **the mass offset is on the
+roll axis only**, so it is the axis that sags and swings under gravity and wants to be under
+control first. Yaw last because it is safer to swing the payload in yaw with pitch already
+neutral, which keeps the swept volume small.
+
+**The two idle axes must be HELD, not left floppy.** Enable all three and command each to hold
+its power-up position before homing begins; the manual does not define what an enabled motor
+does with no command outstanding, and a bulky payload swinging on an uncommanded axis while
+another drives into a stop is exactly the collision the limits exist to prevent.
+
+**Stall dwell: 1 second, provisional, for the first bench run.** The angle-delta threshold
+that goes with it, the approach velocity, and the homing `kp` and feed-forward torque are all
+still unmeasured - they become parameters with provisional defaults and are tuned on the
+bench. Note the trade: a slow approach is gentle on the stops but makes a three-axis homing
+run long, and homing now happens before every flight.
+
+**6c. Travel validation - what it is and why it is worth the tolerance argument.**
+
+After both endpoints are found, `Theta_CW - Theta_CCW` is the axis' total mechanical travel,
+and the expected value is already known: **60 / 60 / 40 degrees** for roll / pitch / yaw. The
+check is `|measured - expected| < tolerance`, and its value is that **the direction of the
+error names the fault**:
+
+| Measured travel | What it means |
+|---|---|
+| about 60 deg | normal |
+| **much less**, e.g. 45 deg | **something is obstructing** - the SAR fouling a skid strut, a snagged cable, a bolt, ice. The case these limits exist for, caught on the ground |
+| **much more**, e.g. 90 deg | the endpoint was not an endpoint - stall detection fired early on friction or a cable drag point |
+| **about 2x or 0.5x**, e.g. 120 or 30 deg | **`CAN_Dn_PNU_PMAX` does not match the range configured in the motor** |
+| 58 or 62 deg | normal variation - stop compliance under a heavy payload, stall detection firing just before true contact, encoder quantisation |
+
+**The fourth row is why this check earns its place.** A PMAX mismatch is precisely the failure
+the protocol note warns about - it does not fail, it silently rescales every command and every
+reading - and **travel validation is the only runtime check in this design that can detect
+it**, because it is the only place an encoder-derived number is compared against a known
+physical quantity. A factor-of-two travel reading is an unmistakable signature. Nothing else
+in the system would ever notice.
+
+**Two tolerances, and they must not be conflated:**
+
+| Tolerance | Provisional | Question it answers |
+|---|---|---|
+| **Reconfirm** | ~0.5 deg | the same endpoint found twice must agree - *was that a real stop?* This is what the appendix' reconfirm step is for |
+| **Range** | ~3 deg on 60, ~2 deg on 40 | `CW - CCW` versus nominal - *is the axis obstructed, or is my scaling wrong?* |
+
+Both figures are starting points for the bench, not measurements. Stop compliance with the SAR
+fitted could consume most of 3 degrees by itself. Set the range tolerance too tight and every
+boot aborts; too loose and a partially obstructed axis passes, and the aircraft flies with a
+reduced range that the mechanical clamp does not know about.
+
+*A policy option once there are real numbers:* if travel measures consistently 57 degrees,
+**derive the operating limits from the measured travel** rather than trusting the nominal.
+More honest than assuming, but it is a choice - UNDECIDED.
+
+**6d. Still open.**
+
+1. **Angle-delta stall threshold, approach velocity, homing `kp` and feed-forward torque** -
+   bench measurement; 1 second dwell is the only provisional value settled so far.
+2. **Reconfirm and range tolerances** - the 0.5 / 3 / 2 degree figures above are guesses.
+3. **Whether operating limits are derived from measured travel** or stay nominal (6c).
+4. **Sign convention** - the appendix defines angles in the gimbal frame; that has to be
+   mapped explicitly onto the `MNT1_*` convention. This project has already been bitten once
+   by a pitch-convention mismatch (5.1.2 / 5.1.3), so it gets written down this time.
+
+**7. Suggested steps, independent of the PMU track.**
+
+Neither track touches the other, so they can run in either order.
+
+| # | Step | Risk | Verified by |
+|:--:|---|:--:|---|
+| **1b** | **DONE in 5.1.12.** `AP_Mount_PNUGimbal` backend and the stabilisation maths, **commanding nothing**. Mechanical-limit clamp in the gimbal backend; `MNT1_*` carry the operating limits | low | **DONE** - builds, both guards compile out, 10 codec tests pass. Log proof needs bench hardware |
+| **1c** | the lifecycle state machine - INIT, ALIGN, RUN, MAINTENANCE, FAULT - the arming interlock and the slew-rate limit. **No HOMING yet** | medium | bench, with the SAR mass fitted, zero set by hand |
+| **1d** | **HOMING**, the Appendix 1 sequence - roll then pitch then yaw, idle axes held, travel validated | **HIGH** - drives the payload into hard stops, and the mechanical clamp cannot protect it until this completes | bench only; arming blocked until it succeeds |
 
 ---
 

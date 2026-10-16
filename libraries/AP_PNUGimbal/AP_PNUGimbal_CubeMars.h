@@ -175,6 +175,9 @@ private:
     uint8_t _motor_id[AP_PNUGIMBAL_NUM_AXES] = {};  // 1..15, distinct (sec 7 ID conflict)
     bool _enabled = false;
 
+    // mechanical travel bounds, radians, symmetric.  See set_target().
+    float _mech_limit_rad[AP_PNUGIMBAL_NUM_AXES] = {};
+
     uint32_t _unmatched_fb_cnt = 0;
     uint32_t _last_unmatched_fb_warn_ms = 0;
     uint32_t _rejected_target_cnt = 0;
