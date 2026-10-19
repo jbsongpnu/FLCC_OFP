@@ -7,7 +7,7 @@
 #include "ap_version.h"
 
 // PNU : This is a custom code modified by PNU Drone
-#define THISFIRMWARE "PNU_OFP V5.1.15"
+#define THISFIRMWARE "PNU_OFP V5.1.16"
 
 // NOTE: 5.1.6 is a DEV build on top of the 5.1.0 OFFICIAL release, which closed the
 // Copter-4.7.1 -> FLCC migration.  It closes D10 Stage 3: TM2's Zoom_POS_FB now carries
@@ -22,6 +22,36 @@
 // and a send_camera_settings() override that forwards real values instead of upstream's
 // NaN placeholders are all vendor-neutral and worth submitting to ArduPilot; only
 // AP_Q30 decides the value means times, which is where PNU-specific facts belong.
+//
+// 5.1.16 fixes two defects found on the PMU bench 2026-10-19.
+//
+//   1. ARMING_SKIPCHK BIT 13 HAD NEVER WORKED, and PNU-ISSUE(D9b)'s design rested on it.
+//      check_failed() only formats and reports - it never consults check_enabled() - so a
+//      check has to wrap ITSELF the way AP_Arming.cpp:1134 and :1303 do.
+//      AP_Arming_Copter::pmucan_checks() did not, so bit 13 did nothing and there was no
+//      emergency-launch override at all: an aircraft with no PMU could not be armed except
+//      by disabling every check.  This has been wrong since D9(b) landed in 5.0.x; nothing
+//      in the step 2 conversion caused it.  Skipping leaves PMUCAN_Fail untouched, so arm()
+//      still latches failsafe.pmucan_armed_healthy = false and the in-flight failsafe stays
+//      out of the way - exactly the "launched without a PMU deliberately" case D9(b) wanted.
+//
+//   2. THE ONE-SHOT STARTUP REPORT WAS EMITTED BEFORE ANYONE WAS LISTENING.  It fired at a
+//      flat 5 s from the CAN thread; KGCS had not connected by then, the statustext was
+//      dropped, and being one-shot it never came back - so neither "PMU ready" nor the
+//      protocol-16 deprecation warning was ever seen, and 15 and 16 looked identical on the
+//      bench.  It now waits for GCS_MAVLINK::active_channel_mask() to be non-zero, which is
+//      the condition that actually matters, with no upper bound: a GCS connecting ten
+//      minutes in still gets the line, and if none ever connects there is nobody to tell.
+//      A one-shot message nobody receives is the silence PNU-ISSUE(D6) exists to remove.
+//
+// Bench-validated in 5.1.15 and unchanged here: PMU telemetry downlink, KGCS and FC command
+// paths, the prearm block when the PMU is absent, and the IN-FLIGHT FAILSAFE - pulling the
+// CAN connector while armed took the set_mode_RTL_or_land_with_pause() branch immediately
+// and recovered cleanly on reconnect.
+//
+// STILL UNTESTED, and it is the test step 2 exists for: the SHARED BUS.  Every bench run so
+// far had CAN_Dn_PNU_OPTS = 1, so the id-based health rewrite - which stops another device's
+// traffic masking a dead PMU - has never been exercised.
 //
 // 5.1.15 is CAN Update Plan step 2: the PMU becomes an AP_PNU_CAN backend.
 //
@@ -360,11 +390,11 @@
 // must stay in step with the three defines below (static_assert in Copter.cpp, D4).
 
 // the following line is parsed by the autotest scripts
-#define FIRMWARE_VERSION 5,1,15,FIRMWARE_VERSION_TYPE_DEV
+#define FIRMWARE_VERSION 5,1,16,FIRMWARE_VERSION_TYPE_DEV
 
 #define FW_MAJOR 5
 #define FW_MINOR 1
-#define FW_PATCH 15
+#define FW_PATCH 16
 #define FW_TYPE FIRMWARE_VERSION_TYPE_DEV
 
 #include <AP_Common/AP_FWVersionDefine.h>

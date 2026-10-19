@@ -59,7 +59,6 @@
 #define AP_PNU_CAN_SHORT_FRAME_WARN_MS (10000U)   // rate limit, short-frame warning
 #define AP_PNU_CAN_TX_ERR_WARN_MS      (10000U)   // rate limit, send-failure warning
 #define AP_PNU_CAN_UNCLAIMED_WARN_MS   (10000U)   // rate limit, unclaimed-frame warning
-#define AP_PNU_CAN_STARTUP_REPORT_MS   (5000U)    // when the one-shot startup line goes out
 #define AP_PNU_CAN_MAX_BACKENDS        (3U)
 
 class AP_PNU_CAN : public AP_CANDriver {

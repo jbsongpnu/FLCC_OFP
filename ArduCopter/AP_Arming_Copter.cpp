@@ -29,6 +29,20 @@ bool AP_Arming_Copter::pre_arm_checks(bool display_failure)
 //   in-flight failsafe then stays out of the way.
 bool AP_Arming_Copter::pmucan_checks(bool display_failure)
 {
+    // PNU-ISSUE(D9b) : the ARMING_SKIPCHK bypass this check's design rests on has to be
+    // wired up BY THE CALLER.  check_failed() only formats and reports - it never
+    // consults check_enabled() - and every other ArduPilot check wraps itself the way
+    // AP_Arming.cpp:1134 and :1303 do.  Without this, bit 13 did nothing and there was no
+    // emergency-launch override at all, contrary to what D9(b) recorded.
+    //
+    // FOUND ON THE BENCH 2026-10-19, and it had been wrong since D9(b) landed in 5.0.x.
+    // Skipping leaves PMU_Ctrl_Echo.PMUCAN_Fail untouched, so arm() still latches
+    // failsafe.pmucan_armed_healthy = false and the in-flight failsafe stays out of the
+    // way - which is exactly the "launched without a PMU on purpose" case D9(b) designed.
+    if (!check_enabled(Check::SYSTEM)) {
+        return true;
+    }
+
     // PMUCAN_Fail: 0 healthy, 1 lost after being seen, 2 never seen.
     // 2 is also the state when no PMU is fitted at all, which is why this is a
     // warning rather than a hard block.

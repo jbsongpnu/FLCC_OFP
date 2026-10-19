@@ -453,9 +453,23 @@ void AP_PNU_CAN::loop(void)
 // permanent prearm warning that raising that global to 2 would.
 void AP_PNU_CAN::report_startup(void)
 {
-    if (_startup_reported || (AP_HAL::millis() < AP_PNU_CAN_STARTUP_REPORT_MS)) {
+    if (_startup_reported) {
         return;
     }
+
+    // Wait for a GCS to be LISTENING, not for a fixed delay.
+    //
+    // This used to fire at a flat 5 s, and on the bench 2026-10-19 that lost the message
+    // entirely: KGCS had not connected yet, the statustext was dropped, and because it is
+    // one-shot it never came back.  Neither "PMU ready" nor the protocol-16 deprecation
+    // warning was ever seen.  A one-shot message nobody receives is precisely the silence
+    // PNU-ISSUE(D6) exists to remove, so the trigger is now the condition that actually
+    // matters.  There is no upper bound on purpose - a GCS connecting ten minutes in
+    // still gets the line, and if none ever connects there is nobody to tell anyway.
+    if (GCS_MAVLINK::active_channel_mask() == 0) {
+        return;
+    }
+
     _startup_reported = true;
 
     const unsigned bus = (unsigned)(_driver_index + 1);
