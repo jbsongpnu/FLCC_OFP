@@ -7,7 +7,7 @@
 #include "ap_version.h"
 
 // PNU : This is a custom code modified by PNU Drone
-#define THISFIRMWARE "PNU_OFP V5.1.14"
+#define THISFIRMWARE "PNU_OFP V5.1.15"
 
 // NOTE: 5.1.6 is a DEV build on top of the 5.1.0 OFFICIAL release, which closed the
 // Copter-4.7.1 -> FLCC migration.  It closes D10 Stage 3: TM2's Zoom_POS_FB now carries
@@ -22,6 +22,44 @@
 // and a send_camera_settings() override that forwards real values instead of upstream's
 // NaN placeholders are all vendor-neutral and worth submitting to ArduPilot; only
 // AP_Q30 decides the value means times, which is where PNU-specific facts belong.
+//
+// 5.1.15 is CAN Update Plan step 2: the PMU becomes an AP_PNU_CAN backend.
+//
+// Protocol 15 now instantiates AP_PNU_CAN, with CAN_Dn_PNU_OPTS bit 0 creating AP_PMUCAN as
+// one of its backends.  THE ENUM VALUE IS UNCHANGED, so no deployed aircraft needs a
+// parameter change, and PNU_OPTS defaults to 1 so an upgrade is a no-op: PMU only, exactly
+// as before.  16 survives as PNU_CAN_LEGACY, a deprecated alias that warns once per boot,
+// so a bench aircraft configured during step 1 keeps working instead of silently getting no
+// driver at all.  Delete the alias when the 5.1.x DEV series goes OFFICIAL.
+//
+// TWO THINGS THAT HAD TO CHANGE, not cosmetics:
+//
+//   1. THE 10 Hz IS NOW EXPLICIT.  It used to be an accident - TXspin() ran at 50 Hz and
+//      rotated five commands, so each happened to go out at 10 Hz, and nothing in the source
+//      said so.  PNU-ISSUE(D7)'s engine interlock is calibrated on it: the threshold of 10
+//      ticks means ~1.0 s only because engineonoffstate() is reached once per rotation.  It
+//      is now derived from PMUCAN_MSG_RATE_HZ and the driver's tick, which reproduces the
+//      old cadence exactly - command slot n fires at tick % 10 == n*2 - while saying why.
+//      Do not restructure the rotation without re-deriving the interlock.
+//
+//   2. HEALTH IS NOW KEYED ON PMU STATUS FRAMES.  RXspin() treated ANY successful receive as
+//      proof the PMU was alive.  That was harmless while the PMU had the bus to itself, but
+//      on the shared bus the gimbal's traffic would have held PMUCAN_Fail at CONNECTED with
+//      the PMU dead, and failsafe_pmucan_check() would NEVER HAVE FIRED.  Only the five PMU
+//      status ids feed the leaky bucket now; its thresholds and timing are unchanged.
+//
+// The directory layout is deliberately untouched.  AP_PMUCAN/AP_PMUCAN.h keeps its path and
+// still declares PMU_Status and PMU_Ctrl_Echo beside their definitions (PNU-ISSUE D14), so
+// ArduCopter/events.cpp, ArduCopter/AP_Arming_Copter.cpp and GCS_PNU.cpp need NO CHANGE -
+// verified by diff.  Those two globals, and their definitions, sit outside the
+// AP_PNU_CAN_ENABLED guard because those files reference them unconditionally.
+//
+// Deviation from the plan, deliberate: protocol 17 (PNUSAR) is NOT dropped here.  Removing
+// it means AP_PNUSAR stops being an AP_CANDriver, which is step 3's job when it becomes a
+// backend.  Bundling it into the risky PMU conversion would have mixed two unrelated changes.
+//
+// NOT BENCH-TESTED.  This must be run against a real PMU before it flies: engine Start/Stop
+// interlock timing, failsafe trigger and recovery, and TM1/TM1x content.
 //
 // 5.1.14 is CAN Update Plan step 1d: HOMING, the Appendix 1 endpoint search.
 //
@@ -322,11 +360,11 @@
 // must stay in step with the three defines below (static_assert in Copter.cpp, D4).
 
 // the following line is parsed by the autotest scripts
-#define FIRMWARE_VERSION 5,1,14,FIRMWARE_VERSION_TYPE_DEV
+#define FIRMWARE_VERSION 5,1,15,FIRMWARE_VERSION_TYPE_DEV
 
 #define FW_MAJOR 5
 #define FW_MINOR 1
-#define FW_PATCH 14
+#define FW_PATCH 15
 #define FW_TYPE FIRMWARE_VERSION_TYPE_DEV
 
 #include <AP_Common/AP_FWVersionDefine.h>

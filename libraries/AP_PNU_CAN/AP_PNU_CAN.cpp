@@ -11,6 +11,7 @@
 #include <AP_Math/AP_Math.h>
 #include <GCS_MAVLink/GCS.h>
 
+#include <AP_PMUCAN/AP_PMUCAN.h>
 #include <AP_PNUGimbal/AP_PNUGimbal_CubeMars.h>
 
 extern const AP_HAL::HAL &hal;
@@ -297,8 +298,12 @@ AP_PNU_CAN::~AP_PNU_CAN()
 // return the driver registered on @driver_index, or nullptr if it is not ready
 AP_PNU_CAN *AP_PNU_CAN::get_pnu_can(uint8_t driver_index)
 {
-    if (driver_index >= AP::can().get_num_drivers() ||
-        AP::can().get_driver_type(driver_index) != AP_CAN::Protocol::PNU_CAN) {
+    if (driver_index >= AP::can().get_num_drivers()) {
+        return nullptr;
+    }
+    const AP_CAN::Protocol type = AP::can().get_driver_type(driver_index);
+    if ((type != AP_CAN::Protocol::PNU_CAN) &&
+        (type != AP_CAN::Protocol::PNU_CAN_LEGACY)) {
         return nullptr;
     }
     return static_cast<AP_PNU_CAN*>(AP::can().get_driver(driver_index));
@@ -354,10 +359,10 @@ void AP_PNU_CAN::create_backends(void)
     const uint8_t opts = get_opts();
 
     if (opts & DEVICE_PMU) {
-        // The PMU is still its own AP_CANDriver on CAN_Dn_PROTOCOL = 15.  Accepting the
-        // bit and saying so beats rejecting it: the default is 1, so refusing here would
-        // stop a gimbal from running purely because the PMU has not moved yet.
-        _pmu_requested = true;
+        AP_PMUCAN *pmu = NEW_NOTHROW AP_PMUCAN(*this);
+        if (!add_backend(pmu)) {
+            set_init_error("PMU backend failed to start");
+        }
     }
 
 #if AP_PNUGIMBAL_CUBEMARS_ENABLED
@@ -470,9 +475,9 @@ void AP_PNU_CAN::report_startup(void)
                       (get_opts() & DEVICE_PMU) ? "" : ", no PMU");
     }
 
-    if (_pmu_requested) {
-        GCS_SEND_TEXT(MAV_SEVERITY_INFO, "PNU_CAN: CAN_D%u PMU is on CAN_Dn_PROTOCOL 15",
-                      bus);
+    if (AP::can().get_driver_type(_driver_index) == AP_CAN::Protocol::PNU_CAN_LEGACY) {
+        GCS_SEND_TEXT(MAV_SEVERITY_WARNING,
+                      "PNU_CAN: CAN_D%u_PROTOCOL 16 is deprecated, use 15", bus);
     }
     if (_init_error[0] != '\0') {
         // CRITICAL, not WARNING: an init error means a backend this configuration asked

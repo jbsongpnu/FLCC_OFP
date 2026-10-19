@@ -12,3 +12,9 @@
 #ifndef AP_PNU_CAN_ENABLED
 #define AP_PNU_CAN_ENABLED (HAL_MAX_CAN_PROTOCOL_DRIVERS > 0)
 #endif
+
+// The driver thread rate, and the ONE clock every backend derives its sub-rates from -
+// update() is handed the tick count rather than each backend inventing a timer.  It lives
+// here rather than in AP_PNU_CAN.h so that a backend can reach it without pulling in the
+// whole driver: AP_PMUCAN derives its ICD-specified 10 Hz per message from it.
+#define AP_PNU_CAN_LOOP_HZ            (100U)    // thread rate, 10 ms

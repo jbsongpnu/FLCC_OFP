@@ -2,9 +2,23 @@
 - This branch currently developing PNU-KAL FLCC OFP after official version (TAG) PNU-KAL-FLCC-5.1.0 (this is same code as 5.0.15 dev)  
 - PNU-ISSUE 10 & 11 still remains : For Gremsy camera and general camera mount library structure  
 - NEXT : **Bench-tune the homing parameters, then set `CAN_Dn_PNU_HOME=1`.** Step 1d is implemented but **defaults to OFF** - the stall threshold, approach velocity and the two gains are provisional and unmeasured. Nothing drives into a stop until somebody turns it on. See 6f near the end of this file for the tuning order  
-- ALSO NEXT : **CAN Update Plan step 2** - the PMU becomes a backend and protocol 15 moves to `AP_PNU_CAN`. **Needs a bench against real PMU hardware before it flies.** Independent of the gimbal track; either order. See the CAN Update Plan Steps section near the end of this file  
+- ALSO NEXT : **CAN Update Plan step 2b** - simulated CAN devices for SITL, so the state machines, health logic and interlock timing can be exercised on a desk. **Deliberately ordered before 2c**: engine-start timing should be measured against a fake PMU, not tuned against a running engine  
+- THEN : **step 2c** - engine-start interlock guards. Raised from the bench 2026-10-19: there is **no timeout today**, so **a link that drops mid-burst still starts the engine ~1 s later on its own**, and a PNU-GCS guard cannot cover that case. Designed, not applied  
+- THEN : **step 3** the SAR backend (protocol 17 retires there)  
+- **BENCH REQUIRED BEFORE FLIGHT (5.1.15)** : the PMU is now an `AP_PNU_CAN` backend. **Engine Start/Stop interlock timing, failsafe trigger and recovery, and TM1/TM1x content all need checking against real PMU hardware.** Nothing about the wire changed, but the code that puts it there did  
 - *Done in the gimbal track :* step 1b (`AP_Mount_PNUGimbal`, 5.1.12) and step 1c (lifecycle state machine, 5.1.13). `AP_Mount` does stabilise against FC attitude and needs no camera, which is why the gimbal is an `AP_Mount` backend  
-- IN THIS VERSION : V5.1.14 - **CAN Update Plan step 1d : HOMING, the Appendix 1 endpoint search**  
+- IN THIS VERSION : V5.1.15 - **CAN Update Plan step 2 : the PMU becomes an `AP_PNU_CAN` backend**  
+   - **Protocol 15 now instantiates `AP_PNU_CAN`**, with `CAN_Dn_PNU_OPTS` bit 0 creating `AP_PMUCAN` as one of its backends. **The enum value is unchanged and `PNU_OPTS` defaults to 1**, so an upgrade is a **no-op** for every deployed aircraft : PMU only, exactly as before  
+   - **16 survives as `PNU_CAN_LEGACY`**, a deprecated alias that warns once per boot, so a bench aircraft configured during step 1 keeps working instead of hitting the factory's `default:` and silently getting no driver, no parameters and no message. Delete it when 5.1.x goes OFFICIAL  
+   - **The 10 Hz is now EXPLICIT.** It used to be an accident : `TXspin()` ran at 50 Hz and rotated five commands, so each *happened* to go out at 10 Hz and nothing said so. D7's interlock is calibrated on it - threshold 10 ticks ≈ 1.0 s only because `engineonoffstate()` is reached once per rotation. Now derived from `PMUCAN_MSG_RATE_HZ` and the driver tick, reproducing the old cadence exactly (slot *n* at `tick % 10 == n*2`) while saying why  
+   - **Health is now keyed on PMU STATUS FRAMES.** `RXspin()` treated *any* successful receive as proof of life - harmless on a dedicated bus, but on the shared bus **gimbal traffic would have held `PMUCAN_Fail` at CONNECTED with the PMU dead, and `failsafe_pmucan_check()` would never have fired.** Only the five PMU status ids feed the leaky bucket now; its thresholds and timing are unchanged  
+   - **The directory layout is untouched, deliberately.** `AP_PMUCAN/AP_PMUCAN.h` keeps its path and still declares `PMU_Status` / `PMU_Ctrl_Echo` beside their definitions (D14), so **`events.cpp`, `AP_Arming_Copter.cpp` and `GCS_PNU.cpp` need no change - verified by diff**. Both globals and their definitions sit *outside* the `AP_PNU_CAN_ENABLED` guard, because those files reference them unconditionally  
+   - **Deviation from the plan, deliberate : protocol 17 is NOT dropped here.** Removing it means `AP_PNUSAR` stops being an `AP_CANDriver`, which is step 3's job. Bundling it into the risky PMU conversion would have mixed two unrelated changes  
+   - Dead members the conversion created were removed rather than left (D6) : `_can_iface`, `sem_handle`, `_thread_name`, `_initialized`, `_driver_index`, `pmucan_period_us`, `_AP_PMUCAN_loop_cnt`, `_cmd_idx`, `_rtr_idx`, `RTR_MSG`, `_pmucan_last_send_us`, `PMUCAN_SEND_TIMEOUT_US`  
+   - Builds : CubeOrangePlus **1,733,336 B**. All five guards compile out, including `AP_PNU_CAN_ENABLED=0` at 1,715,412 B. `CAN_Dn_PROTOCOL` 15 now reads **`PNU_CAN`**. 10 codec tests pass  
+   - **NOT BENCH-TESTED** - see the warning at the top of this file  
+- For 5.1.14 version :  
+   - **CAN Update Plan step 1d : HOMING, the Appendix 1 endpoint search**  
    - **`CAN_Dn_PNU_HOME` DEFAULTS TO 0, deliberately.** This routine drives a bulky payload into three sets of hard stops with the mechanical clamp *disabled*, and the tuning is provisional - only the 1 s stall dwell is settled. **Nothing drives into a stop until it is switched on.** With it off the driver says so once per boot and the zero is set by hand  
    - **MIT mode is mandatory and enforced.** `init()` refuses to arm the sequence unless `PNU_MODE=0`, naming it in the message. MIT is the only mode where the host bounds the push into a stop : a sweep sends `kp=0, kd=PNU_HKD, v=±PNU_HVEL`, so the stall torque settles at **HKD × HVEL** - a number the operator picks. Position/velocity mode runs a cascaded loop whose torque the CAN frame cannot limit at all  
    - **Endpoint detection is by ANGLE ONLY** (Appendix 1 item 4) - overcurrent, undervoltage and overload are *emergency stops, not endpoint criteria*. An endpoint is "the angle stopped changing while motion was still commanded"; any fault status aborts  
@@ -137,7 +151,7 @@ Residuals recorded against resolved issues
 
 - D1 — is the IR prelude needed at all? Requires removing it and retesting on hardware.  
 - D6 — five PMU counters are still write-only; decide to surface (a PMUC log msg) or delete. _rtr_tx_err / _cmd_tx_err have the real diagnostic value.  
-- D7 — accepted interlock residuals (no sender check on handle_gcs_flcc_pmu_ctrl(); the 2-messages-plus-1s shortcut rests on a KGCS contract not enforced in firmware).  
+- D7 — accepted interlock residuals (no sender check on handle_gcs_flcc_pmu_ctrl(); the 2-messages-plus-1s shortcut rests on a KGCS contract not enforced in firmware). **Step 2c addresses the shortcut**: a link dropping mid-burst currently completes the start on its own ~1 s later, because the frozen command pair keeps the counter running. The 300 ms staleness reset deliberately **tightens D7's unlimited loss tolerance** - recorded here rather than left as a silent change.  
 - D12 — confirm 10 m / 15 m are the intended operator thresholds.
 - Untested, from the bench notes: the Viewpro SEARCHING/TRACKING freeze (operator can lose gimbal control with no KGCS action), and whether _Max_zoom_EO = 30 / _Max_zoom_IR = 4 match the new camera.  
 ***
@@ -164,7 +178,7 @@ Residuals recorded against resolved issues
 - **This branch builds ArduCopter ONLY.** ArduPlane, Rover and Sub have been unbuildable since `ed055d2f24` (5.0.10) because `GCS_PNU.cpp` lives in the shared `GCS_MAVLink` library and references `PMU_Ctrl_Echo` and `AP::ac_avoid()`, both of which exist only for Copter. 5.1.11 added `AP_PNU_CAN::var_info` to the same list. This is **by construction, not an accident** - but it means a vehicle gate on PNU code in a shared library protects nothing, so do not add one  
 - PNU-KAL Specific options  
    - **WARNING :** Do not use heli model. Only multicopter frames are supported  
-   - CAN Driver Option for PMU : CAN_D1_PROTOCOL = 15  
+   - CAN Driver Option for the PNU bus : **CAN_D1_PROTOCOL = 15** (PMU, gimbal and SAR share it; `CAN_D1_PNU_OPTS` selects which are fitted, default 1 = PMU only)  
    - **CAN1 bitrate is 1,000,000 bit/s** (`CAN_P1_BITRATE` default). Forced by the CubeMars gimbal, which is fixed at 1 Mbit/s; **the PMU must be reconfigured from 500 k on the device**. See the CAN Update Plan Steps  
    - KGCS telemetry port : SERIALx_PROTOCOL = 2 (MAVLink2) - **never 1**. Every PNU-KAL ICD message is id >= 50001, which MAVLink1 cannot encode, so a port left on 1 carries no PMU/CAM telemetry and accepts no TC commands at all. See PNU-ISSUE D2  
 - Viewpro Mount Specific options  
@@ -1050,7 +1064,7 @@ If it shows deletions, apply targeted edits only.
 | `libraries/AP_Mount/AP_Mount.{h,cpp}`, `AP_Mount_config.h`, `AP_Mount_Params.cpp` | `PNUGimbal = 15` in the `Type` enum, its factory case, `HAL_MOUNT_PNUGIMBAL_ENABLED`, and `15:PNUGimbal` in the `MNT1_TYPE` `@Values` |
 | `libraries/AP_PNUSAR/*` | PNU-only files - CAN driver skeleton (5.1.9), structure only until the ICD arrives |
 | `libraries/AP_CANManager/AP_CANManager_CANDriver_Params.cpp` | the `CAN_Dn_PNU_` subgroup at index 8 (index 7 retired, not reused), and 15/16 added to the `PROTOCOL` `@Values` list |
-| `libraries/AP_CANManager/AP_CAN.h`, `AP_CANManager.{h,cpp}` | `PMUCAN = 15`, `PNU_CAN = 16`, `PNUSAR = 17` plus their driver slots and factory cases |
+| `libraries/AP_CANManager/AP_CAN.h`, `AP_CANManager.{h,cpp}` | `PNU_CAN = 15`, `PNU_CAN_LEGACY = 16` (deprecated alias), `PNUSAR = 17` plus their factory cases |
 | `libraries/AP_Arming/AP_Arming.cpp` | the three PNU protocols listed in the `AP_CAN::Protocol` switch - required to compile under `-Werror=switch`, zero runtime effect |
 | `Tools/scripts/build_options.py` | the `Camera / Q30` build option (D13) and `Gimbal / PNUGIMBAL` (5.1.12) |
 | `ArduCopter/version.h` | **5.1.9 DEV** and the release note describing what it carries |
@@ -1067,7 +1081,7 @@ make a wholesale copy a regression.
 | 4 `pmucan_*.hpp` deleted (1163 lines) | vendored libuavcan v0; only 3 constants were used, all identical in `AP_HAL::CANFrame` / `CANIface` |
 | Mount task kept at 50 Hz | `AP_Mount_Viewpro::update()` self-throttles to 100 ms, so gimbal traffic is 10 Hz either way; at a 10 Hz task rate the period *equals* the throttle and late ticks cause 5 Hz bursts. See D8 |
 | msg 285 suppression made opt-in | V5.0.8 suppressed it for every gimbal, not just Viewpro. See D8 |
-| `version.h` is **5.1.14 DEV** | 5.1.0 OFFICIAL closed the migration; the 5.1.x DEV series carries the post-release D10 work - Stage 1 in 5.1.1, the Gremsy analysis and pitch relocation in 5.1.2, Stage 2a routing in 5.1.3, Gremsy hardware validation in 5.1.4, Stage 2b closure in 5.1.5, Stage 3 in 5.1.6, its bench confirmation in 5.1.7, the KGCS backward-compatibility fix in 5.1.8, the `AP_PNUGimbal` / `AP_PNUSAR` CAN driver skeletons in 5.1.9, `AP_PNUGimbal`'s CubeMars protocol backend in 5.1.10, CAN Update Plan step 1 in 5.1.11, step 1b in 5.1.12, step 1c in 5.1.13 and step 1d in 5.1.14 - and goes OFFICIAL when D10/D11 land |
+| `version.h` is **5.1.15 DEV** | 5.1.0 OFFICIAL closed the migration; the 5.1.x DEV series carries the post-release D10 work - Stage 1 in 5.1.1, the Gremsy analysis and pitch relocation in 5.1.2, Stage 2a routing in 5.1.3, Gremsy hardware validation in 5.1.4, Stage 2b closure in 5.1.5, Stage 3 in 5.1.6, its bench confirmation in 5.1.7, the KGCS backward-compatibility fix in 5.1.8, the `AP_PNUGimbal` / `AP_PNUSAR` CAN driver skeletons in 5.1.9, `AP_PNUGimbal`'s CubeMars protocol backend in 5.1.10, CAN Update Plan step 1 in 5.1.11, step 1b in 5.1.12, step 1c in 5.1.13, step 1d in 5.1.14 and step 2 in 5.1.15 - and goes OFFICIAL when D10/D11 land |
 | `GCS.h` dead CAM macros removed, `OFP_VER_*` tracked against `version.h` | were stale/unused; guarded by `static_assert` in `Copter.cpp` |
 | `AP_PMUCAN` fixes | dropped-frame at RX budget, dead branch, `&`->`&&`, `RXdrain()` extraction, named constants, ctor init, `TXspin` void. See git log |
 | `send_proximity()` upward-distance block **not** commented out | V5.0.8 wrapped it in `/* Currently, no upward sensor */`. `AP_Proximity::get_upward_distance()` already returns false when no backend supplies one (`AP_Proximity.cpp:498`), and TeraRanger Tower Evo is not one of the backends that does - so the comment-out is a no-op here and a silent regression for `AP_Proximity_RangeFinder` / `_MAV` / scripting users. Not applied |
@@ -1782,8 +1796,10 @@ gimbal Master ID or any gimbal command id, rather than letting the demux be ambi
 | **0** | Confirm device bitrates and the SAR id plan | - | - | **DONE 2026-10-15** - bus is 1 Mbit/s, SAR is 11-bit with distinct ids per message |
 | **1** | **DONE in 5.1.11.** **`AP_PNU_CAN` multi-backend driver.** Generalise the 5.1.10 frontend: array of backends rather than one pointer, `AP_PNUGimbal_Backend` becomes the protocol-neutral `AP_PNU_CAN_Backend`, `handle_frame()` returns `bool` (first backend to claim a frame wins, the `MultiCAN` pattern at `AP_CANSensor.h:94`), `send_frame()` carries flags. CubeMars becomes a backend. **`CAN_Dn_PNU_OPTS` lands here** (see the device selection section below), and `CAN_Dn_PG_TYPE` drops `0:None` and defaults to `1:CubeMars`. Registered on protocol **16 for now**, PMUCAN untouched on 15 | new `AP_PNU_CAN/`, `AP_PNUGimbal/` | **none to flying code** | **DONE** - SITL + CubeOrangePlus build, `AP_PNU_CAN_ENABLED=0` builds, 10 codec tests pass |
 | **1b-1d** | **The gimbal track**, branching off step 1 - mount backend, lifecycle state machine, HOMING. **1b and 1c are DONE (5.1.12, 5.1.13); 1d is not.** Its own table and risk notes are in "Gimbal stabilisation and the mount state machine" near the end of this file | `AP_Mount/AP_Mount_PNUGimbal.*`, `AP_PNUGimbal/` | low to **HIGH** for 1d | see that section |
-| **2** | **PMU becomes a backend.** `AP_PMUCAN` changes base class; protocol **15** instantiates `AP_PNU_CAN`, so `CAN_Dn_PNU_OPTS` bit 0 becomes live; **make the 10 Hz per-message rate explicit** (see below); health becomes id-based; drop protocol 17 and keep **16 as a deprecated alias** (see below) | `AP_PMUCAN/`, `AP_PNU_CAN/`, `AP_CAN.h`, `AP_CANManager.{h,cpp}`, `AP_Arming.cpp` | **HIGH** | **bench against the real PMU before flight** - Start/Stop interlock timing, failsafe trigger and recovery, TM1/TM1x |
-| **3** | **SAR backend** under the same driver, 11-bit, ids `0x400`-`0x7FF` | `AP_PNUSAR/` | low | build; real work waits on the ICD |
+| **2** | **DONE in 5.1.15, NOT BENCH-TESTED.** **PMU becomes a backend.** `AP_PMUCAN` changes base class; protocol **15** instantiates `AP_PNU_CAN`, so `CAN_Dn_PNU_OPTS` bit 0 becomes live; the 10 Hz per-message rate is **explicit**; health is **id-based**; **16 kept as a deprecated alias**. Protocol 17 deferred to step 3 | `AP_PMUCAN/`, `AP_PNU_CAN/`, `AP_CAN.h`, `AP_CANManager.{h,cpp}`, `AP_Arming.cpp` | **HIGH** | **bench against the real PMU before flight** - Start/Stop interlock timing, failsafe trigger and recovery, TM1/TM1x |
+| **2b** | **Simulated CAN devices for SITL.** Fake PMU and fake CubeMars motors on a `vcan` interface, so the state machines, health logic and interlock timing can be exercised without hardware. **Ordered before 2c on purpose** - it is how 2c's windows get measured instead of reasoned about. See the section below | new `Tools/pnu/sitl_can/` | low | it *is* the test |
+| **2c** | **Engine-start interlock guards.** Two independent time windows on PNU-ISSUE(D7)'s start sequence - a **300 ms TC1 staleness reset** and a **5 s stop-before-start window**. See the section below | `AP_PMUCAN/` | **HIGH** - engine start logic | step 2b first, then bench |
+| **3** | **SAR backend** under the same driver, 11-bit, ids `0x400`-`0x7FF`. Protocol 17 retires here, deferred from step 2 | `AP_PNUSAR/` | low | build; real work waits on the ICD |
 | **4** | Bus documentation, bitrate note, README and `version.h` | `README.md`, `version.h` | none | - |
 
 **Protocol number: 15 is kept.** The enumerator is renamed `PMUCAN = 15` -> `PNU_CAN = 15`; the
@@ -2342,6 +2358,108 @@ Neither track touches the other, so they can run in either order.
 | **1b** | **DONE in 5.1.12.** `AP_Mount_PNUGimbal` backend and the stabilisation maths, **commanding nothing**. Mechanical-limit clamp in the gimbal backend; `MNT1_*` carry the operating limits | low | **DONE and BENCH-CONFIRMED 2026-10-16** - `MNT0.Roll` and `MNT0.Pitch` move opposite vehicle roll and pitch in a log. Yaw needs the earth-frame lock enabled, see below |
 | **1c** | **DONE in 5.1.13.** the lifecycle state machine - INIT, ALIGN, RUN, MAINTENANCE, FAULT - the arming interlock and the slew-rate limit. **No HOMING yet** | medium | **DONE** - builds, all five guards compile out, 10 codec tests pass. Bench needs the SAR mass fitted and the zero set by hand |
 | **1d** | **DONE in 5.1.14, DEFAULTS OFF.** **HOMING**, the Appendix 1 sequence - roll then pitch then yaw, idle axes held, travel validated | **HIGH** - drives the payload into hard stops, and the mechanical clamp cannot protect it until this completes | **code DONE** - builds, guards compile out. **NOT bench-run**: `PNU_HOME` is 0 until the tuning in 6f is measured |
+
+---
+
+**Step 2b - simulated CAN devices for SITL - PROPOSED 2026-10-19**
+
+*Everything in the CAN stack except the CubeMars codec is currently compile-verified only.
+The codec has 10 unit tests; the state machines, the health logic and the interlock timing
+have never been executed.*
+
+**The hooks already exist upstream.** `AP_HAL_SITL` has two CAN transports
+(`CANSocketIface.cpp:216-220`): multicast UDP, and **SocketCAN** which attaches to a Linux
+`vcan%u` interface (`CAN_SocketCAN.cpp:32`). SITL is configured here with
+`HAL_NUM_CAN_IFACES 2`, so the driver really does run in simulation.
+
+**Use SocketCAN**, because it preserves real CAN semantics - extended ids and **RTR frames**,
+which the PMU needs and a UDP shim may not carry faithfully.
+
+```text
+sudo modprobe vcan
+sudo ip link add vcan0 type vcan && sudo ip link set vcan0 up
+# fake devices in python-can, SITL attached to vcan0
+```
+
+**What it would finally make testable:**
+
+| Device | Covers |
+|---|---|
+| fake PMU | status frame decode; the leaky-bucket health transitions; **stop answering while a fake gimbal keeps chattering and confirm the failsafe fires** - the exact bug step 2 fixed, unprovable any other way short of hardware |
+| fake PMU | the D7 engine interlock, including **step 2c's two windows**, measured rather than reasoned about |
+| fake CubeMars | INIT -> ALIGN -> RUN, fault transitions, slew limiting |
+| fake CubeMars with a travel limit | **HOMING** - the reconfirm mismatch and the travel-validation bounds, otherwise only testable by driving real hardware into real stops |
+| both at once | the shared bus, which nothing has ever exercised |
+
+**What it cannot do:** stop compliance, stall thresholds, real motor dynamics, real PMU
+firmware behaviour. It does not replace the bench - it moves the logic errors off it.
+
+**Cost:** a few hundred lines of Python per device. The CubeMars one is cheap because the
+codec is written and tested, and the fake motor is the same maths in reverse; the PMU one
+needs its five status frames built from the field layouts in `handleFrame()`.
+
+---
+
+**Step 2c - engine-start interlock guards - DESIGNED 2026-10-19, NOT YET APPLIED**
+
+*Raised from the bench: KGCS lost its link at the moment the Start button was pressed, and
+sent the queued data after reconnecting.*
+
+**There is no timeout today, and that is deliberate - but it has a consequence nobody had
+costed.** `engineoffmode()` only ever compares `_pmu_ctrl_cmd` against `_pmu_ctrl_cmd_prv`,
+and that pair **only changes when a new TC1 arrives** - yet the function runs at 10 Hz
+regardless. So when TC1 stops arriving, the pair **freezes in a valid alternating state and
+`_engineoncnt` keeps counting**. PNU-ISSUE(D7) records this as the mechanism that makes the
+interlock tolerate dropped messages. It also means:
+
+| t | Event |
+|---|---|
+| 0.0 s | Start pressed; KGCS begins the 2/3 burst |
+| ~0.2 s | second message arrives, pair valid, counter starts |
+| ~0.2 s | **link drops** |
+| **~1.2 s** | counter reaches 10 - **`ENGONOFF=1` goes out and the engine starts** |
+
+Only about **2 of the 14 messages** were ever needed. The engine starts roughly a second
+after the link died, with no further operator input.
+
+**A guard on PNU-GCS cannot fix this.** It can stop a spurious re-trigger on reconnect, which
+is worth having, but by the time the link drops the FC is already counting on its own and the
+GCS is not there to stop it. The outage case is FC-side or nowhere.
+
+**Two independent windows, both wanted by PNU 2026-10-19:**
+
+| Guard | Window | Failure mode it covers |
+|---|---|---|
+| **TC1 staleness** | **300 ms** | the link dies *during* a burst - stop counting rather than completing the sequence alone |
+| **Stop-before-start** | **5 s** | the link dies *between* Stop and Start - a late or queued Start after reconnect is not honoured |
+
+The second one exists because **KGCS forces Stop before Start as a procedural safety guard**,
+so the FC can require the same thing and refuse a Start that does not follow a recent Stop.
+
+**Design points, to be settled while implementing:**
+
+- **Arm the 5 s window on a valid alternating 4/5 PAIR, not a single message.** Start is
+  validated as a pair; a stray single Stop message should not arm permission to start.
+- **Arm it in EITHER engine state.** Stop-while-off is the KGCS procedure; stop-while-on is a
+  real shutdown. Both should arm the window.
+- **A refused Start MUST say why.** At boot `_last_stop_seen_ms` is zero, so the very first
+  Start is refused until a Stop has been seen - correct per the procedure, but an operator
+  pressing a button that silently does nothing is the PNU-ISSUE(D6) problem again.
+- **The 300 ms threshold has to sit between the burst interval and the time-to-fire.** KGCS
+  sends at ~10 Hz, so genuine gaps are ~100 ms; the sequence fires at ~1.0 s. 300 ms leaves
+  3x margin on each side.
+- **This slightly tightens D7's documented loss tolerance**, which currently survives
+  arbitrarily long dropouts. That is the point, and it should be recorded against D7 rather
+  than left as a silent change.
+- **Constants or parameters?** Both numbers are procedure-derived rather than tuning, so
+  constants with the reasoning at the site are proposed - but if the bench disagrees they
+  become parameters. UNDECIDED.
+- The staleness timestamp comes from `transmit_slot()`, where a new TC1 is already detected
+  by its sequence number. Sampling is 50 Hz, so ~20 ms of quantisation against a 300 ms
+  window - irrelevant.
+
+**Both guards are engine-start logic, so neither goes in without PNU sign-off on the
+numbers** - 300 ms and 5 s are PNU's, recorded here so the reasoning is not lost.
 
 ---
 

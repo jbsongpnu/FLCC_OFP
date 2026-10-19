@@ -41,7 +41,6 @@
 
 #include <AP_Common/sorting.h>
 #include <AP_Logger/AP_Logger.h>
-#include <AP_PMUCAN/AP_PMUCAN.h>    // PNU
 #include <AP_PNU_CAN/AP_PNU_CAN.h>        // PNU
 #include <AP_PNUSAR/AP_PNUSAR.h>        // PNU
 
@@ -216,14 +215,13 @@ void AP_CANManager::init()
             AP_Param::load_object_from_eeprom((AP_PiccoloCAN*)_drivers[drv_num], AP_PiccoloCAN::var_info);
             break;
 #endif
-        case AP_CAN::Protocol::PMUCAN : // PNU : Custom CAN driver for PMU
-            _drivers[drv_num] = _drv_param[drv_num]._pmucan = NEW_NOTHROW AP_PMUCAN;
-            if (_drivers[drv_num] == nullptr) {
-                AP_BoardConfig::allocation_error("PMUCAN %d", drv_num + 1);
-                continue;
-            }
-            break;
 #if AP_PNU_CAN_ENABLED
+        // PNU : 16 is a DEPRECATED ALIAS for 15, kept so that a bench aircraft configured
+        // during CAN Update Plan step 1 keeps working through this upgrade instead of
+        // hitting the default case below and getting no driver, no parameters and no
+        // message at all.  AP_PNU_CAN warns about it once per boot.  Delete the alias, its
+        // enumerator and the warning when the 5.1.x DEV series goes OFFICIAL.
+        case AP_CAN::Protocol::PNU_CAN_LEGACY :
         case AP_CAN::Protocol::PNU_CAN : // PNU : PMU / gimbal / SAR, private CAN protocols
             _drivers[drv_num] = _drv_param[drv_num]._pnu_can = NEW_NOTHROW AP_PNU_CAN;
             if (_drivers[drv_num] == nullptr) {

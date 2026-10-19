@@ -29,8 +29,10 @@ public:
         Scripting2 = 12,
         TOFSenseP = 13,
         RadarCAN = 14,  // used by NanoRadar and Hexsoon
-        PMUCAN = 15,    // PNU : PNU-KAL HD PMUCAN
-        PNU_CAN = 16,   // PNU : PMU / gimbal / SAR on one bus, private CAN protocols
+        PNU_CAN = 15,   // PNU : PMU / gimbal / SAR on one bus, private CAN protocols
+                        //       (value unchanged from PMUCAN, so no aircraft needs a
+                        //        parameter change)
+        PNU_CAN_LEGACY = 16, // PNU : deprecated alias, delete when 5.1.x goes OFFICIAL
         PNUSAR = 17,    // PNU : SAR radar payload, private CAN protocol
     };
 };

@@ -27,25 +27,22 @@
 #include <AP_Math/AP_Math.h>
 #include <stdio.h>
 
-extern const AP_HAL::HAL& hal;
-
 // -------------------------------------------------------------------------
 // Define variables for CAM
+//
+// Defined OUTSIDE the AP_PNU_CAN_ENABLED guard: GCS_PNU.cpp and ArduCopter/events.cpp
+// reference them unconditionally, so with the CAN driver compiled out they keep their
+// static-init values - exactly the "no PMU fitted" case the failsafe already handles.
 mavlink_sys_icd_flcc_gcs_pmu_status_t       PMU_Status    = {0};  // MAVLINK Message for PMU Status (KAL)
 mavlink_sys_icd_gcs_flcc_pmu_ctrl_echo_t    PMU_Ctrl_Echo = {0};  // MAVLINK Message for PMU Command ECHO (KAL)
 
-AP_PMUCAN::AP_PMUCAN()
+#if AP_PNU_CAN_ENABLED
+
+extern const AP_HAL::HAL& hal;
+
+AP_PMUCAN::AP_PMUCAN(AP_PNU_CAN &frontend) :
+    AP_PNU_CAN_Backend(frontend)
 {
-    _initialized            = false;
-
-    // PNU : must start null - add_interface() reads this before assigning to
-    // detect a second bind, so the "multiple interface" guard depends on it.
-    // Do not rely on the allocator zeroing it.
-    _can_iface              = nullptr;
-    _driver_index           = 0;
-
-    RTR_MSG=PMU_BATSTS;
-
     _handleFrame_cnt        = 0;
     _rtr_tx_cnt             = 0;
     _cmd_tx_cnt             = 0;
@@ -54,16 +51,13 @@ AP_PMUCAN::AP_PMUCAN()
     _short_frame_cnt            = 0;
     _last_short_frame_warn_ms   = 0;
 
-    _rtr_idx                = 0;
-    _cmd_idx                = CMD_ID::CMD_ID_BATCTRL;       // _cmd_idx=0;
 
     _engineonoffmode        = 0;                            // OFF
     _engineoncnt            = 0;
     _engineoffcnt           = 0;
 
-    _pmucan_last_send_us    =0;
-
-    pmucan_period_us        = 1000000UL / PMUCAN_LOOP_HZ;	// 10ms
+    _pmu_frames_seen        = 0;
+    _last_pmu_frame_ms      = 0;
 
     // Initialize RTR ID
     _rtr_id[0]  = PMU_BATSTS    | AP_HAL::CANFrame::FlagEFF | AP_HAL::CANFrame::FlagRTR;
@@ -99,130 +93,90 @@ AP_PMUCAN::~AP_PMUCAN()
 }
 
 // -------------------------------------------------------------------------
-// get_pmucan : Return pmucan from @driver_index or nullptr if it's not ready or doesn't exist
+// init : validate and prepare.  No thread and no interface - AP_PNU_CAN owns both.
 // -------------------------------------------------------------------------
-AP_PMUCAN *AP_PMUCAN::get_pmucan(uint8_t driver_index)
+bool AP_PMUCAN::init(void)
 {
-    if (driver_index >= AP::can().get_num_drivers() ||
-        AP::can().get_driver_type(driver_index) != AP_CAN::Protocol::PMUCAN) {
-        return nullptr;
-    }
-    return static_cast<AP_PMUCAN*>(AP::can().get_driver(driver_index));
-}
-
-// -------------------------------------------------------------------------
-// add_interface : binds the driver to one CAN interface. Called by AP_CANManager during init, 
-// after it allocates the driver for whichever bus has CAN_Dn_PROTOCOL = 15.
-// -------------------------------------------------------------------------
-bool AP_PMUCAN::add_interface(AP_HAL::CANIface* can_iface) {
-
-    if (_can_iface != nullptr) {
-    	hal.console->printf("PMUCAN: Multiple Interface not supported\n\r");
-        gcs().send_text(MAV_SEVERITY_WARNING, "PMUCAN: Multiple Interface not supported");
-        return false;
-    }
-
-    _can_iface = can_iface;
-
-    if (_can_iface == nullptr) {
-    	hal.console->printf("PMUCAN: CAN driver not found\n\r");
-        gcs().send_text(MAV_SEVERITY_WARNING, "PMUCAN: CAN driver not found");
-        return false;
-    }
-
-    if (!_can_iface->is_initialized()) {
-    	hal.console->printf("PMUCAN: Driver not initialized\n\r");
-        gcs().send_text(MAV_SEVERITY_WARNING, "PMUCAN: Driver not initialized");
-        return false;
-    }
-
-    if (!_can_iface->set_event_handle(&sem_handle)) {
-    	hal.console->printf("PMUCAN: Cannot add event handle\n\r");
-        gcs().send_text(MAV_SEVERITY_WARNING, "PMUCAN: Cannot add event handle");
-        return false;
-    }
     return true;
 }
 
+
 // -------------------------------------------------------------------------
-// init : Initialize PMUCAN loop task
+// update : the driver's tick, at AP_PNU_CAN_LOOP_HZ
 // -------------------------------------------------------------------------
-void AP_PMUCAN::init(uint8_t driver_index)
+// The cadence below reproduces the pre-5.1.15 behaviour exactly, but derived from
+// PMUCAN_MSG_RATE_HZ instead of emerging from a 50 Hz rotation nobody had written down.
+// PNU-ISSUE(D7)'s engine interlock depends on engineonoffstate() being reached at 10 Hz;
+// that is now a stated requirement rather than an accident, and it must stay one.
+// -------------------------------------------------------------------------
+void AP_PMUCAN::update(uint32_t tick)
 {
-    if (_initialized) {
-        return;
+    if ((tick % PMUCAN_HEALTH_CHECK_TICKS) == 0) {      // nominal 50 Hz
+        check_health();
     }
 
-    if (_can_iface == nullptr) {
-        return;
+    // one of the five command/RTR slots per stride, so each message goes out at exactly
+    // PMUCAN_MSG_RATE_HZ
+    const uint32_t stride = PMUCAN_SLOT_PERIOD_TICKS / CMD_ID::CMD_ID_NUM;
+    const uint32_t phase  = tick % PMUCAN_SLOT_PERIOD_TICKS;
+    if ((stride > 0) && ((phase % stride) == 0)) {
+        transmit_slot(uint8_t(phase / stride));
     }
 
-    // PNU : assign only on the call that actually starts the driver, so a second
-    // init() cannot repoint it while the loop thread is already running.
-    // (currently write-only - kept for parity with the other AP_*CAN drivers)
-    _driver_index = driver_index;
-
-    snprintf(_thread_name, sizeof(_thread_name), "pmucan");
-
-    if (!hal.scheduler->thread_create(FUNCTOR_BIND_MEMBER(&AP_PMUCAN::loop, void), _thread_name, 2048, AP_HAL::Scheduler::PRIORITY_CAN, 0)) {
-        return;
+    if ((tick % PMUCAN_MAVLINK_INTERVAL) == 0) {        // nominal 10 Hz
+        send2gcs();
     }
 
-    _initialized = true;
-
-}
-
-
-// -------------------------------------------------------------------------
-// loop : 100Hz Task - 50 Hz CAN, 10Hz GCS TX, 1Hz state report
-// -------------------------------------------------------------------------
-void AP_PMUCAN::loop(void)
-{
-    while (true)
-    {
-        if (!_initialized)
-        {
-            hal.scheduler->delay_microseconds(1000);
-            continue;
-        }
-
-        // PNU : fixed delay AFTER the work, matching AP_KDECAN / AP_PiccoloCAN.
-        // The real period is pmucan_period_us plus the body execution time, so
-        // the rates below are nominal upper bounds - worst case (select timeout
-        // + full RX drain budget + 2 TX timeouts) is ~12.5 ms, i.e. ~80 Hz loop
-        // / ~40 Hz CAN. Sized for that, not for exact periodicity.
-        hal.scheduler->delay_microseconds(pmucan_period_us);    // nominal 100Hz task
-
-        if(_AP_PMUCAN_loop_cnt%PMUCAN_MINOR_INTERVAL==0)        // nominal 50 Hz CAN
-        {
-            run();
-        }
-
-        if(_AP_PMUCAN_loop_cnt%PMUCAN_MAVLINK_INTERVAL==0)      // nominal 10Hz GCS TX
-        {
-            send2gcs();     // Send PMU Data to GCS
-        }
-
-        if(_AP_PMUCAN_loop_cnt%PMUCAN_ONRUNNING_INTERVAL==0)    // nominal 1Hz state report
-        {
-            sendchanges();  // Send PMU state to GCS if changed
-        }
-
-        _AP_PMUCAN_loop_cnt++;                                  // 10ms period increase
+    if ((tick % PMUCAN_ONRUNNING_INTERVAL) == 0) {      // nominal 1 Hz
+        sendchanges();
     }
 }
 
 
 // -------------------------------------------------------------------------
-// Run : receive and transmit CAN data
+// check_health : leaky bucket, fed by RECOGNISED PMU STATUS FRAMES
 // -------------------------------------------------------------------------
-void AP_PMUCAN::run(void)
+// This is the PNU-ISSUE(D6) fix that the shared bus forced.  The old RXspin() treated any
+// successful receive as proof of life, so on a bus shared with the gimbal a dead PMU would
+// have read as CONNECTED forever and failsafe_pmucan_check() would never have fired.
+// -------------------------------------------------------------------------
+void AP_PMUCAN::check_health(void)
 {
-    // Receive data 
-    RXspin();
+    const uint32_t now_ms = AP_HAL::millis();
+    const bool pmu_seen = (_pmu_frames_seen > 0) &&
+                          ((now_ms - _last_pmu_frame_ms) <= PMUCAN_FRAME_TIMEOUT_MS);
+    _pmu_frames_seen = 0;
 
-	// Transmit data
-	TXspin();
+    if (PMUCAN_Fail_Status == PMUCAN_STATUS::CONNECTED) {
+        if (pmu_seen) {
+            if (PMUCAN_ErrCnt > 0) {
+                PMUCAN_ErrCnt--;
+            }
+        } else {
+            PMUCAN_ErrCnt++;
+            if (PMUCAN_ErrCnt >= PMUCAN_ERR_MAX_CNT) {
+                PMUCAN_Fail_Status = PMUCAN_STATUS::COMMUNICATION_ERROR;
+                PMUCAN_ErrCnt = 0;
+            }
+        }
+        return;
+    }
+
+    if (pmu_seen) {
+        PMUCAN_RcvrCnt++;
+        if (PMUCAN_RcvrCnt >= PMUCAN_RCVR_MAX_CNT) {
+            PMUCAN_Fail_Status = PMUCAN_STATUS::CONNECTED;
+            PMUCAN_RcvrCnt = 0;
+        }
+    } else if (PMUCAN_RcvrCnt > 0) {
+        PMUCAN_RcvrCnt--;
+    }
+}
+
+
+bool AP_PMUCAN::healthy(void) const
+{
+    return PMUCAN_Fail_Status == PMUCAN_STATUS::CONNECTED;
 }
 
 
@@ -266,132 +220,6 @@ void AP_PMUCAN::sendchanges()
 }
 
 
-// -------------------------------------------------------------------------
-// RXspin : parse buffer and process received data
-// -------------------------------------------------------------------------
-void AP_PMUCAN::RXspin()
-{
-    uint64_t time, timeout;
-    int res = 0;
-
-    const uint32_t timeout_us = MIN(AP::scheduler().get_loop_period_us(), PMUCAN_SEND_TIMEOUT_US);
-    AP_HAL::CANIface::CanIOFlags flags = 0;
-    AP_HAL::CANFrame frame;                     // receive frame
-
-    bool read_select    = true;
-    bool write_select   = false;
-    timeout = timeout_us + AP_HAL::micros64();
-
-    //'Root/AP_HAL_ChibiOS/CanIface.cpp',
-    // bool CANIface::select(bool &read, bool &write, const AP_HAL::CANFrame* pending_tx, uint64_t blocking_deadline)
-    int ret = _can_iface->select(read_select, write_select, nullptr, timeout);
-    if (!ret) {
-        // return if no data is available to read
-        // PNU : stay in CONNECTION_FAILURE until the PMU has been seen at least
-        // once (events.cpp reads that as "not connected yet" and holds off the
-        // failsafe).  After a first successful connect, a select() timeout is a
-        // genuine communication error.
-        if(PMUCAN_Fail_Status != PMUCAN_STATUS::CONNECTION_FAILURE)
-        {
-            PMUCAN_Fail_Status = PMUCAN_STATUS::COMMUNICATION_ERROR;
-        }
-
-        return;
-    }
-
-
-    if(PMUCAN_Fail_Status == PMUCAN_STATUS::CONNECTED)     // Normal Connection with PMU
-    {
-        res = _can_iface->receive(frame, time, flags);
-
-        if(res > 0) // Data Received Normaly
-        {
-            if(PMUCAN_ErrCnt > 0) // Check Error Count
-            {
-                PMUCAN_ErrCnt = PMUCAN_ErrCnt - 1;    // Decrease Error Count
-            }
-
-            RXdrain(frame, flags);
-        }
-        else        // Data Not Received
-        {
-            PMUCAN_ErrCnt = PMUCAN_ErrCnt + 1;          // Increase Error Count
-
-            if(PMUCAN_ErrCnt >= PMUCAN_ERR_MAX_CNT) // Check Max Err Count
-            {
-                PMUCAN_Fail_Status  = PMUCAN_STATUS::COMMUNICATION_ERROR; // Set Communication Error Flag with PMU
-                PMUCAN_ErrCnt       = 0; // Reset Error Count
-            }
-        }
-    }
-    else                            // Abnormal Connection with PMU
-    {
-        res = _can_iface->receive(frame, time, flags);
-
-        if(res > 0) // Data Received Normaly
-        {
-            PMUCAN_RcvrCnt = PMUCAN_RcvrCnt + 1;    // Increase Receive Count
-
-            if(PMUCAN_RcvrCnt >= PMUCAN_RCVR_MAX_CNT) // Check Max Recv Count
-            {
-                PMUCAN_Fail_Status  = PMUCAN_STATUS::CONNECTED; // Clear Communication Error Flag with PMU
-                PMUCAN_RcvrCnt      = 0; // Reset Error Count
-            }
-
-            RXdrain(frame, flags);
-
-        }
-        else        // Data Not Received
-        {
-            if((PMUCAN_RcvrCnt > 0) && (res < 0)) // Check Receive Count
-            {
-                PMUCAN_RcvrCnt = PMUCAN_RcvrCnt - 1;    // Decrease Receive Count
-            }
-        }
-
-    }
-
-}
-
-
-
-// -------------------------------------------------------------------------
-// RXdrain : handle the frame already held in 'frame', then drain whatever else
-//           the controller has queued.  Bounded by PMUCAN_RX_MAX_FRAMES and
-//           PMUCAN_RX_MAX_TIME_US so it cannot stall the PMUCAN thread. (PNU)
-// -------------------------------------------------------------------------
-void AP_PMUCAN::RXdrain(AP_HAL::CANFrame& frame, AP_HAL::CANIface::CanIOFlags& flags)
-{
-    uint64_t time;
-    int res = 1;                            // caller guarantees an unhandled frame
-
-    const uint64_t rx_start_us = AP_HAL::micros64();
-    uint8_t frame_count = 0;
-    //Preventing stuck in a while-loop
-    while(res > 0 &&
-          frame_count < PMUCAN_RX_MAX_FRAMES &&
-          (AP_HAL::micros64() - rx_start_us) < PMUCAN_RX_MAX_TIME_US)
-    {
-        if (!(flags & AP_HAL::CANIface::Loopback))
-        {
-            handleFrame(frame);
-        }
-
-        res = _can_iface->receive(frame, time, flags);     // Try Receive
-        frame_count++;
-    }
-
-    // the frame-count / time budget can break the loop with a frame already
-    // dequeued but not yet handled - process it rather than drop it
-    if (res > 0 && !(flags & AP_HAL::CANIface::Loopback))
-    {
-        handleFrame(frame);
-    }
-}
-
-// -------------------------------------------------------------------------
-// handleFrame : processes 1 CAN frame data
-// -------------------------------------------------------------------------
 // PNU-ISSUE(D6) RESOLVED: the PMU ICD specifies DLC 8 for all five status
 //   messages, so anything shorter is rejected below rather than parsed from the
 //   same fixed offsets - which previously yielded stale bytes as battery
@@ -400,7 +228,7 @@ void AP_PMUCAN::RXdrain(AP_HAL::CANFrame& frame, AP_HAL::CANIface::CanIOFlags& f
 //   matches the STM32, so every field below is read by memcpy straight into a
 //   native integer with no byte swap.  Correct as written - do not "fix" it with
 //   be16toh/be32toh.
-void AP_PMUCAN::handleFrame(const AP_HAL::CANFrame& can_rxframe)
+bool AP_PMUCAN::handle_frame(const AP_HAL::CANFrame& can_rxframe)
 {
     uint8_t     uint8_temp  = 0U;
     uint16_t    uint16_temp = 0U;
@@ -408,6 +236,14 @@ void AP_PMUCAN::handleFrame(const AP_HAL::CANFrame& can_rxframe)
 
     int8_t  int8_temp  = 0U;
     int16_t int16_temp = 0U;
+
+    // The PMU speaks 29-bit EXTENDED frames throughout; the gimbal and the SAR are 11-bit
+    // standard.  Returning false rather than true for anything else is what lets them
+    // share one bus - the driver offers each frame to every backend until one claims it.
+    if (!can_rxframe.isExtended() || can_rxframe.isRemoteTransmissionRequest() ||
+        can_rxframe.isErrorFrame()) {
+        return false;
+    }
 
     const uint32_t frame_id = can_rxframe.id & can_rxframe.MaskExtID;
 
@@ -421,14 +257,20 @@ void AP_PMUCAN::handleFrame(const AP_HAL::CANFrame& can_rxframe)
         case PMU_AUX2STS:
         case PMU_VERSTS:
             if (can_rxframe.dlc < PMUCAN_STS_DLC) {
+                // still OUR frame, so it is claimed - reporting it twice, once here and
+                // once as the driver's unclaimed-frame warning, would be worse
                 report_short_frame(frame_id, can_rxframe.dlc);
-                return;
+                return true;
             }
             break;
 
         default:
-            return;                                     // not a PMU status frame
+            return false;                               // not a PMU status frame
     }
+
+    // a recognised PMU status frame: this, and only this, is proof the PMU is alive
+    _pmu_frames_seen++;
+    _last_pmu_frame_ms = AP_HAL::millis();
 
     switch(frame_id)
     {
@@ -544,6 +386,10 @@ void AP_PMUCAN::handleFrame(const AP_HAL::CANFrame& can_rxframe)
 
             break;
     }
+
+    // claimed: the id was one of ours, so the driver must not offer it to the gimbal or
+    // the SAR and must not count it as an unclaimed frame
+    return true;
 }
 
 // -------------------------------------------------------------------------
@@ -568,9 +414,14 @@ void AP_PMUCAN::report_short_frame(uint32_t frame_id, uint8_t dlc)
 
 
 // -------------------------------------------------------------------------
-// TXspin : Transmit data to PMU
+// transmit_slot : send command @slot and poll status @slot
 // -------------------------------------------------------------------------
-void AP_PMUCAN::TXspin()
+// One slot per call, five slots, called at PMUCAN_MSG_RATE_HZ * CMD_ID_NUM - so each
+// individual message goes out at exactly PMUCAN_MSG_RATE_HZ.  That is the ICD rate, and
+// PNU-ISSUE(D7)'s interlock threshold of 10 ticks is calibrated on this function reaching
+// CMD_ID_ENGONOFF at 10 Hz.  Do not restructure the rotation without re-deriving it.
+// -------------------------------------------------------------------------
+void AP_PMUCAN::transmit_slot(uint8_t slot)
 {
     // Update New Command
     if (PMU_Ctrl_Seq == gcs().PMU_Ctrl_Seq)
@@ -599,7 +450,7 @@ void AP_PMUCAN::TXspin()
 
 
     // Send PMU Control Command to PMU
-    switch(_cmd_idx)
+    switch(slot)
     {
         case CMD_ID::CMD_ID_BATCTRL:
             if(pmucan_cmd(_cmd_id[CMD_ID::CMD_ID_BATCTRL], _pmu_ctrl_cmd.Battery_Control_CMD)>0)        // 0~9, 10~100%
@@ -639,21 +490,11 @@ void AP_PMUCAN::TXspin()
             break;
     }
 
-    _cmd_idx++;
-    if(_cmd_idx>=CMD_ID::CMD_ID_NUM)
-    {
-        _cmd_idx=CMD_ID::CMD_ID_BATCTRL;	//_cmd_idx=0;
+    // poll the matching status message.  The command and RTR indices advanced together
+    // before 5.1.15 and still do - one slot drives both.
+    if (slot < RTR_ID_NUM) {
+        pmucan_rtr(_rtr_id[slot]);
     }
-
-    // send RTR
-    pmucan_rtr(_rtr_id[_rtr_idx]);
-
-    _rtr_idx++;
-    if(_rtr_idx>=RTR_ID_NUM)
-    {
-        _rtr_idx=0;
-    }
-
 }
 
 
@@ -670,11 +511,9 @@ int AP_PMUCAN::pmucan_cmd(uint32_t can_id, uint32_t data_cmd)
     // straight into the frame with no byte swap.
     memcpy(can_data, &data_cmd, msgdlc);
 
-    AP_HAL::CANFrame out_frame;
-    uint64_t timeout = AP_HAL::micros64() + PMUCAN_SEND_TIMEOUT_US;                      // Should have timeout value
-
-    out_frame       = {can_id, can_data, msgdlc};                                               // id, data[8], dlc
-    cmd_send_res    = _can_iface->send(out_frame, timeout, AP_HAL::CANIface::AbortOnError);     // using CANIface::send from libraries/AP_HAL_ChibiOS/CANIface.cpp
+    // AP_PNU_CAN owns the interface and is the single place a frame reaches the bus.
+    // @can_id already carries FlagEFF; send_frame() passes the full 32-bit id through.
+    cmd_send_res    = send_frame(can_id, can_data, msgdlc) ? 1 : 0;
 
     if(cmd_send_res==1)
 	{
@@ -861,11 +700,8 @@ int AP_PMUCAN::pmucan_rtr(uint32_t can_id)
     int rtr_send_res=0;
     uint8_t can_data[8]={0};    //Always dummy zeros
 
-    AP_HAL::CANFrame out_frame;
-    uint64_t timeout = AP_HAL::micros64() + PMUCAN_SEND_TIMEOUT_US;                      // Should have timeout value
-
-    out_frame       = {can_id, can_data, 8};                                                    // id, data[8], dlc
-    rtr_send_res    = _can_iface->send(out_frame, timeout, AP_HAL::CANIface::AbortOnError);     // using CANIface::send from libraries/AP_HAL_ChibiOS/CANIface.cpp
+    // @can_id carries FlagEFF | FlagRTR; the driver's send_frame() does not mask them
+    rtr_send_res    = send_frame(can_id, can_data, 8) ? 1 : 0;
 
     if(rtr_send_res==1)
     {
@@ -885,3 +721,5 @@ int AP_PMUCAN::pmucan_rtr(uint32_t can_id)
 
     return rtr_send_res;    // PNU : was unconditionally 0; match pmucan_cmd()
 }
+
+#endif  // AP_PNU_CAN_ENABLED

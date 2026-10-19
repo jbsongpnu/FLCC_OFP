@@ -52,7 +52,6 @@
 //     checked against what the chosen CubeMars mode wants; the manual specifies no
 //     command period at all, so it needs measuring.
 
-#define AP_PNU_CAN_LOOP_HZ             (100U)     // thread rate, 10 ms
 #define AP_PNU_CAN_SELECT_TIMEOUT_US   (2000U)    // RX select(), well inside one tick
 #define AP_PNU_CAN_SEND_TIMEOUT_US     (2000U)    // TX deadline handed to the interface
 #define AP_PNU_CAN_RX_MAX_FRAMES       (24U)      // drain budget, frames per tick
@@ -180,7 +179,6 @@ private:
 
     char _init_error[58] = {};              // empty means "no failure recorded"
     bool _startup_reported = false;
-    bool _pmu_requested = false;            // OPTS bit 0 set but no PMU backend yet
 
     uint32_t _loop_cnt = 0;
 
