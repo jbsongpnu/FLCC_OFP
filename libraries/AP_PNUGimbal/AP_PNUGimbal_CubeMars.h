@@ -86,6 +86,7 @@ protected:
     void transmit(uint32_t tick) override;
     bool status_is_enabled(uint8_t status) const override { return status == STATUS_ENABLED; }
     bool status_is_fault(uint8_t status) const override;
+    bool homing_supported(const char *&reason) const override;
 
 public:
 

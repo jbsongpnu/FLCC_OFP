@@ -124,6 +124,16 @@ public:
     float    get_mech_limit_rad(uint8_t axis) const;
     float    get_slew_rate_degs(void) const { return _slew_rate_degs.get(); }
     bool     get_maintenance(void) const;
+    float    get_axis_direction(uint8_t axis) const;
+    float    get_operating_margin_degs(void) const { return _operating_margin_degs.get(); }
+    bool     get_homing_enabled(void) const    { return _homing_enabled.get() != 0; }
+    float    get_homing_vel_degs(void) const   { return _homing_vel_degs.get(); }
+    float    get_homing_kd(void) const         { return _homing_kd.get(); }
+    float    get_homing_kp(void) const         { return _homing_kp.get(); }
+    uint32_t get_homing_stall_ms(void) const   { const int32_t v = _homing_stall_ms.get(); return (v > 0) ? uint32_t(v) : 0U; }
+    float    get_homing_stall_delta_degs(void) const    { return _homing_stall_delta_degs.get(); }
+    float    get_homing_range_tol_degs(void) const      { return _homing_range_tol_degs.get(); }
+    float    get_homing_reconfirm_tol_degs(void) const  { return _homing_reconfirm_tol_degs.get(); }
     float    get_p_max(void) const      { return _p_max.get(); }
     float    get_v_max(void) const      { return _v_max.get(); }
     float    get_kp_max(void) const     { return _kp_max.get(); }
@@ -199,6 +209,16 @@ private:
     AP_Float _mech_limit_deg[AP_PNUGIMBAL_NUM_AXES];
     AP_Float _slew_rate_degs;
     AP_Int8  _maintenance;
+    AP_Int8  _homing_enabled;
+    AP_Float _homing_vel_degs;
+    AP_Float _homing_kd;
+    AP_Float _homing_kp;
+    AP_Int32 _homing_stall_ms;
+    AP_Float _homing_stall_delta_degs;
+    AP_Float _homing_range_tol_degs;
+    AP_Float _homing_reconfirm_tol_degs;
+    AP_Float _operating_margin_degs;
+    AP_Int8  _axis_reversed[AP_PNUGIMBAL_NUM_AXES];
 };
 
 namespace AP {

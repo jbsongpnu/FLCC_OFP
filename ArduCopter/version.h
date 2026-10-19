@@ -7,7 +7,7 @@
 #include "ap_version.h"
 
 // PNU : This is a custom code modified by PNU Drone
-#define THISFIRMWARE "PNU_OFP V5.1.13"
+#define THISFIRMWARE "PNU_OFP V5.1.14"
 
 // NOTE: 5.1.6 is a DEV build on top of the 5.1.0 OFFICIAL release, which closed the
 // Copter-4.7.1 -> FLCC migration.  It closes D10 Stage 3: TM2's Zoom_POS_FB now carries
@@ -22,6 +22,69 @@
 // and a send_camera_settings() override that forwards real values instead of upstream's
 // NaN placeholders are all vendor-neutral and worth submitting to ArduPilot; only
 // AP_Q30 decides the value means times, which is where PNU-specific facts belong.
+//
+// 5.1.14 is CAN Update Plan step 1d: HOMING, the Appendix 1 endpoint search.
+//
+// This is the most hazardous routine in the driver.  It deliberately drives a bulky SAR
+// payload into three sets of mechanical hard stops, with the mechanical clamp DISABLED -
+// before the zero is found that clamp is relative to wherever the mount powered up, so
+// honouring it would prevent ever reaching an endpoint.  The only protection is the bounded
+// stiffness and torque the homing commands carry.
+//
+// CAN_Dn_PNU_HOME THEREFORE DEFAULTS TO 0.  The stall threshold, approach velocity and the
+// two gains are parameters with provisional defaults and are NOT yet bench-measured; the
+// only value PNU has settled is the 1 second stall dwell.  Nothing drives into a stop until
+// somebody turns this on deliberately.  With it off the driver says so once per boot -
+// "PNU_HOME=0, zero not found - limits are relative" - and the zero is set by hand.
+//
+// WHY MIT MODE IS MANDATORY, and it is enforced: MIT is the only mode in which the host
+// bounds the push into a stop.  A sweep sends kp=0, kd=PNU_HKD, v=+-PNU_HVEL, which is
+// velocity-style impedance control, so at stall the torque settles at HKD*HVEL - a number
+// the operator picks.  A position/velocity-mode command runs a cascaded loop whose torque
+// cannot be limited from the CAN frame at all.  init() refuses to arm the sequence in any
+// other mode, naming PNU_MODE in the message.
+//
+// ENDPOINT DETECTION IS BY ANGLE ONLY, per Appendix 1 item 4: overcurrent, undervoltage and
+// overload are emergency stop conditions, NOT endpoint criteria.  An endpoint is "the angle
+// stopped changing while motion was still commanded"; any fault status aborts the sequence.
+//
+// Sequence per axis, in the order roll, pitch, yaw - roll first because the mass offset is
+// on that axis, yaw last because it is safer to swing the payload with pitch neutral: seek
+// a stop, back off 2% of travel, seek again and require the two readings to agree within
+// PNU_HRTOL; repeat the other way; validate the stop-to-stop travel against twice the
+// mechanical limit within PNU_HTOL; move to the midpoint; confirm motion has stopped; send
+// the zero; verify the feedback reads zero.  The idle axes are HELD at their power-up angle
+// throughout, because the manual does not define what an enabled motor does with no command
+// outstanding and a swinging payload is the collision the limits exist to prevent.
+//
+// TRAVEL VALIDATION IS THE ONLY RUNTIME CHECK that can catch a PNU_PMAX mismatch - the
+// failure the protocol note warns about, which does not fail but silently rescales every
+// command and every reading.  A factor-of-two travel reading is its signature and nothing
+// else in the system would notice.
+//
+// Settled with PNU 2026-10-19 and in this version:
+//   - TRAVEL VALIDATION IS ASYMMETRIC.  The lower bound is twice (mechanical limit minus
+//     CAN_Dn_PNU_MARG), i.e. the mount must reach its own operating range - 50 degrees on a
+//     60 degree axis - and below that it aborts as obstructed.  A measurement between the
+//     operating and mechanical ranges is ACCEPTED and the MNT1_* operating limits stay at
+//     their nominal values; they are NOT derived from the measurement, because stop
+//     compliance under a heavy payload would make the mount's reach vary with how hard it
+//     happened to press.  The upper bound stays mechanical + PNU_HTOL, since compliance only
+//     ever reads smaller and an over-reading means a false endpoint or a PMAX mismatch.
+//   - PER-AXIS ROTATION DIRECTION, CAN_Dn_PNU_DRLL / DPIT / DYAW.  The mount is still
+//     undergoing mechanical design changes, so which way a motor turns for a positive
+//     command is configuration rather than a source constant.  Everything inside
+//     AP_PNUGimbal_Backend is stored in the MOTOR frame and the conversion happens in
+//     exactly two places - set_target() in, get_feedback() out - so there is one pair of
+//     boundaries to reason about instead of a sign scattered through the code.  Homing is
+//     unaffected: it finds both stops and takes the midpoint, which is direction-agnostic.
+//
+// Two hazards found while writing it, both fixed: the VERIFY phase originally commanded
+// position 0 before confirming the zero had been sent, which would have meant the OLD origin
+// - possibly tens of degrees away - and lurched the payload across its travel; and HOMING
+// was reachable from a second INIT, so clearing a fault IN FLIGHT would have re-run the
+// endpoint search mid-air.  Homing is now once per POWER CYCLE (the zero lives in the drive
+// and survives a disable/enable) and is refused while hal.util->get_soft_armed().
 //
 // 5.1.13 is CAN Update Plan step 1c: the gimbal lifecycle state machine.
 //
@@ -259,11 +322,11 @@
 // must stay in step with the three defines below (static_assert in Copter.cpp, D4).
 
 // the following line is parsed by the autotest scripts
-#define FIRMWARE_VERSION 5,1,13,FIRMWARE_VERSION_TYPE_DEV
+#define FIRMWARE_VERSION 5,1,14,FIRMWARE_VERSION_TYPE_DEV
 
 #define FW_MAJOR 5
 #define FW_MINOR 1
-#define FW_PATCH 13
+#define FW_PATCH 14
 #define FW_TYPE FIRMWARE_VERSION_TYPE_DEV
 
 #include <AP_Common/AP_FWVersionDefine.h>

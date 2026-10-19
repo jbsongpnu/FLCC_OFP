@@ -8,6 +8,8 @@
 
 #include <AP_PNU_CAN/AP_PNU_CAN.h>
 
+extern const AP_HAL::HAL &hal;
+
 const char *AP_PNUGimbal_Backend::axis_name(uint8_t axis)
 {
     switch (axis) {
@@ -45,6 +47,19 @@ bool AP_PNUGimbal_Backend::init(void)
         }
     }
 
+    _operating_margin_rad = radians(_frontend.get_operating_margin_degs());
+    if (!isfinite(_operating_margin_rad) || !is_positive(_operating_margin_rad)) {
+        _frontend.set_init_error("PNU_MARG must be > 0");
+        return false;
+    }
+    for (uint8_t axis = 0; axis < AP_PNUGIMBAL_NUM_AXES; axis++) {
+        if (_operating_margin_rad >= _mech_limit_rad[axis]) {
+            _frontend.set_init_error("PNU_MARG exceeds %s mech limit", axis_name(axis));
+            return false;
+        }
+        _axis_dir[axis] = _frontend.get_axis_direction(axis);
+    }
+
     const float slew_degs = _frontend.get_slew_rate_degs();
     if (!isfinite(slew_degs) || is_negative(slew_degs)) {
         _frontend.set_init_error("PNU_SLEW must be >= 0");
@@ -52,9 +67,59 @@ bool AP_PNUGimbal_Backend::init(void)
     }
     _slew_rate_rads = radians(slew_degs);
 
+    _homing_enabled = _frontend.get_homing_enabled();
+    if (_homing_enabled) {
+        _homing_vel_rads         = radians(_frontend.get_homing_vel_degs());
+        _homing_kd               = _frontend.get_homing_kd();
+        _homing_kp               = _frontend.get_homing_kp();
+        _homing_stall_ms         = _frontend.get_homing_stall_ms();
+        _homing_stall_delta_rad  = radians(_frontend.get_homing_stall_delta_degs());
+        _homing_range_tol_rad    = radians(_frontend.get_homing_range_tol_degs());
+        _homing_reconfirm_tol_rad = radians(_frontend.get_homing_reconfirm_tol_degs());
+
+        if (!is_positive(_homing_vel_rads) || !is_positive(_homing_kd) ||
+            !is_positive(_homing_kp) || (_homing_stall_ms == 0) ||
+            !is_positive(_homing_stall_delta_rad) ||
+            !is_positive(_homing_range_tol_rad) ||
+            !is_positive(_homing_reconfirm_tol_rad)) {
+            _frontend.set_init_error("PNU_H* homing values must all be > 0");
+            return false;
+        }
+
+        // the reconfirm tolerance has to be smaller than the backoff, or the second
+        // approach starts inside the tolerance band and proves nothing
+        for (uint8_t axis = 0; axis < AP_PNUGIMBAL_NUM_AXES; axis++) {
+            const float backoff_rad = homing_nominal_travel_rad(axis) *
+                                      AP_PNUGIMBAL_HOMING_BACKOFF_FRAC;
+            if (_homing_reconfirm_tol_rad >= backoff_rad) {
+                _frontend.set_init_error("PNU_HRTOL too large for %s backoff",
+                                         axis_name(axis));
+                return false;
+            }
+        }
+    }
+
     if (!protocol_init()) {
         // protocol_init() has recorded why
         return false;
+    }
+
+    // asked after protocol_init(), because only the protocol knows whether its current
+    // configuration can run the sequence safely - for CubeMars that means MIT mode
+    if (_homing_enabled) {
+        // Refusing the whole gimbal backend rather than just skipping homing is
+        // deliberate.  Skipping it would let the mount reach RUN, which makes healthy()
+        // true and lets the vehicle arm on a mount whose limits are relative to wherever
+        // it powered up - while the operator believes homing happened.  Refusing keeps
+        // healthy() false, so the arming interlock still bites.
+        //
+        // The parameter that has to change is @RebootRequired, hence the instruction.
+        const char *reason = nullptr;
+        if (!homing_supported(reason)) {
+            _frontend.set_init_error("homing needs %s, reboot",
+                                     reason != nullptr ? reason : "?");
+            return false;
+        }
     }
 
     // MAINTENANCE is latched at init and held until reboot.  Entering is live, leaving is
@@ -116,6 +181,10 @@ void AP_PNUGimbal_Backend::set_state(State state, const char *reason)
         queue_enable(true);
         break;
 
+    case State::HOMING:
+        start_homing();
+        break;
+
     case State::ALIGN:
         seed_commanded_from_feedback();
         break;
@@ -130,7 +199,6 @@ void AP_PNUGimbal_Backend::set_state(State state, const char *reason)
         }
         break;
 
-    case State::HOMING:
     case State::RUN:
         break;
     }
@@ -161,11 +229,34 @@ void AP_PNUGimbal_Backend::run_state_machine(void)
             }
         }
         if (all_axes_enabled()) {
-            // STEP 1d inserts HOMING here.  Until the Appendix 1 endpoint search exists,
-            // the zero is wherever the mount powered up - the encoder is relative and its
-            // zero is assumed not to persist - so the mechanical clamp protects nothing
-            // and the zero must be set by hand on the bench.
-            set_state(State::ALIGN, "all axes enabled");
+            // HOMING is needed once per POWER CYCLE, not once per INIT.  The encoder zero
+            // lives in the drive and survives a disable/enable - only removing power loses
+            // it - so a second INIT after a fault has been cleared is still working in the
+            // frame the first homing established.  Re-running the endpoint search then
+            // would drive the payload into its stops for no reason.
+            //
+            // And it must never run while armed.  Normally that cannot happen, because
+            // healthy() is false outside RUN so the vehicle cannot be armed before homing
+            // finishes - but ARMING_SKIPCHK bit 16 lets an operator arm anyway, and a
+            // fault cleared in flight would otherwise re-enter HOMING mid-air.
+            const bool armed = hal.util->get_soft_armed();
+            if (_homing_enabled && !_homed_this_boot && !armed) {
+                set_state(State::HOMING, "all axes enabled");
+            } else if (_homing_enabled && armed) {
+                GCS_SEND_TEXT(MAV_SEVERITY_WARNING,
+                              "PNUGimbal: homing skipped, vehicle is armed");
+                set_state(State::ALIGN, "armed, homing skipped");
+            } else if (_homing_enabled) {
+                set_state(State::ALIGN, "already homed this boot");
+            } else {
+                // CAN_Dn_PNU_HOME is 0, so the zero is wherever the mount powered up -
+                // the encoder is relative and its zero is assumed not to persist.  The
+                // mechanical clamp therefore protects nothing and the zero has to be set
+                // by hand.  Said once per boot rather than left to be discovered.
+                GCS_SEND_TEXT(MAV_SEVERITY_WARNING,
+                              "PNUGimbal: PNU_HOME=0, zero not found - limits are relative");
+                set_state(State::ALIGN, "all axes enabled, homing skipped");
+            }
             return;
         }
         if ((now_ms - _state_entered_ms) > AP_PNUGIMBAL_INIT_TIMEOUT_MS) {
@@ -174,8 +265,7 @@ void AP_PNUGimbal_Backend::run_state_machine(void)
         return;
 
     case State::HOMING:
-        // not reachable in this version; if it ever is, say so rather than sit silently
-        set_state(State::FAULT, "HOMING not implemented");
+        run_homing();
         return;
 
     case State::ALIGN:
@@ -269,6 +359,13 @@ void AP_PNUGimbal_Backend::set_target(uint8_t axis, const AP_PNUGimbal_Target &t
 
     _axis[axis].target = target;
 
+    // Into the MOTOR frame.  See _axis_dir - this and get_feedback() are the only two
+    // places the mount convention and the motor convention meet.
+    const float dir = _axis_dir[axis];
+    _axis[axis].target.position_rad = target.position_rad * dir;
+    _axis[axis].target.velocity_rads = target.velocity_rads * dir;
+    _axis[axis].target.torque_nm = target.torque_nm * dir;
+
     // MECHANICAL LIMIT - the hard stop, applied in the layer that owns the wire.
     //
     // MNT1_ROLL/PITCH/YAW_MIN/MAX carry the OPERATING limits and AP_Mount has already
@@ -281,7 +378,7 @@ void AP_PNUGimbal_Backend::set_target(uint8_t axis, const AP_PNUGimbal_Target &t
     // are relative to wherever the mount powered up.
     const float mech_rad = _mech_limit_rad[axis];
     if (is_positive(mech_rad)) {
-        _axis[axis].target.position_rad = constrain_float(target.position_rad,
+        _axis[axis].target.position_rad = constrain_float(_axis[axis].target.position_rad,
                                                           -mech_rad, mech_rad);
     }
 
@@ -294,6 +391,13 @@ bool AP_PNUGimbal_Backend::get_feedback(uint8_t axis, AP_PNUGimbal_Feedback &fee
         return false;
     }
     feedback = _axis[axis].feedback;
+
+    // back out of the MOTOR frame into the mount's convention
+    const float dir = _axis_dir[axis];
+    feedback.position_rad *= dir;
+    feedback.velocity_rads *= dir;
+    feedback.torque_nm *= dir;
+
     return feedback.valid;
 }
 

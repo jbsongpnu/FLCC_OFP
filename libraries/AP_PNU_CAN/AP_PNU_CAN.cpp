@@ -171,6 +171,108 @@ const AP_Param::GroupInfo AP_PNU_CAN::var_info[] = {
     // @User: Advanced
     AP_GROUPINFO("MAINT", 17, AP_PNU_CAN, _maintenance, 0),
 
+    // @Param: HOME
+    // @DisplayName: PNU gimbal homing at boot
+    // @Description: Run the Appendix 1 endpoint search at every boot to find the mechanical centre. The drives use a relative encoder whose zero is assumed not to persist, so without this the angle limits are relative to wherever the mount powered up and the mechanical clamp protects nothing. DEFAULTS TO 0 because homing deliberately drives the payload into its hard stops and the PNU_H* tuning below is not yet bench-measured - turn it on once it is. Requires PNU_MODE 0 (MIT).
+    // @Values: 0:Disabled - zero set by hand,1:Home at boot
+    // @User: Advanced
+    // @RebootRequired: True
+    AP_GROUPINFO("HOME", 18, AP_PNU_CAN, _homing_enabled, 0),
+
+    // @Param: HVEL
+    // @DisplayName: PNU gimbal homing approach speed
+    // @Description: Speed at which an axis approaches its mechanical stop while homing. With PNU_HKD this sets how hard the payload pushes on the stop - the stall torque is HKD multiplied by this speed in radians per second. Provisional default, needs bench measurement.
+    // @Units: deg/s
+    // @Range: 1 60
+    // @User: Advanced
+    // @RebootRequired: True
+    AP_GROUPINFO("HVEL", 19, AP_PNU_CAN, _homing_vel_degs, 10.0f),
+
+    // @Param: HKD
+    // @DisplayName: PNU gimbal homing damping
+    // @Description: Damping term used throughout homing. During an approach the stall torque is this value multiplied by PNU_HVEL in radians per second, which is the only thing bounding the push into a hard stop - choose it deliberately. Provisional default, needs bench measurement.
+    // @Range: 0.01 5
+    // @User: Advanced
+    // @RebootRequired: True
+    AP_GROUPINFO("HKD", 20, AP_PNU_CAN, _homing_kd, 0.5f),
+
+    // @Param: HKP
+    // @DisplayName: PNU gimbal homing stiffness
+    // @Description: Stiffness used to hold an axis in position during homing - both for the idle axes while another is sweeping, and for the move to the midpoint. Deliberately low. Provisional default, needs bench measurement.
+    // @Range: 0.1 100
+    // @User: Advanced
+    // @RebootRequired: True
+    AP_GROUPINFO("HKP", 21, AP_PNU_CAN, _homing_kp, 5.0f),
+
+    // @Param: HSTL
+    // @DisplayName: PNU gimbal homing stall dwell
+    // @Description: How long an axis must move less than PNU_HDLT, while motion is still commanded, before it counts as having reached its mechanical stop. Endpoint detection is by angle only - the overcurrent and overload status codes are emergency stops, not endpoint criteria.
+    // @Units: ms
+    // @Range: 100 5000
+    // @User: Advanced
+    // @RebootRequired: True
+    AP_GROUPINFO("HSTL", 22, AP_PNU_CAN, _homing_stall_ms, 1000),
+
+    // @Param: HDLT
+    // @DisplayName: PNU gimbal homing stall threshold
+    // @Description: Movement below this over the PNU_HSTL window counts as stopped. Too small and encoder noise prevents a stall ever being detected; too large and the axis is called stopped while still creeping. Provisional default, needs bench measurement.
+    // @Units: deg
+    // @Range: 0.01 5
+    // @User: Advanced
+    // @RebootRequired: True
+    AP_GROUPINFO("HDLT", 23, AP_PNU_CAN, _homing_stall_delta_degs, 0.1f),
+
+    // @Param: HTOL
+    // @DisplayName: PNU gimbal homing travel tolerance
+    // @Description: How far the measured stop-to-stop travel may differ from twice the mechanical limit before homing fails. Much less than expected means something is obstructing the payload; much more means an endpoint was not an endpoint; about double or half means PNU_PMAX does not match the range configured in the motor, which is the only runtime check that can catch that. Provisional default - stop compliance under a heavy payload may consume most of it.
+    // @Units: deg
+    // @Range: 0.5 20
+    // @User: Advanced
+    // @RebootRequired: True
+    AP_GROUPINFO("HTOL", 24, AP_PNU_CAN, _homing_range_tol_degs, 3.0f),
+
+    // @Param: HRTOL
+    // @DisplayName: PNU gimbal homing reconfirm tolerance
+    // @Description: How closely the two approaches to the same mechanical stop must agree. Tighter than PNU_HTOL and answering a different question - was that a real endpoint, rather than is the axis obstructed. Must be smaller than the backoff between approaches, which is 2 percent of the axis travel.
+    // @Units: deg
+    // @Range: 0.05 5
+    // @User: Advanced
+    // @RebootRequired: True
+    AP_GROUPINFO("HRTOL", 25, AP_PNU_CAN, _homing_reconfirm_tol_degs, 0.5f),
+
+    // @Param: MARG
+    // @DisplayName: PNU gimbal operating margin
+    // @Description: How far inside the mechanical limit the operating limit sits, per side. Homing requires the measured stop-to-stop travel to be at least twice the resulting operating limit - with the defaults that is 50 degrees on a 60 degree axis - because a mount that cannot reach its own operating range has something obstructing it. Keep MNT1_ROLL/PITCH/YAW_MIN/MAX consistent with this; they are not derived from it.
+    // @Units: deg
+    // @Range: 0.5 30
+    // @User: Advanced
+    // @RebootRequired: True
+    AP_GROUPINFO("MARG", 26, AP_PNU_CAN, _operating_margin_degs, 5.0f),
+
+    // @Param: DRLL
+    // @DisplayName: PNU gimbal roll direction
+    // @Description: Rotation direction of the roll motor relative to the mount convention. 0 if a positive commanded angle increases the reported encoder position, 1 if it decreases it. The gimbal is still undergoing mechanical design changes, so this is a parameter rather than a source constant.
+    // @Values: 0:Normal,1:Reversed
+    // @User: Advanced
+    // @RebootRequired: True
+    AP_GROUPINFO("DRLL", 27, AP_PNU_CAN, _axis_reversed[AP_PNUGIMBAL_AXIS_ROLL], 0),
+
+    // @Param: DPIT
+    // @DisplayName: PNU gimbal pitch direction
+    // @Description: Rotation direction of the pitch motor relative to the mount convention. 0 if a positive commanded angle increases the reported encoder position, 1 if it decreases it. See DRLL.
+    // @Values: 0:Normal,1:Reversed
+    // @User: Advanced
+    // @RebootRequired: True
+    AP_GROUPINFO("DPIT", 28, AP_PNU_CAN, _axis_reversed[AP_PNUGIMBAL_AXIS_PITCH], 0),
+
+    // @Param: DYAW
+    // @DisplayName: PNU gimbal yaw direction
+    // @Description: Rotation direction of the yaw motor relative to the mount convention. 0 if a positive commanded angle increases the reported encoder position, 1 if it decreases it. See DRLL.
+    // @Values: 0:Normal,1:Reversed
+    // @User: Advanced
+    // @RebootRequired: True
+    AP_GROUPINFO("DYAW", 29, AP_PNU_CAN, _axis_reversed[AP_PNUGIMBAL_AXIS_YAW], 0),
+
     AP_GROUPEND
 };
 
@@ -373,7 +475,9 @@ void AP_PNU_CAN::report_startup(void)
                       bus);
     }
     if (_init_error[0] != '\0') {
-        GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "PNU_CAN: CAN_D%u %s", bus, _init_error);
+        // CRITICAL, not WARNING: an init error means a backend this configuration asked
+        // for is NOT RUNNING.  It is reported once per boot and the operator has to act.
+        GCS_SEND_TEXT(MAV_SEVERITY_CRITICAL, "PNU_CAN: CAN_D%u %s", bus, _init_error);
     }
 }
 
@@ -519,6 +623,16 @@ void AP_PNU_CAN::report_unclaimed(uint32_t can_id)
 // True while CAN_Dn_PNU_MAINT asks for maintenance.  The gimbal layer LATCHES this at
 // init rather than following it live, so clearing the parameter does not silently put a
 // reconfigured motor back on the bus - see the parameter description.
+// +1.0 or -1.0 for one axis.  The gimbal is still undergoing mechanical design changes, so
+// which way a motor turns for a positive command is configuration, not a source constant.
+float AP_PNU_CAN::get_axis_direction(uint8_t axis) const
+{
+    if (axis >= AP_PNUGIMBAL_NUM_AXES) {
+        return 1.0f;
+    }
+    return (_axis_reversed[axis].get() != 0) ? -1.0f : 1.0f;
+}
+
 bool AP_PNU_CAN::get_maintenance(void) const
 {
     return _maintenance.get() != 0;

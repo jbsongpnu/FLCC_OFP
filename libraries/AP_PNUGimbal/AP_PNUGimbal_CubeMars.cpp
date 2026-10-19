@@ -260,6 +260,20 @@ bool AP_PNUGimbal_CubeMars::any_pending(void) const
 // sec 7 : 0 is disabled and 1 is enabled; everything the table lists above that is a
 // fault.  Codes the table does not list are deliberately NOT treated as faults - they are
 // unknown, and guessing either way would be worse than reporting the raw value.
+// Appendix 1 item 2 specifies MIT mode, and the reason is that MIT is the only mode in
+// which the host bounds the torque pushed into a hard stop - kp = 0 with kd and v chosen
+// gives a stall torque of kd * v.  A position/velocity-mode command runs a cascaded loop
+// whose torque cannot be limited from the CAN frame at all, so driving a bulky payload into
+// a mechanical stop in that mode is refused rather than attempted.
+bool AP_PNUGimbal_CubeMars::homing_supported(const char *&reason) const
+{
+    if (_mode != Mode::MIT) {
+        reason = "PNU_MODE=0";
+        return false;
+    }
+    return true;
+}
+
 bool AP_PNUGimbal_CubeMars::status_is_fault(uint8_t status) const
 {
     switch (status) {
