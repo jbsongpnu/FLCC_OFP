@@ -77,6 +77,37 @@ extern mavlink_sys_icd_gcs_flcc_pmu_ctrl_echo_t         PMU_Ctrl_Echo;      // P
 #define PMUCAN_STS_DLC (8U)
 #define PMUCAN_SHORT_FRAME_WARN_MS (10000U)     // rate limit for the short-frame warning
 
+// PNU-ISSUE(D7) / CAN Update Plan step 2c : the two engine-start interlock windows.
+// BOTH NUMBERS ARE PNU'S and both are bounded from opposite directions - see the step 2c
+// section of README.md.  They are constants rather than parameters because they are
+// derived from the KGCS operating procedure, not tuned.
+//
+// TC1 STALENESS.  engineonoffstate()'s counters are a tick timer, not a count of operator
+// alternations: the command pair only changes when a new TC1 arrives, but the function
+// runs at 10 Hz regardless, so a pair frozen in a valid alternating state KEEPS COUNTING.
+// That is what makes the interlock tolerate dropped messages - and it also means a link
+// dying mid-burst completes the start on its own about a second later, with no further
+// operator input.  Below this, counting stops.
+//   It is squeezed from both sides: it must exceed the genuine ~100 ms inter-message gap,
+//   and it must land before the counter reaches 10 (~1.0 s).  500 ms reaches 5 of 10.
+//   Raised from 300 ms by PNU to absorb LTE server and network delay - the link is a
+//   cellular modem, not a radio.  DO NOT GO PAST ~700 ms, and >= 1000 ms is useless
+//   because the start fires first.
+#define PMUCAN_TC1_STALE_MS (500U)
+
+// STOP BEFORE START.  KGCS forces a Stop before a Start as a procedural safety guard, so
+// the FC requires the same and refuses a Start that does not follow a recent Stop.  This
+// covers the link dying BETWEEN the two, where a queued Start arrives after reconnect.
+//   10 s, NOT 5: KGCS disables both buttons for about 5 s after either is pressed, so the
+//   operator physically cannot press Start until ~5 s after the Stop.  A 5 s window would
+//   have expired before the button came back and Start would have been impossible.  10 s
+//   leaves roughly 5 s for the lockout plus human reaction, and is still short enough that
+//   an outage spanning more than one button cycle invalidates the sequence.
+#define PMUCAN_STOP_WINDOW_MS (10000U)
+
+// rate limit for the "Start refused" warning, which would otherwise repeat at 10 Hz
+#define PMUCAN_START_REFUSED_WARN_MS (3000U)
+
 class PMU_CTRL_CMD
 {
 public:
@@ -118,6 +149,13 @@ public:
     void engineonmode(void);
     void engineoffmode(void);
     void report_short_frame(uint32_t frame_id, uint8_t dlc);    // PNU-ISSUE(D6)
+
+    // PNU-ISSUE(D7) / step 2c
+    void note_new_tc1(void);                    // timestamp a NEW TC1 and arm the Stop window
+    bool tc1_is_stale(uint32_t now_ms) const;
+    bool start_permitted(uint32_t now_ms);      // reports the refusal, rate limited
+    void count_start_pair(void);                // _engineoncnt++, stamping the first one
+
     int pmucan_cmd(uint32_t can_id, uint32_t data_cmd);
     int pmucan_rtr(uint32_t can_id);
     /**
@@ -174,6 +212,15 @@ private:
     uint32_t _engineonoffmode;                                      // 0: OFF, 1: ON
 	uint32_t _engineoncnt;
 	uint32_t _engineoffcnt;
+
+    // PNU-ISSUE(D7) / step 2c : the two interlock windows.  All three are written only
+    // when a NEW TC1 arrives - never from the frozen pair, which would refresh them at
+    // 10 Hz and defeat both guards.
+    uint32_t _last_tc1_ms;                      // arrival of the last NEW TC1
+    uint32_t _last_stop_pair_ms;                // last valid 4/5 Stop alternation
+    uint32_t _start_pair_first_ms;              // first valid 2/3 Start alternation of this attempt
+    bool     _stop_window_armed;                // false until a Stop pair has ever been seen
+    uint32_t _last_start_refused_ms;            // rate limit for the refusal warning
 
     // PNU-ISSUE(D6)/5.1.15 : health is now keyed on PMU STATUS FRAMES, not on "a frame
     // arrived".  RXspin() used to treat ANY successful receive as proof the PMU was alive,

@@ -56,6 +56,14 @@ AP_PMUCAN::AP_PMUCAN(AP_PNU_CAN &frontend) :
     _engineoncnt            = 0;
     _engineoffcnt           = 0;
 
+    // PNU-ISSUE(D1)/(D7) step 2c : zero means "no TC1 and no Stop seen this boot", which
+    // is what refuses the very first Start of a power cycle until a Stop arrives.
+    _last_tc1_ms            = 0;
+    _last_stop_pair_ms      = 0;
+    _start_pair_first_ms    = 0;
+    _stop_window_armed      = false;
+    _last_start_refused_ms  = 0;
+
     _pmu_frames_seen        = 0;
     _last_pmu_frame_ms      = 0;
 
@@ -446,6 +454,9 @@ void AP_PMUCAN::transmit_slot(uint8_t slot)
 
         // Update Sequence Number
         PMU_Ctrl_Seq = gcs().PMU_Ctrl_Seq;
+
+        // PNU-ISSUE(D7) / step 2c : the only place either interlock window is stamped
+        note_new_tc1();
     }
 
 
@@ -568,10 +579,35 @@ int AP_PMUCAN::pmucan_cmd(uint32_t can_id, uint32_t data_cmd)
 //   The one real defect here has been fixed - see the send-result check below.
 void AP_PMUCAN::engineonoffstate(void)
 {
+    const uint32_t now_ms = AP_HAL::millis();
+
+    // PNU-ISSUE(D7) / step 2c, GUARD 1 of 2 : TC1 STALENESS.
+    //
+    // The counters below are a tick timer, not a count of operator alternations - the
+    // command pair only changes when a new TC1 arrives, yet this runs at 10 Hz anyway, so
+    // a pair frozen in a valid alternating state keeps counting.  A link dying mid-burst
+    // therefore used to complete the start on its own about a second later.  Stop
+    // counting instead.  Returning here sends nothing: ENGONOFF only goes out on a
+    // transition, and a stale link cannot have a counter anywhere near the threshold.
+    if (tc1_is_stale(now_ms)) {
+        _engineoncnt  = 0U;
+        _engineoffcnt = 0U;
+        return;
+    }
+
     if (_engineonoffmode==0U)	// OFF STATE
     {
         if(_engineoncnt>=10)        // transition to ON STATE
         {
+            // PNU-ISSUE(D7) / step 2c, GUARD 2 of 2 : STOP BEFORE START.
+            // Covers the link dying BETWEEN Stop and Start, where a queued Start arrives
+            // after reconnect.  The counter is cleared so that a later Stop cannot find
+            // it still armed and start the engine with no fresh Start press.
+            if (!start_permitted(now_ms)) {
+                _engineoncnt = 0U;
+                return;
+            }
+
             // PNU-ISSUE(D7) : only believe the engine is running once the frame
             // actually went out.  This used to advance unconditionally, leaving
             // the FC in ON while the PMU had never been told - and KGCS blocks
@@ -624,6 +660,113 @@ void AP_PMUCAN::engineonoffstate(void)
 
 
 // -------------------------------------------------------------------------
+// note_new_tc1 : PNU-ISSUE(D7) / step 2c - a NEW TC1 has arrived
+// -------------------------------------------------------------------------
+// Called from transmit_slot(), at the one point where a new command is recognised by its
+// sequence number.  BOTH WINDOWS ARE STAMPED HERE AND NOWHERE ELSE.  Doing it from
+// engineonoffstate() instead would read the FROZEN pair at 10 Hz and keep refreshing
+// them, which defeats the staleness reset and holds the Stop window permanently open -
+// the pair stays a valid Stop alternation from the end of a Stop burst until the first
+// message of the next burst, so "a Stop was seen recently" would always be true.
+// -------------------------------------------------------------------------
+void AP_PMUCAN::note_new_tc1(void)
+{
+    _last_tc1_ms = AP_HAL::millis();
+
+    // A valid 4/5 alternation arms the stop-before-start window, in EITHER engine state:
+    // stop-while-off is the KGCS procedure, stop-while-on is a real shutdown, and both
+    // should give permission to start.  A single stray Stop message does not arm it -
+    // Start is validated as a pair, so permission to start is too.
+    const uint32_t cmd = _pmu_ctrl_cmd.Engine_OnOff;
+    const uint32_t prv = _pmu_ctrl_cmd_prv.Engine_OnOff;
+    if (((cmd == 0b100U) && (prv == 0b101U)) ||
+        ((cmd == 0b101U) && (prv == 0b100U))) {
+        _last_stop_pair_ms = _last_tc1_ms;
+        _stop_window_armed = true;
+    }
+}
+
+
+// -------------------------------------------------------------------------
+// tc1_is_stale : PNU-ISSUE(D7) / step 2c
+// -------------------------------------------------------------------------
+// Before the first TC1 of a boot there is nothing to be stale: KGCS sends TC1 only while
+// a button is held, so silence is the normal resting state and the counters are zero
+// anyway.  Treating that as stale would be harmless but would also be a lie.
+// -------------------------------------------------------------------------
+bool AP_PMUCAN::tc1_is_stale(uint32_t now_ms) const
+{
+    if (_last_tc1_ms == 0U) {
+        return false;
+    }
+    return (now_ms - _last_tc1_ms) > PMUCAN_TC1_STALE_MS;
+}
+
+
+// -------------------------------------------------------------------------
+// start_permitted : PNU-ISSUE(D7) / step 2c - did a recent Stop precede this Start?
+// -------------------------------------------------------------------------
+// A REFUSED START MUST SAY WHY.  At boot no Stop has been seen, so the first Start of a
+// power cycle is refused - correct per the KGCS procedure, but a button that silently
+// does nothing is the PNU-ISSUE(D6) problem over again.  Rate limited, because this is
+// reached at 10 Hz for as long as the burst keeps arriving.
+// -------------------------------------------------------------------------
+bool AP_PMUCAN::start_permitted(uint32_t now_ms)
+{
+    // MEASURED FROM WHEN THE OPERATOR PRESSED START, NOT FROM NOW.  The guard asks "did a
+    // Stop precede this Start by less than the window" - and the counter spends about
+    // 1.0 s of that window by itself, since the threshold of 10 is a tick timer at 10 Hz.
+    // Testing at the completion instant would charge the operator for the FC's own
+    // interlock delay, shortening the time they actually have to press the button by
+    // roughly that second on top of KGCS's ~5 s lockout.  _start_pair_first_ms is when
+    // this attempt's first valid alternation arrived, and the staleness guard above
+    // bounds how far in the past that can be - at most one stale window.
+    const uint32_t pressed_ms = (_start_pair_first_ms != 0U) ? _start_pair_first_ms : now_ms;
+
+    if (_stop_window_armed &&
+        ((pressed_ms - _last_stop_pair_ms) <= PMUCAN_STOP_WINDOW_MS)) {
+        return true;
+    }
+
+    if ((_last_start_refused_ms == 0U) ||
+        ((now_ms - _last_start_refused_ms) >= PMUCAN_START_REFUSED_WARN_MS)) {
+        _last_start_refused_ms = now_ms;
+        if (!_stop_window_armed) {
+            GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "PMU: start refused, press Stop first");
+        } else {
+            // kept under 50 characters: MAVLink STATUSTEXT truncates there and a
+            // longer message is split into chunks that not every GCS reassembles.
+            // The age is clamped for the same reason - it is only ever read as
+            // "longer ago than the limit".
+            const uint32_t age_s = MIN((pressed_ms - _last_stop_pair_ms) / 1000U, 999U);
+            GCS_SEND_TEXT(MAV_SEVERITY_WARNING,
+                          "PMU: start refused, Stop %us ago (max %us)",
+                          (unsigned)age_s,
+                          (unsigned)(PMUCAN_STOP_WINDOW_MS / 1000U));
+        }
+    }
+    return false;
+}
+
+
+// -------------------------------------------------------------------------
+// count_start_pair : PNU-ISSUE(D7) / step 2c - advance the Start counter
+// -------------------------------------------------------------------------
+// Identical to the bare _engineoncnt++ it replaces, except that the FIRST increment of an
+// attempt is timestamped.  start_permitted() measures the stop-before-start window from
+// that instant rather than from the moment the counter completes, so the operator is not
+// charged for the interlock's own ~1.0 s.
+// -------------------------------------------------------------------------
+void AP_PMUCAN::count_start_pair(void)
+{
+    if (_engineoncnt == 0U) {
+        _start_pair_first_ms = AP_HAL::millis();
+    }
+    _engineoncnt++;
+}
+
+
+// -------------------------------------------------------------------------
 // engineonmode : checks OFF command when engine is ON
 // -------------------------------------------------------------------------
 void AP_PMUCAN::engineonmode(void)
@@ -666,7 +809,7 @@ void AP_PMUCAN::engineoffmode(void)
     {
         if(_pmu_ctrl_cmd_prv.Engine_OnOff==0b11)
         {
-            _engineoncnt++;
+            count_start_pair();
         }
         else
         {
@@ -677,7 +820,7 @@ void AP_PMUCAN::engineoffmode(void)
     {
         if(_pmu_ctrl_cmd_prv.Engine_OnOff==0b10)
         {
-            _engineoncnt++;
+            count_start_pair();
         }
         else
         {

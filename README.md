@@ -1,16 +1,24 @@
 # PNU-KAL FLCC OFP Development Version
 - This branch currently developing PNU-KAL FLCC OFP after official version (TAG) PNU-KAL-FLCC-5.1.0 (this is same code as 5.0.15 dev)  
 - PNU-ISSUE 10 & 11 still remains : For Gremsy camera and general camera mount library structure  
-- NEXT : **Bench-tune the homing parameters, then set `CAN_Dn_PNU_HOME=1`.** Step 1d is implemented but **defaults to OFF** - the stall threshold, approach velocity and the two gains are provisional and unmeasured. Nothing drives into a stop until somebody turns it on. See 6f near the end of this file for the tuning order  
-- **CAN Update Plan step 2b's fake PMU IS VALIDATED.** `Tools/pnu/sitl_can/`, **flown in SITL by PNU 2026-10-29** with Mission Planner on SERIAL0 and KGCS on SERIAL1: choke, the choke crank, Start, warm-up idle, the cooling trip to ground idle, Stop, takeoff and **RTL with landing** all behave as specified. Five defects were found and fixed on the way, **all five in the MAVLink takeoff watcher - none in the engine model and none on CAN**. **No firmware code changed and no version was bumped**  
-- **The start-up ORDER is not optional** - `vcan0` before SITL, and Mission Planner on TCP 5760 before SERIAL1 and SERIAL2 exist at all. The validated sequence is in `Tools/pnu/sitl_can/README.md`  
-- **The D9 failsafe now runs end to end on a desk.** `silent` in the fake's console while hovering trips it to RTL, `resume` reconnects and clears it - PNU 2026-10-29. That is the test step 2b existed for, and it no longer needs a connector pulled. **Not yet TIMED** against the ~100-200 ms the constants predict  
-- ALSO NEXT : the fake **gimbal** (three CubeMars motors), the other half of step 2b, which is what finally exercises the shared bus  
-- THEN : **step 2c** - engine-start interlock guards. Raised from the bench 2026-10-19: there is **no timeout today**, so **a link that drops mid-burst still starts the engine ~1 s later on its own**, and a PNU-GCS guard cannot cover that case. Designed, not applied  
+- **CAN Update Plan step 2c is APPLIED and MEASURED in 5.1.18** - a **500 ms TC1 staleness reset** and a **10 s stop-before-start window**. **The defect was reproduced, not just the fix**: with guard 1 disabled the same cut-short Start burst started the engine 1.34 s after the last message; with it enabled, no start. Interlock duration measured at **1.50 s**, matching the bench's ~1-1.5 s. Driven by `Tools/pnu/sitl_can/tc1_inject.py`, and **re-run independently by PNU 2026-10-29 with every scenario reporting AS EXPECTED**  
+- NEXT : **PNU's eye on two step 2c decisions** - the Stop window is measured from the **Start press** rather than from the interlock completing, and a **Stop** burst cut off mid-way no longer completes either. Both are recorded in the step 2c section. **Not tested against a real PMU, engine, KGCS or LTE link**  
+- ALSO NEXT : the fake **gimbal** (three CubeMars motors), the other half of step 2b, and the only thing that will exercise the **shared bus**  
+- ALSO NEXT : **Bench-tune the homing parameters, then set `CAN_Dn_PNU_HOME=1`.** Step 1d is implemented but **defaults to OFF** - the stall threshold, approach velocity and the two gains are provisional and unmeasured. Nothing drives into a stop until somebody turns it on. See 6f near the end of this file for the tuning order  
 - THEN : **step 3** the SAR backend (protocol 17 retires there)  
+- *Done in step 2b, tools only with no version bump :* the **fake PMU is validated** (`Tools/pnu/sitl_can/`, flown in SITL 2026-10-29 with Mission Planner on SERIAL0 and KGCS on SERIAL1 - choke, the choke crank, Start, warm-up idle, the cooling trip, Stop, takeoff and RTL with landing). **The D9 failsafe now runs end to end on a desk**: `silent` trips it to RTL, `resume` clears it, no connector pulled. **The start-up ORDER is not optional** - `vcan0` before SITL, Mission Planner on TCP 5760 before SERIAL1 and SERIAL2 exist at all; the validated sequence is in `Tools/pnu/sitl_can/README.md`  
 - **BENCH STATUS (5.1.16)** : PMU telemetry, command paths, prearm and the **in-flight failsafe** all PASSED 2026-10-19. **Outstanding** : the **shared bus** (`PNU_OPTS=3`, the test step 2 exists for), **Stop-command timing**, and the **~1.0 s interlock duration** after the 10 Hz rework  
 - *Done in the gimbal track :* step 1b (`AP_Mount_PNUGimbal`, 5.1.12) and step 1c (lifecycle state machine, 5.1.13). `AP_Mount` does stabilise against FC attitude and needs no camera, which is why the gimbal is an `AP_Mount` backend  
-- IN THIS VERSION : V5.1.17 - **the PMU failsafe moves out of a logging task.** `failsafe_pmucan_check()` was called from `ten_hz_logging_loop()`, which sits inside `#if HAL_LOGGING_ENABLED`, so a logging-free build had **no PMU failsafe at all** and said nothing about it. Now its own `SCHED_TASK` at priority 92, same 10 Hz. **Found by reading, not by a failure** - and no shippable image was ever exposed, because Copter does not currently build with logging off anyway  
+- IN THIS VERSION : V5.1.18 - **CAN Update Plan step 2c, the two engine-start interlock windows** (`AP_PMUCAN` only), **measured in SITL and with the original defect reproduced**. See the step 2c section  
+   - **TC1 staleness, 500 ms.** `engineonoffstate()`'s counters are a tick timer, not a count of operator alternations - the command pair only changes when a new TC1 arrives but the function runs at 10 Hz regardless, so a frozen pair kept counting and **a link dying mid-burst completed the start on its own about a second later**. Counting now stops  
+   - **Stop before start, 10 s.** KGCS forces a Stop before a Start, so the FC requires the same and refuses a Start that does not follow a recent one - covering the link dying *between* the two  
+   - **Both windows are stamped only where a NEW TC1 is detected.** The frozen pair stays a valid Stop alternation from the end of one burst to the start of the next, so testing it at 10 Hz would have held the window permanently open. That is why this is in `transmit_slot()` and not in `engineonoffstate()`  
+   - **Measured, and the defect reproduced**: with guard 1 disabled the identical cut-short burst started the engine 1.34 s after the last message; with it enabled, no start. `stop-start` completes in 1.50 s, matching the bench's ~1-1.5 s  
+   - **Two decisions that want PNU's eye** - the Stop window is measured from the **Start press** rather than from the interlock completing, and a **Stop** burst cut off mid-way no longer completes either  
+   - Two defects found while measuring and fixed: the refusal message exceeded STATUSTEXT's 50 characters and arrived split in two, and the fake PMU exited immediately whenever stdin was not a terminal  
+- For 5.1.17 version :  
+   - **The PMU failsafe moves out of a logging task.** `failsafe_pmucan_check()` was called from `ten_hz_logging_loop()`, which sits inside `#if HAL_LOGGING_ENABLED`, so a logging-free build had **no PMU failsafe at all** and said nothing about it. Now its own `SCHED_TASK` at priority 92, same 10 Hz. **Found by reading, not by a failure** - and no shippable image was ever exposed, because Copter does not currently build with logging off anyway  
+- For 5.1.16 version :  
    - **`ARMING_SKIPCHK` bit 13 had NEVER worked, and D9(b)'s design rested on it.** `check_failed()` only formats and reports - it **never consults `check_enabled()`** - so a check must wrap *itself*, the way `AP_Arming.cpp:1134` and `:1303` do. `pmucan_checks()` did not, so bit 13 did nothing and **an aircraft with no PMU could not be armed at all** except by disabling every check. Wrong since D9(b) landed in 5.0.x; **nothing in step 2 caused it**  
    - Skipping leaves `PMUCAN_Fail` untouched, so `arm()` still latches `pmucan_armed_healthy = false` and the in-flight failsafe stays out of the way - exactly the "launched without a PMU deliberately" case D9(b) designed  
    - **The one-shot startup report was emitted before anyone was listening.** It fired at a flat 5 s from the CAN thread; KGCS had not connected, the statustext was dropped, and being one-shot it never returned - so **neither `PMU ready` nor the protocol-16 deprecation warning was ever seen, and 15 and 16 looked identical on the bench**  
@@ -1094,7 +1102,7 @@ make a wholesale copy a regression.
 | 4 `pmucan_*.hpp` deleted (1163 lines) | vendored libuavcan v0; only 3 constants were used, all identical in `AP_HAL::CANFrame` / `CANIface` |
 | Mount task kept at 50 Hz | `AP_Mount_Viewpro::update()` self-throttles to 100 ms, so gimbal traffic is 10 Hz either way; at a 10 Hz task rate the period *equals* the throttle and late ticks cause 5 Hz bursts. See D8 |
 | msg 285 suppression made opt-in | V5.0.8 suppressed it for every gimbal, not just Viewpro. See D8 |
-| `version.h` is **5.1.17 DEV** | 5.1.0 OFFICIAL closed the migration; the 5.1.x DEV series carries the post-release D10 work - Stage 1 in 5.1.1, the Gremsy analysis and pitch relocation in 5.1.2, Stage 2a routing in 5.1.3, Gremsy hardware validation in 5.1.4, Stage 2b closure in 5.1.5, Stage 3 in 5.1.6, its bench confirmation in 5.1.7, the KGCS backward-compatibility fix in 5.1.8, the `AP_PNUGimbal` / `AP_PNUSAR` CAN driver skeletons in 5.1.9, `AP_PNUGimbal`'s CubeMars protocol backend in 5.1.10, CAN Update Plan step 1 in 5.1.11, step 1b in 5.1.12, step 1c in 5.1.13, step 1d in 5.1.14, step 2 in 5.1.15, the bench fixes in 5.1.16 and the PMU failsafe's scheduling fix in 5.1.17 - and goes OFFICIAL when D10/D11 land |
+| `version.h` is **5.1.18 DEV** | 5.1.0 OFFICIAL closed the migration; the 5.1.x DEV series carries the post-release D10 work - Stage 1 in 5.1.1, the Gremsy analysis and pitch relocation in 5.1.2, Stage 2a routing in 5.1.3, Gremsy hardware validation in 5.1.4, Stage 2b closure in 5.1.5, Stage 3 in 5.1.6, its bench confirmation in 5.1.7, the KGCS backward-compatibility fix in 5.1.8, the `AP_PNUGimbal` / `AP_PNUSAR` CAN driver skeletons in 5.1.9, `AP_PNUGimbal`'s CubeMars protocol backend in 5.1.10, CAN Update Plan step 1 in 5.1.11, step 1b in 5.1.12, step 1c in 5.1.13, step 1d in 5.1.14, step 2 in 5.1.15, the bench fixes in 5.1.16, the PMU failsafe's scheduling fix in 5.1.17 and CAN Update Plan step 2c in 5.1.18 - and goes OFFICIAL when D10/D11 land |
 | `GCS.h` dead CAM macros removed, `OFP_VER_*` tracked against `version.h` | were stale/unused; guarded by `static_assert` in `Copter.cpp` |
 | `AP_PMUCAN` fixes | dropped-frame at RX budget, dead branch, `&`->`&&`, `RXdrain()` extraction, named constants, ctor init, `TXspin` void. See git log |
 | `send_proximity()` upward-distance block **not** commented out | V5.0.8 wrapped it in `/* Currently, no upward sensor */`. `AP_Proximity::get_upward_distance()` already returns false when no backend supplies one (`AP_Proximity.cpp:498`), and TeraRanger Tower Evo is not one of the backends that does - so the comment-out is a no-op here and a silent regression for `AP_Proximity_RangeFinder` / `_MAV` / scripting users. Not applied |
@@ -1811,7 +1819,7 @@ gimbal Master ID or any gimbal command id, rather than letting the demux be ambi
 | **1b-1d** | **The gimbal track**, branching off step 1 - mount backend, lifecycle state machine, HOMING. **1b and 1c are DONE (5.1.12, 5.1.13); 1d is not.** Its own table and risk notes are in "Gimbal stabilisation and the mount state machine" near the end of this file | `AP_Mount/AP_Mount_PNUGimbal.*`, `AP_PNUGimbal/` | low to **HIGH** for 1d | see that section |
 | **2** | **DONE in 5.1.15, BENCH-TESTED 2026-10-19 except the shared bus.** **PMU becomes a backend.** `AP_PMUCAN` changes base class; protocol **15** instantiates `AP_PNU_CAN`, so `CAN_Dn_PNU_OPTS` bit 0 becomes live; the 10 Hz per-message rate is **explicit**; health is **id-based**; **16 kept as a deprecated alias**. Protocol 17 deferred to step 3 | `AP_PMUCAN/`, `AP_PNU_CAN/`, `AP_CAN.h`, `AP_CANManager.{h,cpp}`, `AP_Arming.cpp` | **HIGH** | **PASSED**: telemetry, command paths, prearm, in-flight failsafe and recovery. **OUTSTANDING**: shared bus with `PNU_OPTS=3`, and Stop-command timing. The ~1.0 s interlock duration PASSED at ~1-1.5 s |
 | **2b** | **Simulated CAN devices for SITL.** **Fake PMU VALIDATED in SITL 2026-10-29.** Fake CubeMars motors still to come. **Ordered before 2c on purpose** - it is how 2c's windows get measured instead of reasoned about. See the section below | `Tools/pnu/sitl_can/` - no firmware change | low | **SITL-flown by PNU**: choke, the choke crank, Start, warm-up idle, cooling trip, Stop, takeoff, RTL with landing, and **the silent trigger tripping the D9 failsafe to RTL**. 43 offline tests pass |
-| **2c** | **Engine-start interlock guards.** Two independent time windows on PNU-ISSUE(D7)'s start sequence - a **500 ms TC1 staleness reset** and a **10 s stop-before-start window**. See the section below | `AP_PMUCAN/` | **HIGH** - engine start logic | step 2b first, then bench |
+| **2c** | **DONE in 5.1.18, MEASURED IN SITL.** Two independent time windows on PNU-ISSUE(D7)'s start sequence - a **500 ms TC1 staleness reset** and a **10 s stop-before-start window**. See the section below | `AP_PMUCAN/` | **HIGH** - engine start logic | **all four scenarios AS EXPECTED, and the original defect reproduced with guard 1 disabled.** Not tested against a real PMU, engine, KGCS or LTE link |
 | **3** | **SAR backend** under the same driver, 11-bit, ids `0x400`-`0x7FF`. Protocol 17 retires here, deferred from step 2 | `AP_PNUSAR/` | low | build; real work waits on the ICD |
 | **4** | Bus documentation, bitrate note, README and `version.h` | `README.md`, `version.h` | none | - |
 
@@ -2726,7 +2734,7 @@ ICD leaves open and each is a one-line change.
 
 ---
 
-**Step 2c - engine-start interlock guards - DESIGNED 2026-10-19, NOT YET APPLIED**
+**Step 2c - engine-start interlock guards - APPLIED 2026-10-29 in 5.1.18**
 
 *Raised from the bench: KGCS lost its link at the moment the Start button was pressed, and
 sent the queued data after reconnecting.*
@@ -2823,6 +2831,118 @@ latching alternations as they arrive in `handle_gcs_flcc_pmu_ctrl()` rather than
 
 **Both guards are engine-start logic, so neither goes in without PNU sign-off on the
 numbers** - 500 ms and 10 s are PNU's, recorded here so the reasoning is not lost.
+
+**Step 2c AS BUILT - 5.1.18, 2026-10-29. `AP_PMUCAN` only; nothing else is touched.**
+
+| Added | Where |
+|---|---|
+| `note_new_tc1()` | stamps both windows, called from `transmit_slot()`'s new-command branch |
+| `tc1_is_stale()` | the 500 ms test |
+| `start_permitted()` | the 10 s test, and the refusal message |
+| `count_start_pair()` | `_engineoncnt++`, stamping the first increment of an attempt |
+| `PMUCAN_TC1_STALE_MS` 500, `PMUCAN_STOP_WINDOW_MS` 10000, `PMUCAN_START_REFUSED_WARN_MS` 3000 | `AP_PMUCAN.h`, with the reasoning at the site |
+
+**Constants, not parameters** - the design left this UNDECIDED and proposed constants. Both
+numbers come from the KGCS operating procedure rather than from tuning, and neither has
+room to move much, so a parameter would mostly offer a way to break the interlock from a
+ground station. If the bench disagrees they become parameters.
+
+**BOTH WINDOWS ARE STAMPED ONLY WHEN A NEW TC1 ARRIVES, and that is load-bearing.** The
+obvious place to test the Stop alternation is `engineonoffstate()`, which already inspects
+the command pair - and it would be wrong. The pair is FROZEN between TC1 arrivals, so it
+stays a valid 4/5 Stop alternation from the end of a Stop burst until the first message of
+the next burst. Testing it at 10 Hz would refresh `_last_stop_pair_ms` continuously and the
+10 s window would never expire. Same for staleness: the thing being timed is the ARRIVAL of
+messages, so it can only be stamped where arrivals are detected.
+
+**DEVIATION, deliberate: the Stop window is measured from the START PRESS, not from the
+moment permission is checked.** The guard asks "did a Stop precede this Start by less than
+10 s". The counter threshold of 10 is a tick timer at 10 Hz, so it consumes about 1.0 s of
+the window on its own, and testing at the completion instant charges the operator for the
+FC's own interlock delay on top of KGCS's ~5 s button lockout. `_start_pair_first_ms`
+records when this attempt's first valid alternation arrived, and the staleness guard bounds
+how stale that can be. The design note fixed the other end of the window - "measure from
+the LAST Stop message seen" - and said nothing about this end, so this is a choice within
+its latitude rather than a contradiction of it. **It does not weaken the guard**: a Start
+queued during an outage arrives late, so its first alternation is late too.
+
+**SIDE EFFECT WORTH KNOWING: the staleness guard is symmetric, so a STOP burst cut off
+mid-way no longer completes either.** `engineonoffstate()` returns early while TC1 is
+stale, which zeroes both counters, not just the Start one. An operator whose link dies
+during a Stop press must press Stop again. On the ground that is an annoyance; in the air
+an engine that declines to stop on a comms glitch is the safer of the two failures, which
+is why this is recorded rather than special-cased. **If PNU wants Stop exempted, say so** -
+it is one condition, but it reopens exactly the mechanism step 2c exists to close.
+
+**A refused Start reports itself**, rate limited to 3 s because the check is reached at
+10 Hz for as long as the burst keeps arriving:
+
+```text
+PMU: start refused, press Stop first              (no Stop seen this boot)
+PMU: start refused, Stop was 14s before it (limit 10s)
+```
+
+**The first Start after any boot is refused until a Stop has been seen.** That is the KGCS
+procedure working as specified, not a defect - but it is the behaviour most likely to be
+reported as one, so the message exists to explain itself.
+
+**Builds: CubeOrangePlus, SITL, and SITL with `AP_PNU_CAN_ENABLED=0`.**
+
+**MEASURED IN SITL 2026-10-29 - both windows, and the defect reproduced and closed.**
+
+`Tools/pnu/sitl_can/tc1_inject.py` sends the TC1 bursts KGCS would send, with the timing
+under our control, and **watches `vcan0` itself** for the `ENGONOFF` the FC emits. One
+process, one clock, so the interval needs no correlation between logs. The frame is packed
+by hand - the PNU dialect is not in a stock pymavlink - and `--self-test` checks its
+CRC_EXTRA and length against the firmware's own generated header, and the two windows
+against `AP_PMUCAN.h`.
+
+| Scenario | Expected | Observed |
+|---|---|---|
+| `start-only` - first Start of a boot, no Stop | refused | **refused**, `PMU: start refused, press Stop first` |
+| `cut-start` - Start burst cut after 2 messages | no start | **no start** after 6 s of watching |
+| `late-start` - Stop, wait 14 s, Start | refused | **refused**, `PMU: start refused, Stop 14s ago (max 10s)` |
+| `stop-start` - the correct procedure | starts | **started, 1.50 s** after the burst began |
+
+**Re-run independently by PNU 2026-10-29 on their own SITL - every scenario AS EXPECTED.**
+
+**THE DEFECT WAS REPRODUCED, NOT JUST THE FIX.** With `PMUCAN_TC1_STALE_MS` temporarily
+raised to 600000 to disable guard 1 and nothing else changed, the identical `cut-start`
+scenario **started the engine 1.34 s after the last TC1 arrived**, with no further operator
+input - the bench report of 2026-10-19, reproduced on a desk. Restoring the constant
+returned it to no-start. That is the counterfactual the guard needed, and it is the
+difference between "the code is present" and "the code fixes the bug".
+
+**Interlock duration measured at 1.50-1.55 s** from the first message of the Start burst to
+`ENGONOFF=1` on the wire. The bench measured ~1 to 1.5 s, so this agrees. It is longer than
+the naive 1.0 s the threshold of 10 implies: ~0.1 s goes to the second message making the
+first valid pair, up to 0.1 s to the ENGONOFF slot's phase in the five-slot rotation, and
+the remainder is consistent with an occasional counter reset when a 10 Hz burst is sampled
+by a 10 Hz loop and the same value is seen twice. **That last part is a hypothesis, not a
+measurement** - it is the bunching sensitivity PNU-ISSUE(D7) already records, and it fails
+safe. If Start ever becomes flaky, look there.
+
+**Two defects found while measuring, both now fixed:**
+
+- **The refusal message was 53 characters.** MAVLink STATUSTEXT caps at 50, so it arrived
+  as two chunks and read as broken text on anything that does not reassemble them. Both
+  messages are now under 50, and the reported age is clamped to keep it that way.
+- **The fake PMU exited 0.01 s after starting whenever stdin was not a terminal.** EOF on
+  a redirected stdin was treated as the console's "quit". Invisible when run by hand, fatal
+  for any scripted or background run - including this measurement. EOF now means "there is
+  no console here" unless stdin is a TTY, and SIGTERM quits.
+- **The injector died instead of waiting when its endpoint did not exist yet** - found by
+  PNU on the first run, and the same mistake as the takeoff watcher's in step 2b. SERIAL1
+  and SERIAL2 do not exist until SERIAL0 has a client, so a tool started before Mission
+  Planner got ECONNREFUSED and gave up. It now waits, bounded by `--link-timeout`, and says
+  what to do. `-A "--serial0 tcp:0"` on `sim_vehicle.py` removes the dependency entirely -
+  **verified: all three ports open with no ground station attached**, which is what makes
+  the measurement scriptable.
+
+**What this does NOT cover.** A real PMU, a real engine, and a real KGCS: the injector
+sends what the KGCS protocol specifies, not what KGCS actually emits. The LTE link is not
+simulated, so the bunching above is not exercised. **The numbers are confirmed to behave as
+designed; they are not confirmed to be the right numbers for the aircraft.**
 
 ---
 

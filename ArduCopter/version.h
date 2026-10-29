@@ -7,7 +7,7 @@
 #include "ap_version.h"
 
 // PNU : This is a custom code modified by PNU Drone
-#define THISFIRMWARE "PNU_OFP V5.1.17"
+#define THISFIRMWARE "PNU_OFP V5.1.18"
 
 // NOTE: 5.1.6 is a DEV build on top of the 5.1.0 OFFICIAL release, which closed the
 // Copter-4.7.1 -> FLCC migration.  It closes D10 Stage 3: TM2's Zoom_POS_FB now carries
@@ -22,6 +22,53 @@
 // and a send_camera_settings() override that forwards real values instead of upstream's
 // NaN placeholders are all vendor-neutral and worth submitting to ArduPilot; only
 // AP_Q30 decides the value means times, which is where PNU-specific facts belong.
+//
+// 5.1.18 is CAN Update Plan step 2c: the two engine-start interlock windows.
+//
+//   PNU-ISSUE(D7) recorded that engineonoffstate()'s counters are a TICK TIMER, not a
+//   count of operator alternations - the command pair only changes when a new TC1 arrives,
+//   but the function runs at 10 Hz regardless, so a pair frozen in a valid alternating
+//   state keeps counting.  That is what makes the interlock tolerate dropped messages, and
+//   it is also why A LINK DYING MID-BURST COMPLETED THE START ON ITS OWN about a second
+//   later, with no further operator input.  Raised from the bench 2026-10-19 after KGCS
+//   lost its link at the moment Start was pressed.  A PNU-GCS guard cannot cover it: by
+//   the time the link drops the FC is already counting alone.
+//
+//   Two independent windows, both numbers PNU's:
+//     - TC1 STALENESS, 500 ms.  Counting stops when TC1 goes quiet.  Squeezed from both
+//       sides: above the ~100 ms inter-message gap, below the ~1.0 s the counter needs.
+//       Raised from 300 ms to absorb LTE delay; >= 1000 ms would be useless.
+//     - STOP BEFORE START, 10 s.  KGCS forces Stop before Start, so the FC requires the
+//       same and refuses a Start that does not follow a recent Stop - covering the link
+//       dying BETWEEN the two.  10 s, not 5: KGCS disables both buttons for ~5 s after
+//       either press, so a 5 s window would have made Start impossible.
+//
+//   BOTH WINDOWS ARE STAMPED ONLY WHERE A NEW TC1 IS DETECTED, in transmit_slot().  The
+//   frozen pair stays a valid Stop alternation from the end of one burst to the start of
+//   the next, so testing it at 10 Hz would hold the window permanently open.
+//
+//   DEVIATION from the design note, deliberate: the Stop window is measured from the START
+//   PRESS, not from the instant permission is checked.  The counter eats ~1.0 s of the
+//   window itself, and charging the operator for the FC's own delay on top of the ~5 s
+//   button lockout leaves too little time to press.  It does not weaken the guard - a
+//   Start queued during an outage arrives late, so its first alternation is late too.
+//
+//   SIDE EFFECT: the staleness guard is symmetric, so a STOP burst cut off mid-way no
+//   longer completes either, and the operator must press Stop again.  In the air an engine
+//   that declines to stop on a comms glitch is the safer failure, so this is recorded
+//   rather than special-cased.
+//
+//   This deliberately TIGHTENS D7's documented loss tolerance, which until now survived
+//   arbitrarily long dropouts.  That is the point.
+//
+//   MEASURED IN SITL 2026-10-29 with Tools/pnu/sitl_can/tc1_inject.py, which sends the TC1
+//   bursts and watches vcan0 for ENGONOFF on one clock.  A Start burst cut after two
+//   messages produced NO start; the correct Stop-then-Start produced one 1.50 s after the
+//   burst began, matching the bench's ~1 to 1.5 s.  With PMUCAN_TC1_STALE_MS temporarily
+//   raised to disable guard 1 and nothing else changed, the same cut-short burst STARTED
+//   THE ENGINE 1.34 s after the last message - the 2026-10-19 bench report reproduced, and
+//   closed again by restoring the constant.  Not tested against a real PMU, a real engine,
+//   a real KGCS or a real LTE link.
 //
 // 5.1.17 moves the PMU failsafe out of a logging task.
 //
