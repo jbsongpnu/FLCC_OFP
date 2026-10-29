@@ -137,9 +137,17 @@ class FakePMU(object):
     # -- console ----------------------------------------------------------------------
 
     def console_thread(self):
+        '''EOF means "quit" only from a terminal.  With stdin redirected or closed - any
+           scripted or background run - EOF arrives immediately and means "there is no
+           console here", not "shut down".  Treating the two the same made the fake exit
+           0.01 s after starting whenever it was not run by hand.'''
+        interactive = sys.stdin is not None and sys.stdin.isatty()
         for line in sys.stdin:
             self.commands.put(line.strip())
-        self.commands.put('quit')
+        if interactive:
+            self.commands.put('quit')
+        else:
+            self.log('no console on stdin - SIGUSR1 toggles silence, SIGINT or SIGTERM quits')
 
     def drain_console(self):
         while True:
@@ -450,6 +458,7 @@ def main():
         pmu.set_silent(True)
 
     signal.signal(signal.SIGUSR1, lambda *_: pmu.commands.put('toggle-silent'))
+    signal.signal(signal.SIGTERM, lambda *_: pmu.commands.put('quit'))
     threading.Thread(target=pmu.console_thread, daemon=True).start()
 
     if args.mavlink.lower() != 'none':

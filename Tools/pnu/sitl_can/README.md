@@ -12,6 +12,7 @@ interlock timing can be exercised on a desk instead of against a running engine.
 | `pmu_model.py` | the engine, generator and battery. Pure state machine, no I/O |
 | `pmu_frames.py` | the five status frames. Wire format only, no state |
 | `fake_pmu.py` | SocketCAN I/O, the operator console and MAVLink takeoff detection |
+| `tc1_inject.py` | TC1 injector and stopwatch for the step 2c interlock windows |
 | `test_pmu_model.py` | 17 tests: the RPM ladder, and every field at the offset `AP_PMUCAN` reads |
 | `test_fake_pmu.py` | 26 tests: RTR dispatch, command decode, the silent trigger, takeoff detection |
 
@@ -117,6 +118,75 @@ B) WATCHER, 14 s         : asked system 1/1, identified vehicle 1 from
                            GLOBAL_POSITION_INT, landed_state=1 (ON_GROUND)
 ```
 
+
+## Measuring the step 2c interlock windows
+
+`tc1_inject.py` sends the TC1 bursts KGCS would send - 14 messages alternating 2/3 for
+Start, 4/5 for Stop, at 10 Hz - with the timing under our control, and **watches `vcan0`
+itself** for the `ENGONOFF` the FC emits when the interlock completes. One process, one
+clock, so the measured interval needs no correlation between logs.
+
+**Do not run KGCS at the same time.** This tool stands in for it, and the FC does not check
+who sent a TC1 - an accepted residual of PNU-ISSUE(D7) - so two senders would interleave
+their bursts and the result would mean nothing. The default endpoint is SERIAL1, the port
+KGCS would otherwise use, which leaves SERIAL0 for Mission Planner and SERIAL2 for the
+fake PMU.
+
+**SERIAL1 does not exist until SERIAL0 has a client**, so the injector cannot connect to
+5762 straight after starting SITL. Either attach Mission Planner to tcp:5760 first, or
+start SITL so that it never waits for one:
+
+```sh
+./Tools/autotest/sim_vehicle.py -v ArduCopter --no-mavproxy --no-rebuild -A "--serial0 tcp:0"
+```
+
+`-A` passes arguments to the SITL binary, and `--serial0 tcp:0` is `tcp:0:wait` without the
+wait. Verified: all three ports open immediately with no ground station attached, which is
+what makes the whole measurement scriptable. The injector waits for the endpoint either
+way - `--link-timeout` bounds it.
+
+```sh
+# 1-2 as in the procedure above: vcan0, then SITL.  KGCS stays OFF.
+# 3. the fake PMU, which does not need MAVLink for this test
+Tools/pnu/sitl_can/fake_pmu.py --interface vcan0 --mavlink none
+
+# 4. check the tool agrees with the firmware before trusting any result
+Tools/pnu/sitl_can/tc1_inject.py --self-test
+
+# 5. the scenarios, IN THIS ORDER - see below
+Tools/pnu/sitl_can/tc1_inject.py start-only
+Tools/pnu/sitl_can/tc1_inject.py cut-start
+Tools/pnu/sitl_can/tc1_inject.py late-start
+Tools/pnu/sitl_can/tc1_inject.py stop-start
+```
+
+`--self-test` checks the hand-packed TC1 message's CRC_EXTRA and length against the
+firmware's own generated header, and the two window constants against `AP_PMUCAN.h`. The
+PNU dialect is not in a stock pymavlink, so the frame is packed by hand; this is what makes
+that safe.
+
+**Order matters, because the FC latches the engine state.** A successful `stop-start`
+leaves it ON, and later Start scenarios then do nothing. `start-only` must come first on a
+fresh boot, since it tests the case where no Stop has ever been seen. `stop` returns the
+FC to OFF between runs.
+
+| Scenario | What it does | Expected |
+|---|---|---|
+| `start-only` | Start with no Stop ever seen | refused, `press Stop first` |
+| `cut-start` | Stop, wait, then a Start burst cut after 2 messages | **no start** - this is the defect step 2c closes |
+| `late-start` | Stop, wait 14 s, then Start | refused, `Stop 14s ago (max 10s)` |
+| `stop-start` | the correct KGCS procedure | **starts**, about 1.5 s after the burst begins |
+| `stop` / `start` | a single burst on its own | - |
+| `cut-stop` | a Stop burst cut short | no stop - the side effect, not a goal |
+
+Each run prints a timeline and a verdict. Useful switches: `--cut N` messages before a
+cut-short burst stops, `--wait N` seconds between Stop and Start, `--settle N` how long to
+keep watching afterwards, `--rate` and `--count` for the burst shape, `--interface none` to
+skip the CAN watch.
+
+**To see the defect rather than the fix**, raise `PMUCAN_TC1_STALE_MS` in `AP_PMUCAN.h` to
+something huge, rebuild, and run `cut-start` again: the engine starts about 1.3 s after the
+last message, with no further input. Put the constant back afterwards.
 
 ## The console
 
