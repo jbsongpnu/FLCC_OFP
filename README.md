@@ -2,7 +2,10 @@
 - This branch currently developing PNU-KAL FLCC OFP after official version (TAG) PNU-KAL-FLCC-5.1.0 (this is same code as 5.0.15 dev)  
 - PNU-ISSUE 10 & 11 still remains : For Gremsy camera and general camera mount library structure  
 - NEXT : **Bench-tune the homing parameters, then set `CAN_Dn_PNU_HOME=1`.** Step 1d is implemented but **defaults to OFF** - the stall threshold, approach velocity and the two gains are provisional and unmeasured. Nothing drives into a stop until somebody turns it on. See 6f near the end of this file for the tuning order  
-- ALSO NEXT : **CAN Update Plan step 2b** - simulated CAN devices for SITL, so the state machines, health logic and interlock timing can be exercised on a desk. **Deliberately ordered before 2c**: engine-start timing should be measured against a fake PMU, not tuned against a running engine  
+- **CAN Update Plan step 2b's fake PMU IS VALIDATED.** `Tools/pnu/sitl_can/`, **flown in SITL by PNU 2026-10-29** with Mission Planner on SERIAL0 and KGCS on SERIAL1: choke, the choke crank, Start, warm-up idle, the cooling trip to ground idle, Stop, takeoff and **RTL with landing** all behave as specified. Five defects were found and fixed on the way, **all five in the MAVLink takeoff watcher - none in the engine model and none on CAN**. **No firmware code changed and no version was bumped**  
+- **The start-up ORDER is not optional** - `vcan0` before SITL, and Mission Planner on TCP 5760 before SERIAL1 and SERIAL2 exist at all. The validated sequence is in `Tools/pnu/sitl_can/README.md`  
+- **The D9 failsafe now runs end to end on a desk.** `silent` in the fake's console while hovering trips it to RTL, `resume` reconnects and clears it - PNU 2026-10-29. That is the test step 2b existed for, and it no longer needs a connector pulled. **Not yet TIMED** against the ~100-200 ms the constants predict  
+- ALSO NEXT : the fake **gimbal** (three CubeMars motors), the other half of step 2b, which is what finally exercises the shared bus  
 - THEN : **step 2c** - engine-start interlock guards. Raised from the bench 2026-10-19: there is **no timeout today**, so **a link that drops mid-burst still starts the engine ~1 s later on its own**, and a PNU-GCS guard cannot cover that case. Designed, not applied  
 - THEN : **step 3** the SAR backend (protocol 17 retires there)  
 - **BENCH STATUS (5.1.16)** : PMU telemetry, command paths, prearm and the **in-flight failsafe** all PASSED 2026-10-19. **Outstanding** : the **shared bus** (`PNU_OPTS=3`, the test step 2 exists for), **Stop-command timing**, and the **~1.0 s interlock duration** after the 10 Hz rework  
@@ -1807,7 +1810,7 @@ gimbal Master ID or any gimbal command id, rather than letting the demux be ambi
 | **1** | **DONE in 5.1.11.** **`AP_PNU_CAN` multi-backend driver.** Generalise the 5.1.10 frontend: array of backends rather than one pointer, `AP_PNUGimbal_Backend` becomes the protocol-neutral `AP_PNU_CAN_Backend`, `handle_frame()` returns `bool` (first backend to claim a frame wins, the `MultiCAN` pattern at `AP_CANSensor.h:94`), `send_frame()` carries flags. CubeMars becomes a backend. **`CAN_Dn_PNU_OPTS` lands here** (see the device selection section below), and `CAN_Dn_PG_TYPE` drops `0:None` and defaults to `1:CubeMars`. Registered on protocol **16 for now**, PMUCAN untouched on 15 | new `AP_PNU_CAN/`, `AP_PNUGimbal/` | **none to flying code** | **DONE** - SITL + CubeOrangePlus build, `AP_PNU_CAN_ENABLED=0` builds, 10 codec tests pass |
 | **1b-1d** | **The gimbal track**, branching off step 1 - mount backend, lifecycle state machine, HOMING. **1b and 1c are DONE (5.1.12, 5.1.13); 1d is not.** Its own table and risk notes are in "Gimbal stabilisation and the mount state machine" near the end of this file | `AP_Mount/AP_Mount_PNUGimbal.*`, `AP_PNUGimbal/` | low to **HIGH** for 1d | see that section |
 | **2** | **DONE in 5.1.15, BENCH-TESTED 2026-10-19 except the shared bus.** **PMU becomes a backend.** `AP_PMUCAN` changes base class; protocol **15** instantiates `AP_PNU_CAN`, so `CAN_Dn_PNU_OPTS` bit 0 becomes live; the 10 Hz per-message rate is **explicit**; health is **id-based**; **16 kept as a deprecated alias**. Protocol 17 deferred to step 3 | `AP_PMUCAN/`, `AP_PNU_CAN/`, `AP_CAN.h`, `AP_CANManager.{h,cpp}`, `AP_Arming.cpp` | **HIGH** | **PASSED**: telemetry, command paths, prearm, in-flight failsafe and recovery. **OUTSTANDING**: shared bus with `PNU_OPTS=3`, and Stop-command timing. The ~1.0 s interlock duration PASSED at ~1-1.5 s |
-| **2b** | **Simulated CAN devices for SITL.** Fake PMU and fake CubeMars motors on a `vcan` interface, so the state machines, health logic and interlock timing can be exercised without hardware. **Ordered before 2c on purpose** - it is how 2c's windows get measured instead of reasoned about. See the section below | new `Tools/pnu/sitl_can/` | low | it *is* the test |
+| **2b** | **Simulated CAN devices for SITL.** **Fake PMU VALIDATED in SITL 2026-10-29.** Fake CubeMars motors still to come. **Ordered before 2c on purpose** - it is how 2c's windows get measured instead of reasoned about. See the section below | `Tools/pnu/sitl_can/` - no firmware change | low | **SITL-flown by PNU**: choke, the choke crank, Start, warm-up idle, cooling trip, Stop, takeoff, RTL with landing, and **the silent trigger tripping the D9 failsafe to RTL**. 43 offline tests pass |
 | **2c** | **Engine-start interlock guards.** Two independent time windows on PNU-ISSUE(D7)'s start sequence - a **500 ms TC1 staleness reset** and a **10 s stop-before-start window**. See the section below | `AP_PMUCAN/` | **HIGH** - engine start logic | step 2b first, then bench |
 | **3** | **SAR backend** under the same driver, 11-bit, ids `0x400`-`0x7FF`. Protocol 17 retires here, deferred from step 2 | `AP_PNUSAR/` | low | build; real work waits on the ICD |
 | **4** | Bus documentation, bitrate note, README and `version.h` | `README.md`, `version.h` | none | - |
@@ -2407,6 +2410,319 @@ firmware behaviour. It does not replace the bench - it moves the logic errors of
 **Cost:** a few hundred lines of Python per device. The CubeMars one is cheap because the
 codec is written and tested, and the fake motor is the same maths in reverse; the PMU one
 needs its five status frames built from the field layouts in `handleFrame()`.
+
+**The fake PMU's engine model - SPECIFIED BY PNU 2026-10-27.**
+
+*Superseded 2026-10-29: **`PMU CAN Comm Protocol.md` is now in the repository root** - an
+English rendering of the PMU's Korean PDF ICD, written by PNU. The fake is built from that,
+not from `AP_PMUCAN::handle_frame()`, so it no longer merely reproduces our own decoder's
+assumptions. The cross-check of the two is below and it came out clean.*
+
+**RPM ladder. No step may be skipped.**
+
+| State | RPM | Throttle | Entered by | Load current | Head temps |
+|---|---|---|---|---|---|
+| STOPPED | 0 | 0% | boot, Stop, cold-start abort | - | decay to 25 at 5 degC/s |
+| CHOKING | ramp to 1000, hold 2 s, then 0 | 8% | Start with **choke closed** | - | - |
+| CRANK | 1000, hold 2 s | 8% | Start with **choke open** | - | - |
+| WARM-UP idle | ramp to **4200** over 1 s, hold | 8% | 2 s at 1000 elapsed | - | climb 25 -> 100 at 5 degC/s |
+| GROUND idle, cooling on | **5000** | 13% | head temps reach **80** | **6.3 A** | continues climbing to 100 |
+| FLIGHT | **6200** | 50% | takeoff detected **from 5000 only** | **87.5 A** | climb to **180** at 5 degC/s |
+| COLD-START ABORT | -> 0 | 0% | takeoff attempted below 5000 | - | decay to 25 |
+
+CHOKING leaves the engine **stopped**: it reaches 1000 rpm for 2 s and stops, and the status
+word must still read as not-running afterwards. Ceiling is ~6500 and the model never exceeds
+7000 even at 100% throttle; above 6500 sets the over-speed bit rather than clipping silently.
+
+**Battery and generator are tightly coupled** - same voltage, same current. The flight load is
+87.5 A and *something* carries it: the engine's generator while the engine runs, the battery
+the instant it stops. That is what makes the cold-start abort observable - RPM falls to zero,
+ILD stays at the flight load, and **IBAT goes to -87.5 A (raw -875), negative for discharge**,
+which is the only place in the whole model where IBAT is not zero.
+
+`System_Voltage` is **48.0 V at all times**. `Battery_Temp` and `PMU_Temp` are **0** -
+deliberately not modelled. `Fuel_Quantity` is **100** and the Fuel Low bit is held clear,
+because the real aircraft has no fuel sensor.
+
+**`PMU_Status.PMU_Status` - the 16-bit status word. NOT decoded anywhere in the FC today**;
+`handle_frame()` stores it whole and `GCS_PNU.cpp` forwards it whole. Written down here
+because the fake has to generate it and nothing else in the tree records it.
+
+| Bit | 1 means | 0 means |
+|---|---|---|
+| 0 | Manual throttle | PMU auto throttle |
+| 1 | Engine is in **starting** mode | after starting, or not starting |
+| 2 | Engine is **stopping** | after stop, or already stopped |
+| 3 | Choke valve **closed** | choke valve open |
+| 4 | Cooling fan ON | cooling fan OFF |
+| 5 | *reserved* | |
+| 6 | Engine RPM too high (> 6500) | |
+| 7 | Engine stopped from unknown reason | |
+| 8 | Fuel low | |
+| 9 | Engine exceeded MTBF, needs overhaul | |
+| 10 | Engine cylinder high-temperature warning | |
+| 11, 12 | *reserved* | |
+| 13 | Battery overcurrent warning | |
+| 14 | Battery undervoltage warning | |
+| 15 | Battery overvoltage warning | |
+
+**Bits 13, 14 and 15 come from the ICD, not from the 2026-10-27 specification**, which
+listed 11-15 as reserved; PNU has confirmed that was a slip in that message, so the ICD
+stands. The ICD also gives no numeric
+threshold for bits 6 and 10 - "above warning threshold" and "high-temperature warning" - so
+the 6500 rpm and 230 degC figures are PNU's, and the fake uses them as the trip points.
+
+**There is no "engine is running" bit.** Bit 1 is set only *during* the start, bit 2 only
+*during* the stop, and both read 0 once the engine is up. Running is inferred from the RPM
+range, and **that inference belongs to KGCS, not to the FC** - confirmed by PNU 2026-10-29.
+Over-speed (bit 6) is the same division: it is how KGCS annunciates an abnormal generator,
+and the FC's only job is to carry the word intact.
+
+**So the FC passing `PMU_Status` through undecoded is the design, not an omission.** Nothing
+here is a TODO. If a future session is tempted to parse this word in the FC, it needs a new
+FC-side requirement first - the bits above exist to let the *fake* generate them faithfully.
+
+**The silent trigger - the reason step 2b exists.** The fake PMU takes a runtime command
+that **stops it transmitting without killing the process**, and a second that resumes.
+Three lines, and it is the only way to reach the two tests that matter:
+
+- the leaky-bucket health transitions and the D9 failsafe, start to finish, repeatably
+- **the shared bus**: the PMU goes quiet while the fake gimbal keeps chattering. That is
+  exactly the bug step 2 fixed - the old `RXspin()` took any traffic as proof of life - and
+  it is unprovable on the desk any other way
+
+**Defaults chosen here, not specified by PNU** - each is a one-line change:
+
+- `Engine_Hour_Count` increments whenever RPM > 0
+- `Current_Control_Command` and `Battery_Quantity_Command` echo the last BATCTRL received
+- bit 1 is held from Start until the warm-up idle RPM is reached; bit 2 for the stop ramp
+- the cold-start abort **latches**, needing a fresh Start, and sets bit 7
+
+**All three open questions closed by the ICD and by PNU, 2026-10-29:**
+
+1. **Scale is 0.1, not x100.** Every INT16 analog field - TEMP, IBAT, TEMP1, TEMP2, ILD,
+   VBUS, GCMD, GAGE, PTEMP - is `physical = raw * 0.1`. The x100 guess was **wrong**, and
+   it mattered: see the 6.25 A note below. The FC itself still applies no scale at all, so
+   the conversion remains entirely KGCS's.
+2. **`IBAT` is positive for CHARGING, negative for DISCHARGING** - ICD BATSTS, and confirmed
+   by PNU. Only ILD and IBAT are measured, and the generator's output is inferred:
+
+   ```text
+   generated = ILD + IBAT
+   ```
+
+   A charging battery *adds* to what the generator must produce; a discharging one subtracts,
+   because IBAT is then negative. **While the engine runs the fake holds IBAT at 0**, by
+   PNU's instruction, rather than modelling a charge current - so `generated == ILD`
+   throughout the normal ladder, and the only non-zero IBAT in the model is the abort.
+3. **The cold-start abort latches** and needs a fresh Start. Confirmed.
+
+**The cooling-device current is 6.3 A, raw 63** - settled by PNU 2026-10-29. The original
+figure was 6.25 A, which is raw 62.5 and does not exist at 0.1 A resolution. The pair
+6.25 A / 87.5 A at 48 V is 300 W / 4200 W, so the round numbers were always the watts and
+the amps were the derived quantity, free to move; 6.3 A is 302 W.
+
+Every other quantity lands exactly: 48.0 V -> 480, 87.5 A -> 875, -87.5 A -> -875,
+25 degC -> 250, 80 -> 800, 100 -> 1000, 180 -> 1800, 230 -> 2300. All well inside INT16.
+
+**With that, the engine model is fully specified and nothing in it is assumed.**
+
+`Throttle_Position_Report` (PCL) and `Fuel_Quantity` (GAS) are `INT8` and carry **raw
+percent**, scale 1.0 - the throttle column above is literal.
+
+**`AP_PMUCAN` cross-checked against `PMU CAN Comm Protocol.md`, 2026-10-29. Clean.**
+
+The ICD warns twice that the PDF prints field *order* without byte offsets, and says not to
+finalize a decoder on the printed left-to-right order alone. **Our decoder's offsets match
+that order in all five frames**, and the 5.1.16 bench run read sane values from real
+hardware, which is the capture validation the ICD asks for:
+
+| Frame | ICD order | `handle_frame()` offsets | |
+|---|---|---|---|
+| BATSTS | BSTS, TEMP, IBAT, GAGE | 0:2, 2:4, 4:6, 6:8 | match |
+| ENGSTS | TEMP1, TEMP2, RPM, GAS, PCL | 0:2, 2:4, 4:6, 6, 7 | match |
+| AUX1STS | ICMD, ILD, VBUS, GCMD | 0:2, 2:4, 4:6, 6:8 | match |
+| AUX2STS | HOURCNT, RSV, PSTS, PTEMP | 0:3, (3 skipped), 4:6, 6:8 | match |
+| VERSTS | DATE, MN, MJ, RSV | 0:4, 4, 5, (6:8 ignored) | match |
+
+Also confirmed: the ICD's instruction 2 - *"frames with an invalid DLC must not overwrite
+the latest valid values or valid reception timestamps"* - is already satisfied, because the
+D6 short-frame check returns before `_pmu_frames_seen` and `_last_pmu_frame_ms` are touched.
+
+**Four things the ICD records that are not otherwise written down anywhere in this tree:**
+
+- **The PMU never transmits on its own.** Status is strictly RTR-request / Data-response,
+  which is exactly what `_rtr_id[]` and the five-slot rotation do. **The fake PMU must be
+  RTR-driven, not free-running** - and the silent trigger therefore means *stop answering
+  RTRs*, which is a truer failure mode than a dropped broadcast.
+- **`HOURCNT` is in SECONDS.** The ICD says so explicitly - *"despite its name"*. Our field
+  is called `Engine_Hour_Count` and the MAVLink field `HOURCNT`, both of which read as
+  hours. The FC only forwards it raw so there is **no FC bug**, but KGCS must divide by
+  3600, and nothing in the FC should ever present this value as hours.
+- **The ICD's bit rate of 500 kbps does not apply here.** The CubeMars motors have no option
+  but 1 Mbit/s, so **the whole of CAN1 runs at 1 Mbit/s once the gimbal and the SAR are on
+  it** and the PMU is reconfigured upward to match. Confirmed by PNU 2026-10-29 - the ICD
+  figure is superseded, not overlooked.
+- **`ICMD` width is inferred, and its type and scale are `TBD` in the ICD.** We decode it as
+  INT16, which is the only width that fits, but the signedness and scale are assumed. It is
+  a developer-debug field; the fake will echo the last BATCTRL into it and nothing should
+  depend on its value.
+
+`MJ` and `MN` are **packed BCD** - `0x12` is version 12, not 18. The FC forwards them raw,
+so the conversion is KGCS's. The fake reports **MJ = 1, MN = 0** - version 1.0, which is
+`0x01` and `0x00` and reads identically in BCD and binary, so the choice sidesteps the
+encoding rather than exercising it. Nothing in the model depends on the PMU version.
+
+**Step 2b AS BUILT - the fake PMU, 2026-10-29. `Tools/pnu/sitl_can/`.**
+
+**No firmware file changed and no version was bumped.** Every previous CAN Update Plan
+step carried a `version.h` bump because it changed the aircraft; this one does not change
+the binary at all, so bumping `THISFIRMWARE` would have decoupled the version from what
+the version describes. If PNU wants a tag for it, it should say "tools" rather than a
+5.1.x firmware number.
+
+| File | What it is | Lines |
+|---|---|---|
+| `pmu_model.py` | the engine, generator and battery - pure state machine, no I/O | 335 |
+| `pmu_frames.py` | the five status frames - wire format only, no state | 99 |
+| `fake_pmu.py` | SocketCAN I/O, the operator console, MAVLink takeoff detection | 304 |
+| `test_pmu_model.py` | 17 tests - the RPM ladder, and every field at the offset `AP_PMUCAN` reads | |
+| `test_fake_pmu.py` | 26 tests - RTR dispatch, command decode, the silent trigger, takeoff detection | |
+
+The three-way split is deliberate: the model is testable without CAN, the frames are
+testable without a socket, and **a second protocol - the gimbal - reuses neither, which is
+the point**. `Tools/pnu/sitl_can/README.md` has the `vcan0` setup, the four SITL
+parameters and the console reference.
+
+**Raw `AF_CAN` sockets, not `python-can`**, so there is no dependency to install and the
+RTR and extended-id handling stays explicit and auditable. `pymavlink` is imported lazily
+and only for automatic takeoff detection; the console's `takeoff` replaces it.
+
+**Confirmed while building it, by reading the SITL transport rather than assuming:**
+
+- `AP_HAL_SITL` hard-codes the SocketCAN interface name as `vcan<instance>`
+  (`CAN_SocketCAN.cpp:32`), so the first interface is always **`vcan0`** - it is not
+  configurable, and the fake's default matches.
+- **`SIM_CAN_TYPE1 = 2`** selects SocketCAN; the default is 1, multicast UDP.
+- `AP_HAL::CANFrame`'s `FlagEFF`, `FlagRTR` and `FlagERR` are **bit-identical** to
+  SocketCAN's `CAN_EFF_FLAG`, `CAN_RTR_FLAG` and `CAN_ERR_FLAG` (`CANIface.h:32-34`), and
+  `CAN_SocketCAN::send()` copies `frame.id` through unmasked. **So RTR survives the SITL
+  transport in both directions** - which the whole design depends on, and which was worth
+  checking rather than hoping.
+
+**VALIDATED IN SITL BY PNU, 2026-10-29 - THE WHOLE SEQUENCE FLEW.** `vcan0`, Mission
+Planner on SERIAL0 and KGCS on SERIAL1. Correct: choke valve open and close, the choke
+crank, Start, the warm-up idle, the cooling trip to ground idle, Stop, takeoff,
+**RTL with landing as the final stage**, and **the silent trigger: `silent` while hovering
+trips the D9 failsafe to RTL, `resume` reconnects and clears it**. The failsafe that until
+now could only be tested by pulling a CAN connector is a one-word console command. The socket path, the CAN filter and the kernel's
+RTR delivery are therefore all exercised, which the offline tests could not reach.
+
+**The validated start-up order is in `Tools/pnu/sitl_can/README.md`** and it is not
+optional: `vcan0` must exist before SITL starts, and **Mission Planner must attach to TCP
+5760 before SERIAL1 and SERIAL2 exist at all**. `--no-mavproxy` is used because KGCS needs
+a TCP endpoint; Mission Planner on its own does not need it and is happy on MAVProxy's UDP
+14550.
+
+**FIVE DEFECTS FOUND IN SITL, ALL IN THE TAKEOFF WATCHER, NONE IN THE MODEL OR ON CAN.
+The second was introduced by the fix for the first**, which is worth recording as plainly
+as the bugs themselves. **The CAN side has not needed a single fix.** Every one of the
+five was in the FC-state bridge - the part that is not CAN, not the ICD, and not specified
+by anybody, which is where the guessing was.
+
+**(1) ILD, the head temperatures and PCL oscillated after takeoff.**
+
+`recv_match()` accepts `HEARTBEAT` from **any source system**, and the armed flag was taken
+from whichever heartbeat arrived last. With Mission Planner and KGCS also on the link - and
+both send their own heartbeats, with no `SAFETY_ARMED` bit - `armed` alternated at the
+heartbeat rate, so the airborne state alternated, so the engine state flapped
+GROUND_IDLE <-> FLIGHT. ILD and PCL are instantaneous functions of state and snap on every
+flip; the temperatures slew and so wobbled. **Invisible before takeoff**, because the
+airborne state is false either way, which is exactly why it survived to flight.
+
+Fixed by filtering to one system id, plus two hardenings found on the way: the altitude
+fallback gained **hysteresis**, so a hover sitting on the threshold cannot chatter - a
+real-aircraft hazard, not only a simulated one - and `LANDED_STATE_UNDEFINED` is treated
+as no data rather than as "on the ground".
+
+**(2) Then takeoff was not detected at all.** The fix above identified the vehicle as *the
+first heartbeat that is not `MAV_TYPE_GCS` and not `MAV_AUTOPILOT_INVALID`*. That is a
+sound filter and an **unsound identifier**: a ground station that does not label itself
+`MAV_TYPE_GCS` captures the lock, and from then on no `GLOBAL_POSITION_INT` matches, the
+altitude never updates, and nothing is ever airborne. KGCS is the likely candidate; the
+point is that it should never have depended on what any GCS chooses to put in a heartbeat.
+
+**The vehicle is now identified by its TELEMETRY.** `GLOBAL_POSITION_INT` and
+`EXTENDED_SYS_STATE` are sent by vehicles and by nothing else, so whoever sends one is the
+vehicle. Heartbeats are then read only from that system id - the filter from (1) is kept,
+because a ground station sharing the vehicle's system id would otherwise still clear the
+armed flag. `--sysid` pins it by hand if ever needed.
+
+**(3) And it could not have worked at all as a passive listener.** Two facts about SITL
+that neither the fake nor this file had recorded:
+
+- **`udp:127.0.0.1:14550` is MAVProxy's output, not SITL's.** With `--no-mavproxy` nothing
+  listens there at all. SITL's own endpoints are TCP **5760** (SERIAL0, `tcp:0:wait`, so
+  SITL blocks until something connects), **5762** and **5763** (`SITL_State.h:33`).
+- **Copter's default stream rates are ALL ZERO.** `GCS_MAVLink_Parameters.cpp:60-70` sets
+  every `AP_MAV_DEFAULT_STREAM_RATE_*` to 0 for `APM_BUILD_COPTER_OR_HELI`. A listener
+  that does not ask receives HEARTBEAT and nothing else - no position, no extended state,
+  so no takeoff, ever, on any endpoint. MAVProxy and Mission Planner work because they
+  request streams; the first SITL run only worked because MAVProxy was doing it.
+
+**The watcher now requests its own streams** with `MAV_CMD_SET_MESSAGE_INTERVAL`, addressed
+using the heartbeat and re-sent every 5 s until a vehicle has been identified. It no longer
+depends on another ground station having asked for anything.
+
+**Both facts were measured against a live SITL, not reasoned about**, by running a passive
+listener and the watcher side by side on SERIAL2:
+
+```text
+A) PASSIVE listener, 8 s : HEARTBEAT 82, TIMESYNC 9, SYS_STATUS 1, 51005 x803
+                           - no GLOBAL_POSITION_INT, no EXTENDED_SYS_STATE
+B) WATCHER, 14 s         : asked system 1/1, identified vehicle 1 from
+                           GLOBAL_POSITION_INT, landed_state=1 (ON_GROUND)
+```
+
+**(5) The engine dropped to ground idle WHILE DESCENDING UNDER RTL.** Reported by PNU
+after a flight in SITL: changing to RTL took the engine to the 5000 rpm ground idle in the
+air. `MAV_LANDED_STATE_LANDING` is reported all the way down, and the airborne test asked
+whether the state was `IN_AIR` or `TAKEOFF` - which looks equivalent to "not on the
+ground" and is not. **Only an explicit `ON_GROUND` now counts as landed**; anything else,
+including any `landed_state` MAVLink adds later, keeps flight power. That is the safe
+direction, and on a real aircraft it is the only acceptable one - an engine that drops to
+idle during a descent is a far worse failure than one that holds flight power after
+touchdown.
+
+**(4) The watcher died instead of retrying.** `SERIAL1` and `SERIAL2` (TCP 5762 and 5763)
+**do not exist until something connects to SERIAL0**, because SERIAL0 is `tcp:0:wait` and
+SITL blocks at startup until a ground station attaches - measured: only 5760 is open
+beforehand, 5762 and 5763 appear afterwards. Starting the fake first therefore got
+`ECONNREFUSED`, `mavutil.mavlink_connection()` raised, and **the thread died with a
+traceback and no other symptom** - takeoff detection silently off for the rest of the
+session. The connection is now retried, and the whole watcher loop is wrapped so that this
+thread can never again disappear quietly.
+
+**And the console now answers this question itself.** `status` reports the MAVLink side -
+the locked system id, armed, relative altitude, landed state and the heartbeat count - and
+the fake warns once if no vehicle telemetry has arrived after 15 s. All three defects above
+were diagnosed by reasoning from a symptom; there is now no need to do that again.
+
+**WHAT STILL HAS NOT BEEN RUN:**
+
+- the leaky-bucket health transitions, the **D9 failsafe** and the **silent trigger** -
+  the tests step 2b exists for. The fake supports them; nobody has driven them yet
+- **step 2c's interlock timing**, which is the measurement 2b was ordered before 2c to get
+- the fake gimbal, and therefore the shared bus
+
+**One deliberate limitation.** RPM follows the scripted ladder and is **not** derived from
+`ENGPCL`, because the ICD gives no throttle-to-RPM relation. A manual throttle command is
+recorded and echoed but moves nothing. Deriving a curve would make the fake agree with an
+invention rather than with the PMU.
+
+**Values marked `MODEL CHOICE` in the source are not protocol facts** - GAGE, the BCD
+DATE, the landing transition, the stop ramp. Each is a plausible filler for something the
+ICD leaves open and each is a one-line change.
 
 ---
 
