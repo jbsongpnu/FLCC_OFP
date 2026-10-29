@@ -210,6 +210,13 @@ const AP_Scheduler::Task Copter::scheduler_tasks[] = {
     SCHED_TASK(check_vibration,       10,     50,  87),
     SCHED_TASK(gpsglitch_check,       10,     50,  90),
     SCHED_TASK(takeoff_check,         50,     50,  91),
+    // PNU : scheduled here, beside ekf_check / gpsglitch_check, and NOT from
+    // ten_hz_logging_loop() where it used to live - that task sits inside
+    // #if HAL_LOGGING_ENABLED, so a build with logging compiled out had NO PMU
+    // FAILSAFE AT ALL and said nothing about it.  AGENTS.md: a core component must
+    // never depend on an optional one.  The rate is unchanged at 10 Hz, which is what
+    // PNU-ISSUE(D9)'s ~100-200 ms response time was measured against.
+    SCHED_TASK(failsafe_pmucan_check, 10,     50,  92),
 #if AP_LANDINGGEAR_ENABLED
     SCHED_TASK(landinggear_update,    10,     75,  93),
 #endif
@@ -734,7 +741,6 @@ void Copter::ten_hz_logging_loop()
         camera_mount.write_log();
     }
 #endif
-    failsafe_pmucan_check();        // check PMU failsafe condition & action (PNU)
 }
 
 // twentyfive_hz_logging - should be run at 25hz

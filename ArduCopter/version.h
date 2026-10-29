@@ -7,7 +7,7 @@
 #include "ap_version.h"
 
 // PNU : This is a custom code modified by PNU Drone
-#define THISFIRMWARE "PNU_OFP V5.1.16"
+#define THISFIRMWARE "PNU_OFP V5.1.17"
 
 // NOTE: 5.1.6 is a DEV build on top of the 5.1.0 OFFICIAL release, which closed the
 // Copter-4.7.1 -> FLCC migration.  It closes D10 Stage 3: TM2's Zoom_POS_FB now carries
@@ -22,6 +22,31 @@
 // and a send_camera_settings() override that forwards real values instead of upstream's
 // NaN placeholders are all vendor-neutral and worth submitting to ArduPilot; only
 // AP_Q30 decides the value means times, which is where PNU-specific facts belong.
+//
+// 5.1.17 moves the PMU failsafe out of a logging task.
+//
+//   failsafe_pmucan_check() was called from the tail of ten_hz_logging_loop(), and that
+//   SCHED_TASK sits inside #if HAL_LOGGING_ENABLED (Copter.cpp).  SO A BUILD WITH LOGGING
+//   COMPILED OUT HAD NO PMU FAILSAFE AT ALL - the check was simply never scheduled, with
+//   no prearm warning, no message and nothing in any log to say the protection was gone.
+//   AGENTS.md: a core, non-optional component must never depend on a compile-time
+//   optional one.
+//
+//   HOW EXPOSED WAS IT, HONESTLY: not at all, today.  ArduCopter does not currently build
+//   with HAL_LOGGING_ENABLED=0 whatever this file does - AC_CustomControl.cpp:190 calls
+//   AP::logger() with no guard and the build stops there (verified 2026-10-29, and the
+//   failure is upstream's, not ours).  So no shippable image could have lost the failsafe
+//   this way.  The coupling was still wrong and the fix still belongs here, but this is a
+//   latent structural defect that was made safe, not a bug that bit anyone.
+//
+//   It is now its own SCHED_TASK at priority 92, beside ekf_check, check_vibration and
+//   gpsglitch_check - the other 10 Hz safety checks, none of which are logging-gated.
+//   THE RATE IS UNCHANGED AT 10 Hz on purpose: PNU-ISSUE(D9)'s ~100-200 ms response was
+//   measured against it, confirmed on the bench 2026-10-19 by pulling the CAN connector
+//   and again in SITL 2026-10-29 with the fake PMU's silent trigger.
+//
+//   Found by reading the failsafe path while preparing the SITL silent-trigger test, not
+//   by a failure - every build PNU has flown has logging enabled, so nothing was at risk.
 //
 // 5.1.16 fixes two defects found on the PMU bench 2026-10-19.
 //
