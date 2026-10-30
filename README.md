@@ -5,16 +5,25 @@
 - **SAR Integration Plan step 3a is DONE in 5.1.19** - `AP_PNUSAR` is an `AP_PNU_CAN` backend, **protocol 17 is retired**, and the connection layer works: Heart_Beat `0x510`, the FC-maintained Live_Counter, the 3 s `T_HB` timeout and `SAR_STATUS` 0 and 1. **Now exercised against the fake SAR** by step 3b; still **no SAR hardware**  
 - **SAR Integration Plan step 3b is DONE, tools only with no version bump** - `Tools/pnu/sitl_can/fake_sar.py`, and with it **the first shared-bus run this project has ever done**: fake PMU and fake SAR on one `vcan0` at `CAN_D1_PNU_OPTS = 5`. Measured 2026-10-30 - `SAR disconnected` **3.058 s** after the last heartbeat against the ICD's 3,000 ms, the reconnection announced in 16 ms **with the state staying Disconnected**, and the short frame, the reserved `0x523` and an intruding `0x400` each reported. The PMU answered **505 of 505 RTRs** on the shared wire throughout  
 - **SAR Integration Plan step 3c is DONE in 5.1.20** - TC **50050** and TM **51050**, the TM at **5 Hz unconditionally**, and TC ingest that checks its source. **`Live_Counter` is now observable and was measured against the fake SAR**: 6 receptions counted while the device's own `Raw_Counter` read 777005  
-- NEXT : **step 3d, the Start and Stop commands** - `0x501`/`0x502`, their responses, the FC's 2 s windows, states 2/3/4 and the **RTK-Fixed start interlock**. Until then the FC refuses a Start out loud rather than silently  
+- **SAR Integration Plan step 3d is DONE in 5.1.21** - the **observation command layer**: `0x501`/`0x502` out, `0x521`/`0x522` in, the FC's **2 s window**, `SAR_STATUS` 2, 3 and 4, and the ICD 14.3.3 **Start interlock** behind the new **`CAN_Dn_PNU_SCHK`** bitmask. Measured in SITL against the fake SAR on a shared bus with the fake PMU; **no SAR hardware and no KGCS**  
+- NEXT : **step 3e, the navigation bundle** - the nine frames `0x400`-`0x408` at 10 Hz behind `NAV_TX_ENABLED`, 300 ms GPS freshness and ICD 14.7 automatic termination, with **`0x404` carrying placeholder zeros**  
 - **The ICD confirms the ID reservation made before it existed** - `0x400`-`0x7FF`, 11-bit, 1 Mbit/s - so the gimbal, PMU and SAR still share CAN1 without collision, and MAVLink 50050/51050 are free  
 - ALSO NEXT : **PNU's eye on two step 2c decisions** - the Stop window is measured from the **Start press** rather than from the interlock completing, and a **Stop** burst cut off mid-way no longer completes either. Both are recorded in the step 2c section. **Not tested against a real PMU, engine, KGCS or LTE link**  
 - ALSO NEXT : the fake **gimbal** (three CubeMars motors), the other half of step 2b - **displaced by the SAR work**. The **shared bus** no longer waits on it - step 3b exercised it with the fake SAR beside the fake PMU  
 - ALSO NEXT : **Bench-tune the homing parameters, then set `CAN_Dn_PNU_HOME=1`.** Step 1d is implemented but **defaults to OFF** - the stall threshold, approach velocity and the two gains are provisional and unmeasured. Nothing drives into a stop until somebody turns it on. See 6f near the end of this file for the tuning order  
-- THEN : **step 3e**, the nine-frame 10 Hz navigation bundle `0x400`-`0x408`, with **`0x404` carrying placeholder zeros** until the gimbal can supply real attitude  
+- THEN : **step 3f**, real gimbal attitude into `0x404` and the 40 ms `ATT_FRESH` contract - which is what turns on `CAN_Dn_PNU_SCHK` bit 2 and raises its default. **Blocked on a measured CubeMars feedback rate**  
 - *Done in step 2b, tools only with no version bump :* the **fake PMU is validated** (`Tools/pnu/sitl_can/`, flown in SITL 2026-10-29 with Mission Planner on SERIAL0 and KGCS on SERIAL1 - choke, the choke crank, Start, warm-up idle, the cooling trip, Stop, takeoff and RTL with landing). **The D9 failsafe now runs end to end on a desk**: `silent` trips it to RTL, `resume` clears it, no connector pulled. **The start-up ORDER is not optional** - `vcan0` before SITL, Mission Planner on TCP 5760 before SERIAL1 and SERIAL2 exist at all; the validated sequence is in `Tools/pnu/sitl_can/README.md`  
 - **BENCH STATUS (5.1.16)** : PMU telemetry, command paths, prearm and the **in-flight failsafe** all PASSED 2026-10-19. **Outstanding** : the **shared bus** (`PNU_OPTS=3`, the test step 2 exists for), **Stop-command timing**, and the **~1.0 s interlock duration** after the 10 Hz rework  
 - *Done in the gimbal track :* step 1b (`AP_Mount_PNUGimbal`, 5.1.12) and step 1c (lifecycle state machine, 5.1.13). `AP_Mount` does stabilise against FC attitude and needs no camera, which is why the gimbal is an `AP_Mount` backend  
-- IN THIS VERSION : V5.1.20 - **SAR Integration Plan step 3c: the SAR's two MAVLink messages.** TC **50050** and TM **51050** in `pnu_kal.xml`, the TM at **5 Hz unconditionally**, TC ingest with a source check. **Measured in SITL against the fake SAR**; no SAR hardware and no KGCS  
+- IN THIS VERSION : V5.1.21 - **SAR Integration Plan step 3d: the SAR's observation command layer.** `0x501`/`0x502` go out, `0x521`/`0x522` come back, `SAR_STATUS` reaches 2, 3 and 4, and TC50 is no longer recorded-and-ignored. **Measured in SITL against the fake SAR**; no SAR hardware and no KGCS  
+   - **`SAR_STATUS` is now COMPUTED, not assigned.** ICD section 8 states a priority - disconnected or recovery-pending (0) outranks the current attempt's timeout (4), which outranks the last confirmed state (1/2/3) - and with five states and two latches, last-writer-wins would quietly break it. One `publish_state()` decides, so **"a heartbeat must not overwrite 2/3/4 with Ready" is true by construction** rather than by remembering it  
+   - **The FC opens a 2 s window and NEVER retries** (ICD 14.5 prohibits it - an FC retry loop would exceed the GCS's two-attempt limit). A window opens only for a command **actually transmitted**, so a refused send does not become state 4; a new command clears the previous latch and republishes `LAST_CONFIRMED_STATE` while it waits; an expired response is never counted retroactively. **A failed Start leaves navigation OFF, a failed Stop RETAINS it**, because stopping is unconfirmed  
+   - **New `CAN_Dn_PNU_SCHK`**, the Start interlock as a bitmask - RTK Fixed, GPS fix age, gimbal attitude age, navigation health. **Default 11 is the ICD's set less the attitude age**, which is off because `0x404` is hard-coded zeros until 3f and **a constant has no age**; setting that bit refuses every Start, which is the honest behaviour. It exists because a bench or an integration test has no RTK fix and could otherwise never send one Start. **Relaxing it is announced** once per boot and again on every Start under it, and it is read live - no reboot  
+   - **Stop is never gated** (ICD 14.4.2, in bold there): stopping a payload producing contaminated data must not depend on the quality of that data  
+   - **Four frames, one payload byte `0x01`.** The ICD says in its own words not to encode Stop as `0x02` merely because it is Stop, so one constant serves commands and responses alike. A response carrying anything else is refused and the window left to expire - measured with `0xFF`  
+   - **A TC50 that can reach no device now says so** (`SAR: no backend, check PNU_OPTS`). Without it the GCS's own 3 s window would report the SAR as not responding, blaming the payload for a configuration fault on this aircraft - PNU-ISSUE(D6)  
+   - **`SIM_GPS1_*` reports RTK Fixed in SITL**, which is what made the *permitted* path testable and not only the refusals  
+- For 5.1.20 version : **SAR Integration Plan step 3c: the SAR's two MAVLink messages.** TC **50050** and TM **51050** in `pnu_kal.xml`, the TM at **5 Hz unconditionally**, TC ingest with a source check. **Measured in SITL against the fake SAR**; no SAR hardware and no KGCS  
    - **`Live_Counter` is observable for the first time.** Measured: the FC reported **6** after six heartbeats while the device's own `Raw_Counter` read **777005** - two different quantities, which is what ICD 3.3 requires. A rejected short heartbeat did **not** increment it, and it **held its value across a disconnect** and continued on reconnect  
    - **TM50 is 5 Hz whatever else is true** (ICD 3.2), so it is its own `SCHED_TASK` and not a stream-group entry - Copter's default stream rates are all zero, and a rate the ICD fixes is not the operator's to set. With no SAR backend in the build it reports Disconnected and a zero count, which is the truth in that configuration. Measured at **5.01 Hz**  
    - **OPERATIONAL : KGCS must send TC50 from a system id `MAV_GCS_SYSID` covers** (default 255), or it is refused with a message naming the parameter. TC50 has no `target_system` field, so ICD 3.1 asks the FC to check the sender, and `sysid_is_gcs()` is that gate. **TC1 never checked, so nothing before this depended on that parameter being right.** The component id is deliberately not filtered - the ICD names no permitted value - and is logged instead  
@@ -1893,7 +1902,7 @@ So presence becomes a bitmask.
 |---|---:|---|
 | **`CAN_Dn_PNU_OPTS`** | 15 | bit 0 PMU, bit 1 gimbal, bit 2 SAR. **Default 1** (PMU only) |
 | `CAN_Dn_PG_*` | <=15 | gimbal settings, **names unchanged from 5.1.10** |
-| `CAN_Dn_PS_*` | - | SAR settings, added with the SAR backend |
+| **`CAN_Dn_PNU_SCHK`** | 15 | SAR Start interlock bitmask, added in step 3d. bit 0 RTK Fixed, bit 1 GPS fix age, bit 2 gimbal attitude age, bit 3 navigation health. **Default 11** |
 
 It is a **new `PNU_` subgroup** on `CANDriver_Params` at index 8, and it holds **everything** -
 the device bitmask and the gimbal settings in one flat group. The plan originally said `PG_`
@@ -3020,7 +3029,7 @@ gimbal can supply real attitude.** Recorded with its cost in "The one real risk"
 | **3a** | **DONE in 5.1.19.** `AP_PNUSAR` becomes an `AP_PNU_CAN_Backend`; **protocol 17 retires**, deferred from step 2; `PNU_OPTS` bit 2 wires it up. `0x510` Heart_Beat, Live_Counter, the 3 s timeout, `SAR_STATUS` 0 and 1 | `AP_PNUSAR/`, `AP_CAN.h`, `AP_PNU_CAN.cpp`, `AP_CANManager/`, `AP_Arming.cpp` | nothing |
 | **3b** | **DONE 2026-10-30, tools only, no version bump.** **Fake SAR** on `vcan0`, same shape as the fake PMU. Heartbeat first, then grown phase by phase. **Carried the first shared-bus run there has ever been** - fake PMU and fake SAR together at `PNU_OPTS=5` | `Tools/pnu/sitl_can/` | 3a |
 | **3c** | **DONE in 5.1.20.** MAVLink **50050** TC and **51050** TM in `pnu_kal.xml`; TM at 5 Hz unconditionally; TC ingest with a source check. The `SAR connected` / `SAR reconnected` STATUSTEXT already landed in 3a | `pnu_kal.xml`, `GCS_PNU.cpp`, `GCS.h`, `GCS_Common.cpp`, `ap_message.h`, `Copter.cpp`, `UserCode.cpp` | 3a |
-| **3d** | Commands `0x501`/`0x502`, responses `0x521`/`0x522`, the 2 s FC windows, states 2/3/4, the **RTK-Fixed start interlock** | `AP_PNUSAR/` | 3c |
+| **3d** | **DONE in 5.1.21.** Commands `0x501`/`0x502`, responses `0x521`/`0x522`, the 2 s FC window, states 2/3/4, the **RTK-Fixed start interlock** behind the new `CAN_Dn_PNU_SCHK`, and `SAR_Ctrl_Seq` finally consumed | `AP_PNUSAR/`, `AP_PNU_CAN/`, `GCS_PNU.cpp`, `Tools/pnu/sitl_can/` | 3c |
 | **3e** | The nine-frame **10 Hz navigation bundle** `0x400`-`0x408`, GPS freshness at 300 ms, automatic termination. **`0x404` is placeholder zeros** | `AP_PNUSAR/` | 3d |
 | **3f** | Real gimbal attitude into `0x404`, and the `ATT_FRESH` 40 ms contract | `AP_PNUGimbal/`, `AP_PNUSAR/` | **measured gimbal feedback rate** |
 | **3g** | ICD section 16: the 25 deg envelope and **yaw to waypoint-segment heading** | `AP_PNUGimbal/`, mission access | 3f |
@@ -3137,6 +3146,80 @@ that is step 3d.
 *Verified:* CubeOrangePlus **1,734,516 B, 231,560 free** (+644 B over 5.1.19), SITL, and
 **SITL with `AP_PNU_CAN_ENABLED=0`** - the last one is the point of the D14 globals: TM50
 still compiles and still reports Disconnected when there is no CAN driver at all.
+
+### Step 3d as built - MEASURED 2026-10-30
+
+The command layer, in `AP_PNUSAR` plus one parameter on the driver and one guard in
+`GCS_PNU.cpp`. `gcs().SAR_Ctrl_Seq` finally has a consumer: the GCS layer stores the
+command and increments, the backend reads the increment once from the CAN thread and acts.
+
+**The structural change is `publish_state()`.** ICD section 8 states a *priority* between
+the sources of `SAR_STATUS`, not a sequence of assignments - disconnected or
+recovery-pending (0) outranks the current attempt's timeout (4), which outranks the last
+confirmed state (1/2/3). Step 3a could assign the state at each event because there were
+two of them; with five states and two latches, last-writer-wins would quietly violate the
+document, and "a heartbeat must not overwrite 2/3/4 with Ready" (14.1) is only one of the
+orderings it would break. Computing the published value from the inputs makes the priority
+true by construction. **Step 3a's single `_recovery_pending` flag had to split in two for
+that**: the reconnection notification fires once, the inhibition stays latched until the
+next power cycle. In 3a the state stayed Disconnected only because nothing wrote it again.
+
+| Decision | Why |
+|---|---|
+| the FC never retries | ICD 14.5 prohibits it outright - an FC retry loop would exceed the GCS's two-attempt limit (14.6), which is the GCS's to own |
+| a window opens only for a command **transmitted** | 14.5's own wording. A frame the interface refused never reached the device, so letting it expire into state 4 would blame the SAR for a fault on this side of the connector |
+| a failed Start leaves nav OFF, a failed Stop **retains** it | 14.5. Stopping is unconfirmed, and the device may well still be transmitting; turning the gate off would make the FC's record disagree with the payload |
+| an unmatched response is counted and discarded | The protocol has no transaction id and ICD 3.1 accepts that. Whether anything is waiting is the only thing that distinguishes a fresh response from a late or duplicated one |
+| the timeout message is **not** the ICD's wording | "SAR not responding to Start" belongs to the GCS and means the whole two-attempt transaction failed (14.6). This is one FC window expiring, and the GCS may still hold a retry |
+| a repeated Start is forwarded, not suppressed | 14.3: the device answers `0x521/01` again without toggling. The FC forwards the attempt; deciding it is redundant is not its job |
+| `0x503` stays a named id and nothing else | ICD 13 asks for a stub only. With no defined serialization there is nothing to stub that would not be invented - Mode is not placed at B0 and eight zero bytes are not sent |
+| TC50 with no SAR backend is reported | PNU-ISSUE(D6). Otherwise the GCS's 3 s window blames the payload for a `PNU_OPTS` bit |
+
+**`CAN_Dn_PNU_SCHK`, and why it exists.** ICD 14.3.3 has the FC recheck Primary RTK Fixed,
+GPS age, ATT age and navigation health before it may transmit `0x501`. A strict build can
+therefore never send a Start on a bench, which is exactly where the Lumir integration test
+happens. The bitmask names each check; **the default 11 is the ICD's set less the attitude
+age**, because `0x404` carries hard-coded zeros until step 3f and a constant has no age -
+ICD 16.4 forbids presenting a substitute as valid, so the bit is off and **setting it
+refuses every Start**. Relaxation is never silent: once per boot, and again on every Start
+that goes out under it. It is read live, so a bench operator does not reboot between tries.
+
+Measured in SITL, fake SAR and fake PMU on one `vcan0`, `CAN_D1_PNU_OPTS = 5`:
+
+| Drive | Result |
+|---|---|
+| boot, default `SCHK` | `SAR: ATT age check off, no source`; with `SCHK=0` at boot, also `SAR: Start checks relaxed, SCHK=0` |
+| Start, ICD set, sim GPS healthy | allowed, `0x501` `dlc 1 01` on the wire, `0x521` back in **58 ms**, `SAR Start confirmed, state 3` |
+| Stop while Started | `0x502` out, `0x522` back, `SAR Stop confirmed, state 2` |
+| `SCHK=4` (attitude only) | `SAR: Start blocked, no ATT source`, **and nothing on the bus** |
+| `SCHK=2`, 1.5 s after the GPS was cut | `SAR: Start blocked, GPS fix stale` |
+| `SCHK=1`, once the driver dropped the fix | `SAR: Start blocked, no RTK Fixed` |
+| `SCHK=11`, no GPS at all | `SAR: Start blocked, no RTK Fixed` |
+| `SCHK=11`, GPS restored | allowed, and **no bypass line** - the permitted path, not only the refusals |
+| `SCHK` changed by `PARAM_SET` mid-run | took effect on the next Start, **no reboot** |
+| `respond off`, then Stop | `SAR: no Stop response, nav ON` at **2.03 s**; TM50 `status=3 -> status=4` at **+2.14 s** |
+| the GCS retry | state **returned to 3** within 0.14 s and timed out to 4 again at +2.17 s - the latch cleared, `LAST_CONFIRMED_STATE` republished while waiting |
+| unsolicited `0x521` with no window | `SAR: unmatched 0x521 (1)`, state unchanged |
+| `0x522` carrying `0xFF` | `SAR: 0x522 payload 0xFF`, **the window stayed open** and expired honestly into state 4 |
+| Start and Stop while disconnected | `SAR: Start blocked, disconnected` / `SAR: Stop blocked, disconnected`, nothing transmitted |
+| Start after reconnect | `SAR: Start blocked, recovery pending` - ICD 14.8, and the TM stayed at 0 throughout |
+| TM50 rate across it all | **5.00 Hz** over 45 s |
+
+**SITL's simulated u-blox reports `GPS.Status = 6`** - RTK Fixed - for 206 of 207 dataflash
+records in the first run. That is what made the *permitted* path testable rather than only
+the refusals, and it is also why the first attempt at this measurement looked like a bug:
+a Start that was expected to be blocked was correctly allowed.
+
+**Not covered:** no SAR hardware and no KGCS, so the GCS-side 3 s windows and the single
+retry (ICD 14.6) are still PNU-GCS's to test; `NAV_TX_ENABLED` moves but nothing reads it
+until 3e; and ICD 14.7's **automatic termination** - the FC sending its own `0x502` on a
+navigation fault - is deliberately absent, because its triggers are 3e's and a mechanism
+with no trigger is code nobody has run.
+
+*Verified:* CubeOrangePlus **1,735,784 B, 230,288 free** (+1,268 B over 5.1.20), SITL, and
+**SITL with `AP_PNU_CAN_ENABLED=0`**. `Tools/pnu/sitl_can/test_fake_sar.py` is at 22 tests,
+flake8 clean - the new one covers the deliberately wrong `0xFF` response payload, because
+a rule the fake is unwilling to break is a rule the FC never gets to refuse.
 
 ### The GCS side is not ours
 

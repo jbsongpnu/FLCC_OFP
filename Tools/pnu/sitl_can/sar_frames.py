@@ -59,6 +59,10 @@ RESERVED_DLC = 8
 COMMAND_BYTE = 0x01
 RESPONSE_BYTE = 0x01
 
+# Not a protocol value: a deliberate violation, so that the FC's "the only defined payload
+# is 0x01" rule (ICD 12.2 and 12.3) can be exercised rather than assumed.
+BAD_RESPONSE_BYTE = 0xFF
+
 # ICD 3.3 / 14.1 : T_HB.  The FC owns this deadline; it is here so that the fake's
 # console and the tests can reason about it, and so one place fails if it ever moves.
 HB_TIMEOUT_MS = 3000

@@ -232,11 +232,9 @@ class FakeSAR(object):
         elif cmd == 'counter':
             self.set_counter(arg)
         elif cmd == 'start-resp':
-            self.send(icd.START_RESP, icd.build_start_response())
-            self.log('TX 0x521 Observation_Start_Response, unsolicited')
+            self.unsolicited_response(icd.START_RESP, arg)
         elif cmd == 'stop-resp':
-            self.send(icd.STOP_RESP, icd.build_stop_response())
-            self.log('TX 0x522 Observation_Stop_Response, unsolicited')
+            self.unsolicited_response(icd.STOP_RESP, arg)
         elif cmd == 'param-resp':
             self.send(icd.PARAM_RESP, icd.build_param_response())
             self.log('TX 0x523 Observation_Param_Response, eight opaque bytes')
@@ -248,10 +246,24 @@ class FakeSAR(object):
         elif cmd in ('quit', 'exit'):
             self.running = False
         elif cmd == 'help':
-            self.log('silent | resume | status | hb | short | counter N | start-resp | '
-                     'stop-resp | param-resp | respond on|off | intrude [id] | quit')
+            self.log('silent | resume | status | hb | short | counter N | '
+                     'start-resp [bad] | stop-resp [bad] | param-resp | '
+                     'respond on|off | intrude [id] | quit')
         else:
             self.log('unknown command "%s", try help' % cmd)
+
+    def unsolicited_response(self, resp_id, arg):
+        '''send 0x521/0x522 with nothing waiting for it, optionally with a wrong payload
+
+        "bad" sends 0xFF instead of 0x01.  ICD 12.2 and 12.3 define exactly one payload,
+        and a response carrying anything else must not confirm a command - a rule that
+        can only be tested by a device willing to break it.
+        '''
+        payload = (bytes([icd.BAD_RESPONSE_BYTE]) if arg.startswith('bad')
+                   else icd.build_start_response())
+        self.send(resp_id, payload)
+        self.log('TX 0x%03X %s, unsolicited, payload 0x%02X'
+                 % (resp_id, icd.name_of(resp_id), payload[0]))
 
     def set_counter(self, arg):
         '''ICD 3.3 : the FC must not infer a reboot from a Raw_Counter decrease, so this

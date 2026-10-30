@@ -7,7 +7,7 @@
 #include "ap_version.h"
 
 // PNU : This is a custom code modified by PNU Drone
-#define THISFIRMWARE "PNU_OFP V5.1.20"
+#define THISFIRMWARE "PNU_OFP V5.1.21"
 
 // NOTE: 5.1.6 is a DEV build on top of the 5.1.0 OFFICIAL release, which closed the
 // Copter-4.7.1 -> FLCC migration.  It closes D10 Stage 3: TM2's Zoom_POS_FB now carries
@@ -22,6 +22,51 @@
 // and a send_camera_settings() override that forwards real values instead of upstream's
 // NaN placeholders are all vendor-neutral and worth submitting to ArduPilot; only
 // AP_Q30 decides the value means times, which is where PNU-specific facts belong.
+//
+// 5.1.21 is SAR Integration Plan step 3d: the SAR's observation command layer.
+//
+//   0x501 Observation_Start_Command and 0x502 Observation_Stop_Command go out, 0x521 and
+//   0x522 come back, and SAR_STATUS reaches 2, 3 and 4.  TC50 is no longer recorded and
+//   ignored: AP_PNUSAR consumes gcs().SAR_Ctrl_Seq and acts.  ALL FOUR FRAMES CARRY THE
+//   SINGLE BYTE 0x01 - the ICD says in its own words not to encode Stop as 0x02 because
+//   it is Stop, so one constant serves all four.
+//
+//   SAR_STATUS IS NOW COMPUTED, NOT ASSIGNED.  ICD section 8 states a priority -
+//   disconnected or recovery-pending (0) outranks the current attempt's timeout (4),
+//   which outranks the last confirmed state (1/2/3) - and with five states and two
+//   latches, last-writer-wins would quietly break it.  publish_state() is the one place
+//   that decides, so "a heartbeat must not overwrite 2/3/4 with Ready" is true by
+//   construction.  Step 3a's single _recovery_pending flag had to split in two for that:
+//   the reconnection notification fires once, the inhibition stays latched to the next
+//   power cycle.
+//
+//   THE FC OPENS A 2 s WINDOW AND NEVER RETRIES.  ICD 14.5 prohibits an FC retry loop,
+//   because it would exceed the GCS's two-attempt limit.  A window is opened only for a
+//   command actually transmitted, so a refused send does not become state 4; a new
+//   command clears the previous attempt's latch and republishes LAST_CONFIRMED_STATE
+//   while it waits; an expired response is never counted retroactively, and a response
+//   matching no open window is counted and discarded.  A failed Start leaves navigation
+//   OFF, a failed Stop RETAINS it, because stopping is unconfirmed.
+//
+//   NEW PARAMETER CAN_Dn_PNU_SCHK, the ICD 14.3.3 Start interlock as a bitmask: Primary
+//   RTK Fixed, GPS fix age, gimbal attitude age, navigation health.  Default 11 is the
+//   ICD's set LESS THE ATTITUDE AGE, which is off because 0x404 carries hard-coded zeros
+//   until step 3f and a constant has no age - setting that bit refuses every Start, which
+//   is the honest behaviour.  It exists because a bench or an integration test has no RTK
+//   fix and could otherwise never send a single Start.  Relaxing it is announced once per
+//   boot and again on every Start that goes out under it.  Read live, so no reboot.
+//   STOP IS NEVER GATED - ICD 14.4.2 puts that in bold.
+//
+//   A TC50 that can reach no device now says so ("SAR: no backend, check PNU_OPTS").
+//   Without it the GCS's own 3 s window would report the SAR as not responding, blaming
+//   the payload for a configuration fault on this aircraft - PNU-ISSUE(D6).
+//
+//   Measured in SITL against the fake SAR on a shared bus with the fake PMU: each SCHK
+//   bit refused and permitted in turn, state 4 at 2.14 s and 2.17 s, the retry clearing
+//   the latch, an unmatched 0x521, a 0xFF response refused and left to expire, and both
+//   Start and Stop refused while the link was down and again while recovery was pending.
+//   SITL's simulated u-blox reports RTK Fixed, which is what made the permitted path
+//   testable at all.  No SAR hardware and no KGCS.
 //
 // 5.1.20 is SAR Integration Plan step 3c: the SAR's two MAVLink messages.
 //

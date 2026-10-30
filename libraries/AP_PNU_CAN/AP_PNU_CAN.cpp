@@ -275,6 +275,13 @@ const AP_Param::GroupInfo AP_PNU_CAN::var_info[] = {
     // @RebootRequired: True
     AP_GROUPINFO("DYAW", 29, AP_PNU_CAN, _axis_reversed[AP_PNUGIMBAL_AXIS_YAW], 0),
 
+    // @Param: SCHK
+    // @DisplayName: PNU SAR start interlock checks
+    // @Description: Which of the SAR ICD section 14.3.3 pre-transmission checks the FC enforces before it sends an observation Start to the SAR. The default is the set the ICD requires, less the gimbal attitude age, for which there is no source until the gimbal supplies real attitude - a Start with that bit set is always refused. Clearing a bit is a bench and integration aid, not a flight configuration: it is announced once per boot and again on every Start that goes out under it. Stop is never gated, because the ICD forbids blocking it.
+    // @Bitmask: 0:Primary GPS RTK Fixed,1:GPS fix age under 300ms,2:Gimbal attitude age under 40ms,3:Navigation health
+    // @User: Advanced
+    AP_GROUPINFO("SCHK", 30, AP_PNU_CAN, _sar_start_checks, AP_PNUSAR_SCHK_ICD),
+
     AP_GROUPEND
 };
 

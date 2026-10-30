@@ -137,6 +137,7 @@ public:
     float    get_kp_max(void) const     { return _kp_max.get(); }
     float    get_kd_max(void) const     { return _kd_max.get(); }
     float    get_t_max(void) const      { return _t_max.get(); }
+    uint8_t  get_sar_start_checks(void) const { return uint8_t(_sar_start_checks.get()); }
 
 private:
 
@@ -216,6 +217,7 @@ private:
     AP_Float _homing_reconfirm_tol_degs;
     AP_Float _operating_margin_degs;
     AP_Int8  _axis_reversed[AP_PNUGIMBAL_NUM_AXES];
+    AP_Int8  _sar_start_checks;
 };
 
 namespace AP {

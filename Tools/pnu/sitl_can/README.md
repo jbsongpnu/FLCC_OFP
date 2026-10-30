@@ -238,9 +238,9 @@ Tools/pnu/sitl_can/fake_sar.py --interface vcan0 --counter 777000
 | `hb` | one heartbeat now, to end a silence at a chosen instant |
 | `short` | a **DLC 3** heartbeat. The FC must reject it and say so, and must not count it |
 | `counter N` | set `Raw_Counter`, **including downwards** - ICD 3.3 forbids inferring a reboot from a decrease |
-| `start-resp` / `stop-resp` | an unsolicited `0x521` / `0x522` |
+| `start-resp [bad]` / `stop-resp [bad]` | an unsolicited `0x521` / `0x522`; `bad` sends `0xFF` instead of `0x01`, which ICD 12.2 says the FC must not accept as a confirmation |
 | `param-resp` | `0x523`, eight opaque bytes |
-| `respond on` / `off` | answer `0x501`/`0x502` or stay quiet, for the FC's 2 s window in 3d |
+| `respond on` / `off` | answer `0x501`/`0x502` or stay quiet; `off` is how the FC's 2 s window is driven into `SAR_STATUS` 4 |
 | `intrude [id]` | transmit on an **FC -> SAR** id, default `0x400` |
 | `quit` | exit |
 

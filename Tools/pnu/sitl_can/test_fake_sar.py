@@ -294,6 +294,17 @@ def test_the_ids_match_the_firmware_header():
         assert int(defines[name], 0) == value, '%s is %s, the fake says %u' % (name, defines[name], value)
 
 
+def test_an_unsolicited_response_can_carry_a_wrong_payload():
+    sar = make_sar()
+    sar.do_command('start-resp')
+    sar.do_command('stop-resp bad')
+    assert sar.sent[0] == (icd.START_RESP, bytes([icd.RESPONSE_BYTE]))
+    assert sar.sent[1] == (icd.STOP_RESP, bytes([icd.BAD_RESPONSE_BYTE]))
+    # The ICD defines one payload and the fake must not quietly normalise the other one
+    # away: the whole point of "bad" is that the FC gets to refuse it.
+    assert icd.BAD_RESPONSE_BYTE != icd.RESPONSE_BYTE
+
+
 if __name__ == '__main__':
     failures = 0
     for name, fn in sorted(globals().items()):
