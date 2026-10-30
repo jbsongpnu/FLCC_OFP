@@ -6,16 +6,25 @@
 - **SAR Integration Plan step 3b is DONE, tools only with no version bump** - `Tools/pnu/sitl_can/fake_sar.py`, and with it **the first shared-bus run this project has ever done**: fake PMU and fake SAR on one `vcan0` at `CAN_D1_PNU_OPTS = 5`. Measured 2026-10-30 - `SAR disconnected` **3.058 s** after the last heartbeat against the ICD's 3,000 ms, the reconnection announced in 16 ms **with the state staying Disconnected**, and the short frame, the reserved `0x523` and an intruding `0x400` each reported. The PMU answered **505 of 505 RTRs** on the shared wire throughout  
 - **SAR Integration Plan step 3c is DONE in 5.1.20** - TC **50050** and TM **51050**, the TM at **5 Hz unconditionally**, and TC ingest that checks its source. **`Live_Counter` is now observable and was measured against the fake SAR**: 6 receptions counted while the device's own `Raw_Counter` read 777005  
 - **SAR Integration Plan step 3d is DONE in 5.1.21** - the **observation command layer**: `0x501`/`0x502` out, `0x521`/`0x522` in, the FC's **2 s window**, `SAR_STATUS` 2, 3 and 4, and the ICD 14.3.3 **Start interlock** behind the new **`CAN_Dn_PNU_SCHK`** bitmask. Measured in SITL against the fake SAR on a shared bus with the fake PMU; **no SAR hardware and no KGCS**  
-- NEXT : **step 3e, the navigation bundle** - the nine frames `0x400`-`0x408` at 10 Hz behind `NAV_TX_ENABLED`, 300 ms GPS freshness and ICD 14.7 automatic termination, with **`0x404` carrying placeholder zeros**  
+- **SAR Integration Plan step 3e is DONE in 5.1.22** - the **10 Hz navigation bundle**, nine frames `0x400`-`0x408`, 72 payload bytes per snapshot, plus ICD 14.7 **automatic termination**. Measured at **9.99 Hz** against the fake SAR with `ATT_Seq` 1:1 and every field decoding to its expected physical value. **`0x404` carries sentinels, not zeros** - ICD 16.4 - until the gimbal exists  
+- NEXT : **step 3f**, real gimbal attitude into `0x404` and the 40 ms `ATT_FRESH` contract. It is also what makes `CAN_Dn_PNU_SCHK` bit 2 usable: setting it today refuses every Start and terminates every observation, because a constant has no age. **Blocked on a measured CubeMars feedback rate**  
 - **The ICD confirms the ID reservation made before it existed** - `0x400`-`0x7FF`, 11-bit, 1 Mbit/s - so the gimbal, PMU and SAR still share CAN1 without collision, and MAVLink 50050/51050 are free  
 - ALSO NEXT : **PNU's eye on two step 2c decisions** - the Stop window is measured from the **Start press** rather than from the interlock completing, and a **Stop** burst cut off mid-way no longer completes either. Both are recorded in the step 2c section. **Not tested against a real PMU, engine, KGCS or LTE link**  
 - ALSO NEXT : the fake **gimbal** (three CubeMars motors), the other half of step 2b - **displaced by the SAR work**. The **shared bus** no longer waits on it - step 3b exercised it with the fake SAR beside the fake PMU  
 - ALSO NEXT : **Bench-tune the homing parameters, then set `CAN_Dn_PNU_HOME=1`.** Step 1d is implemented but **defaults to OFF** - the stall threshold, approach velocity and the two gains are provisional and unmeasured. Nothing drives into a stop until somebody turns it on. See 6f near the end of this file for the tuning order  
-- THEN : **step 3f**, real gimbal attitude into `0x404` and the 40 ms `ATT_FRESH` contract - which is what turns on `CAN_Dn_PNU_SCHK` bit 2 and raises its default. **Blocked on a measured CubeMars feedback rate**  
+- THEN : **step 3g**, ICD section 16 - the 25 deg stabilisation envelope and **yaw to the waypoint-segment heading**  
 - *Done in step 2b, tools only with no version bump :* the **fake PMU is validated** (`Tools/pnu/sitl_can/`, flown in SITL 2026-10-29 with Mission Planner on SERIAL0 and KGCS on SERIAL1 - choke, the choke crank, Start, warm-up idle, the cooling trip, Stop, takeoff and RTL with landing). **The D9 failsafe now runs end to end on a desk**: `silent` trips it to RTL, `resume` clears it, no connector pulled. **The start-up ORDER is not optional** - `vcan0` before SITL, Mission Planner on TCP 5760 before SERIAL1 and SERIAL2 exist at all; the validated sequence is in `Tools/pnu/sitl_can/README.md`  
 - **BENCH STATUS (5.1.16)** : PMU telemetry, command paths, prearm and the **in-flight failsafe** all PASSED 2026-10-19. **Outstanding** : the **shared bus** (`PNU_OPTS=3`, the test step 2 exists for), **Stop-command timing**, and the **~1.0 s interlock duration** after the 10 Hz rework  
 - *Done in the gimbal track :* step 1b (`AP_Mount_PNUGimbal`, 5.1.12) and step 1c (lifecycle state machine, 5.1.13). `AP_Mount` does stabilise against FC attitude and needs no camera, which is why the gimbal is an `AP_Mount` backend  
-- IN THIS VERSION : V5.1.21 - **SAR Integration Plan step 3d: the SAR's observation command layer.** `0x501`/`0x502` go out, `0x521`/`0x522` come back, `SAR_STATUS` reaches 2, 3 and 4, and TC50 is no longer recorded-and-ignored. **Measured in SITL against the fake SAR**; no SAR hardware and no KGCS  
+- IN THIS VERSION : V5.1.22 - **SAR Integration Plan step 3e: the 10 Hz navigation bundle.** Nine frames `0x400`-`0x408` every 100 ms while an observation runs, plus ICD 14.7 automatic termination. **Measured in SITL against the fake SAR**; no SAR hardware and no KGCS  
+   - **The snapshot is taken on the VEHICLE thread**, in a new 10 Hz Copter `SCHED_TASK`, and the CAN thread only writes out what it is handed. `AP_GPS::update()` runs on the vehicle thread, so a snapshot there cannot straddle a GPS update - the same twenty-odd fields read from the CAN thread could have built one bundle from **two different samples**, which is what ICD 7.3's "same acquisition time" forbids  
+   - **`0x404` carries SENTINELS, not zeros** - `INT16_MIN` for Roll and Pitch, `0xFFFF` for Yaw, `ATT_Flags` empty. ICD 16.4 asks for sentinels when actual attitude is unavailable, and zeros would read as a level, north-facing SAR to anything that checks values before flags. **`ATT_Seq` still advances**, so a bundle lost before the bus leaves a visible gap  
+   - **`CAN_Dn_PNU_SCHK` now governs ICD 14.7 as well as 14.3.3.** The same bits gate the Start interlock and the matching automatic-termination conditions, because a bench allowed to Start without RTK would otherwise have its observation torn down 100 ms later. **The vehicle's own navigation/EKF failsafe is not gated** and always terminates  
+   - **An automatic termination is not a normal Stop.** Navigation goes off first, then `0x502` if the heartbeat is still live, and its response or its 2 s timeout is an **internal result** - never `SAR_STATUS` 2 or 4. The published state is ICD 14.8's recovery-pending 0, which a reconnect does not release  
+   - **Two small public accessors added to `AP_GPS`**: `get_rtcm_stats()` for `0x407`, which was private, and `have_gps_yaw_accuracy()` so `YAcc` carries the unavailable sentinel instead of `gps_yaw_deg()`'s 10 degree fallback - a distinction ICD 6.2 asks for by name  
+   - **12 new codec tests run the ICD's own section 9.1 byte vectors against the firmware's packer**, including its `-1.235 -> -124` rounding rule and the `36000 -> 0` angle rule. The fake SAR now assembles and decodes bundles under ICD 7.3's boundary rules; 29 Python tests  
+   - **A 50 ms staleness window dropped 6% of bundles**, and finding out why exposed an uncounted drop - a snapshot overwritten before the CAN thread reached it. Both fixed; at one full interval the loss is **zero**  
+- For 5.1.21 version : **SAR Integration Plan step 3d: the SAR's observation command layer.** `0x501`/`0x502` go out, `0x521`/`0x522` come back, `SAR_STATUS` reaches 2, 3 and 4, and TC50 is no longer recorded-and-ignored. **Measured in SITL against the fake SAR**; no SAR hardware and no KGCS  
    - **`SAR_STATUS` is now COMPUTED, not assigned.** ICD section 8 states a priority - disconnected or recovery-pending (0) outranks the current attempt's timeout (4), which outranks the last confirmed state (1/2/3) - and with five states and two latches, last-writer-wins would quietly break it. One `publish_state()` decides, so **"a heartbeat must not overwrite 2/3/4 with Ready" is true by construction** rather than by remembering it  
    - **The FC opens a 2 s window and NEVER retries** (ICD 14.5 prohibits it - an FC retry loop would exceed the GCS's two-attempt limit). A window opens only for a command **actually transmitted**, so a refused send does not become state 4; a new command clears the previous latch and republishes `LAST_CONFIRMED_STATE` while it waits; an expired response is never counted retroactively. **A failed Start leaves navigation OFF, a failed Stop RETAINS it**, because stopping is unconfirmed  
    - **New `CAN_Dn_PNU_SCHK`**, the Start interlock as a bitmask - RTK Fixed, GPS fix age, gimbal attitude age, navigation health. **Default 11 is the ICD's set less the attitude age**, which is off because `0x404` is hard-coded zeros until 3f and **a constant has no age**; setting that bit refuses every Start, which is the honest behaviour. It exists because a bench or an integration test has no RTK fix and could otherwise never send one Start. **Relaxing it is announced** once per boot and again on every Start under it, and it is read live - no reboot  
@@ -3019,8 +3028,15 @@ and is not costed here beyond the phase that carries it.
   rate is unknown** - `AP_PNUGimbal_CubeMars.h` lists it among the things the manual does
   not specify and that we refused to invent. Homing is also still untuned, `PNU_HOME=0`.
 
-**PNU's decision 2026-10-30: `0x404` carries hard-coded zero Roll/Pitch/Yaw until the
-gimbal can supply real attitude.** Recorded with its cost in "The one real risk" below.
+**PNU's decision 2026-10-30: `0x404` carries no real Roll/Pitch/Yaw until the gimbal can
+supply it.** Recorded with its cost in "The one real risk" below.
+
+**Refined when 3e was written, and the refinement matters on the wire.** "Zeros" was the
+original wording; ICD 16.4 asks for **sentinels** when actual attitude is unavailable -
+`INT16_MIN`, `INT16_MIN`, `0xFFFF` with `ATT_Flags` empty - because zeros read as a level,
+north-facing SAR to anything that checks values before flags. PNU chose the sentinels.
+**Lumir must be told in writing** either way, because a receiver has to know that `0x404`
+is unpopulated rather than reporting a perfectly stabilised payload.
 
 ### Phases
 
@@ -3030,8 +3046,8 @@ gimbal can supply real attitude.** Recorded with its cost in "The one real risk"
 | **3b** | **DONE 2026-10-30, tools only, no version bump.** **Fake SAR** on `vcan0`, same shape as the fake PMU. Heartbeat first, then grown phase by phase. **Carried the first shared-bus run there has ever been** - fake PMU and fake SAR together at `PNU_OPTS=5` | `Tools/pnu/sitl_can/` | 3a |
 | **3c** | **DONE in 5.1.20.** MAVLink **50050** TC and **51050** TM in `pnu_kal.xml`; TM at 5 Hz unconditionally; TC ingest with a source check. The `SAR connected` / `SAR reconnected` STATUSTEXT already landed in 3a | `pnu_kal.xml`, `GCS_PNU.cpp`, `GCS.h`, `GCS_Common.cpp`, `ap_message.h`, `Copter.cpp`, `UserCode.cpp` | 3a |
 | **3d** | **DONE in 5.1.21.** Commands `0x501`/`0x502`, responses `0x521`/`0x522`, the 2 s FC window, states 2/3/4, the **RTK-Fixed start interlock** behind the new `CAN_Dn_PNU_SCHK`, and `SAR_Ctrl_Seq` finally consumed | `AP_PNUSAR/`, `AP_PNU_CAN/`, `GCS_PNU.cpp`, `Tools/pnu/sitl_can/` | 3c |
-| **3e** | The nine-frame **10 Hz navigation bundle** `0x400`-`0x408`, GPS freshness at 300 ms, automatic termination. **`0x404` is placeholder zeros** | `AP_PNUSAR/` | 3d |
-| **3f** | Real gimbal attitude into `0x404`, and the `ATT_FRESH` 40 ms contract | `AP_PNUGimbal/`, `AP_PNUSAR/` | **measured gimbal feedback rate** |
+| **3e** | **DONE in 5.1.22.** The nine-frame **10 Hz navigation bundle** `0x400`-`0x408`, GPS freshness at 300 ms, ICD 14.7 automatic termination. **`0x404` is sentinels, not zeros** | `AP_PNUSAR/`, `AP_GPS.h`, `Copter.cpp`, `UserCode.cpp`, `Tools/pnu/sitl_can/` | 3d |
+| **3f** | Real gimbal attitude into `0x404`, and the `ATT_FRESH` 40 ms contract. Also what makes `CAN_Dn_PNU_SCHK` bit 2 usable at last | `AP_PNUGimbal/`, `AP_PNUSAR/` | **measured gimbal feedback rate** |
 | **3g** | ICD section 16: the 25 deg envelope and **yaw to waypoint-segment heading** | `AP_PNUGimbal/`, mission access | 3f |
 
 The fake SAR lands at 3b on purpose. Step 2c is the precedent: the fake PMU is what turned
@@ -3221,6 +3237,81 @@ with no trigger is code nobody has run.
 flake8 clean - the new one covers the deliberately wrong `0xFF` response payload, because
 a rule the fake is unwilling to break is a rule the FC never gets to refuse.
 
+### Step 3e as built - MEASURED 2026-10-30
+
+The nine-frame bundle in a new `AP_PNUSAR_Nav.cpp`, a 10 Hz Copter `SCHED_TASK`, two
+accessors on `AP_GPS`, and the ICD 14.7 automatic terminations.
+
+**The thread split is the design, not an implementation detail.** `nav_snapshot()` runs on
+the **vehicle thread**, beside `AP_GPS::update()`, and encodes all nine frames before
+anything else can touch the data; the CAN thread's `send_bundle()` only writes bytes out.
+Reading twenty-odd GPS fields from the CAN thread could straddle a GPS update and build
+one bundle out of two different samples, which is exactly what ICD 7.3's "same acquisition
+time" forbids. Encoding where the data is read makes that true by construction rather than
+by hoping the window is narrow.
+
+| Decision | Why |
+|---|---|
+| `0x404` carries **sentinels**, not zeros | ICD 16.4 asks for sentinels when actual attitude is unavailable. Zeros read as a level, north-facing SAR to anything that checks values before flags - and plenty does |
+| `ATT_Seq` advances per **snapshot**, not per transmission | A bundle lost before it reached the bus then leaves a visible gap at the receiver. A dense counter would hide exactly the event worth seeing |
+| `CAN_Dn_PNU_SCHK` gates 14.7 as well as 14.3.3 | A bench allowed to Start without RTK would have had the observation torn down 100 ms later, which would make the parameter useless for the thing it exists for |
+| the **navigation failsafe is not gated** | "SAR handling must not replace or delay the FC's own flight failsafe actions" (14.7). The other conditions describe data quality; this one is the vehicle saying it no longer knows where it is |
+| an automatic Stop is an **internal result** | 14.7 and 14.8. State 2 would claim a confirmed normal Stop and state 4 would invite the GCS to retry a transaction it never started (14.6 warns about precisely that) |
+| DGPS (4) does **not** terminate | 14.7 lists "ordinary 3D_FIX (3) or lower", and the ICD leaves in-observation DGPS explicitly TBD (section 10). Nothing is invented for it |
+| a failed `send_frame` **abandons** the rest of the bundle | The receiver discards a bundle with a missing id anyway (7.3), so the remaining frames would only congest the bus on their way to being thrown away |
+| the snapshot is **one slot**, not a queue | 7.4 discards unsent bundles rather than holding them. A queue would deliver stale data after a gap, which is worse than a gap |
+
+**Two accessors on `AP_GPS`, and the second one matters more than the first.**
+`get_rtcm_stats()` makes `0x407` carry real counters instead of the ICD-legal blank.
+`have_gps_yaw_accuracy()` exists because `gps_yaw_deg()` **substitutes a flat 10 degrees**
+when the receiver reports no heading accuracy - without it the FC would have transmitted
+10.00 deg as `YAcc` and a receiver would have had every reason to believe it. ICD 6.2 asks
+for that fallback to be distinguished by name.
+
+**The ICD's own byte vectors are now a unit test.** Section 9.1 publishes exact expected
+bytes for five of the nine frames; `libraries/AP_PNUSAR/tests/test_pnusar_nav.cpp` runs
+them against the firmware's packer, not against a second implementation written for the
+test. It also covers the document's `-1.235 -> -124` rounding rule, the `36000 -> 0` angle
+rule, out-of-range becoming the sentinel rather than saturating, and NaN. **12 tests.**
+
+Measured in SITL, fake SAR and fake PMU on one `vcan0`, `CAN_D1_PNU_OPTS = 5`:
+
+| Drive | Result |
+|---|---|
+| Start, `SCHK` at its default | first bundle **5 ms** after `0x521`; the fake assembled it under ICD 7.3's boundary rules |
+| the decoded bundle | `Lat 35.2345000 Lng 129.0789000 Alt 10.10 m AEl 10.10 m`, `Status 6 RTK_FIXED NSats 10 I 0`, `GMS 459864600 GWk 2442`, `SMS/Delta 200 ms`, `GPS_Flags 0x6F` |
+| `0x404` on the wire | `00 80 00 80 FF FF nn 00` - Roll/Pitch `INT16_MIN`, Yaw `0xFFFF`, `ATT_Flags` empty, as decided |
+| `GPS_Yaw` and `YAcc` | both **n/a**: the sim u-blox has no heading, and the 10 deg fallback was correctly suppressed |
+| rate over 12 s | **9.99 Hz**, 119 bundles, `ATT_Seq` 1:1 with the bundles received - **no gaps** |
+| `Delta` | **200 ms** - the sim GPS is 5 Hz and consecutive bundles reuse the sample, which is the case ICD 7.2 calls out |
+| normal Stop | bundle count frozen at 140 across the next 3 s |
+| GPS cut, `SCHK=11` | `SAR: observation aborted, GPS age` **294 ms** later, then `SAR: auto Stop confirmed (1)` |
+| GPS cut, `SCHK=9` (age check off) | `SAR: observation aborted, fix degraded` 3.88 s later, when AP_GPS dropped the fix |
+| the same abort with the device mute | `SAR: auto Stop unanswered (1)` exactly **2.02 s** later, and **TM50 stayed at 0** - not 4 |
+| heartbeat loss mid-observation | `SAR disconnected` 3.03 s after the last beat, bundles stopped at 80 and **stayed at 80** across the reconnect; no `0x502` attempted |
+| a Start after any abort | `SAR: Start blocked, recovery pending` - ICD 14.8, and the only way back is a power cycle |
+
+**One defect found by measuring, which is the point of measuring.** The first run reported
+`SAR: bundle stale, 1 of 21` and then went quiet, while `ATT_Seq` showed **7 of 118
+bundles missing** over 12 s. Two things were wrong: the 50 ms staleness window was tighter
+than the driver thread's 10 ms loop actually keeps in SITL, and **a snapshot overwritten
+before the CAN thread reached it was not counted as a drop at all** - it would have shown
+up only as an `ATT_Seq` gap at the far end, which is the silent failure PNU-ISSUE(D6)
+exists to remove. The window is now one full bundle interval, still far inside the ICD's
+300 ms source-age limit, and an overrun is counted and reported. **Loss after the fix:
+zero.**
+
+**Not covered:** no SAR hardware and no KGCS; `0x404` is sentinels until 3f, so a receiver
+has never yet seen a valid attitude from this FC; the ICD 15 Float-interval bookkeeping is
+post-processing and deliberately absent from the FC (15.4 says Float alone adds no
+automatic Stop); and nothing exercises a Primary GPS change at a bundle boundary, because
+SITL was run with one GPS.
+
+*Verified:* CubeOrangePlus **1,737,892 B, 228,184 free** (+2,108 B over 5.1.21), SITL, and
+**SITL with `AP_PNU_CAN_ENABLED=0`** - with no CAN driver the 10 Hz task still compiles and
+does nothing, which is what the entry point outside the feature guard is for. 12 C++ codec
+tests and 29 Python tests pass, flake8 clean.
+
 ### The GCS side is not ours
 
 ICD section 14.6 - the 3 s per-attempt windows, the single retry, Start-button enabling -
@@ -3228,16 +3319,24 @@ is **PNU-GCS work and is already under way**. This plan is FC-side only. The FC 
 its own 2 s window and performs **no retry of its own**; section 14.5 prohibits one,
 because an FC retry loop would exceed the GCS's two-attempt limit.
 
-### One codebase gap, and it is small
+### The one codebase gap - CLOSED in 3e, by two accessors
 
-`RTCMFU`/`RTCMFD` come from `AP_GPS::rtcm_stats`, which is **private** (`AP_GPS.h:746`,
-under the `private:` at 643). Everything else the ICD needs is public: `get_undulation()`
-for `AEl`, `last_message_time_ms()` and `last_message_delta_time_ms()` for `SMS` and
-`Delta`, the accuracy and DOP getters, and `gps_yaw_deg()` for yaw and `YAcc`.
+`RTCMFU`/`RTCMFD` came from `AP_GPS::rtcm_stats`, which was **private**. The ICD's
+`RTCM_STATS_AVAILABLE` bit exists for exactly that case and 3e could have shipped with the
+bit clear and both counters zero, which ICD 6.5 defines as correct - but the FC *has* the
+numbers, so **PNU's decision 2026-10-30 was to add the accessor** rather than transmit a
+blank field for no reason.
 
-The ICD's `RTCM_STATS_AVAILABLE` bit exists for exactly this case, so **3e ships with
-GPS_Flags bit 6 clear and both counters zero**, which the ICD defines as correct. A public
-accessor on `AP_GPS` is a separate, clean, upstreamable commit and is not on this path.
+A second one came with it, and it is the more interesting of the two.
+`gps_yaw_deg()` **substitutes a flat 10 degrees** when the receiver reports no heading
+accuracy, and ICD 6.2 asks for that fallback to be distinguished from a measured value.
+Without `have_gps_yaw_accuracy()` the FC would have transmitted 10.00 deg as `YAcc` and a
+receiver would have had every reason to believe it. It now sends the unavailable sentinel.
+
+Both are `const`, four lines each, change no behaviour, and are a clean upstreamable commit
+on their own. Everything else the ICD needs was already public: `get_undulation()` for
+`AEl`, `last_message_time_ms()` and `last_message_delta_time_ms()` for `SMS` and `Delta`,
+the accuracy and DOP getters, and `gps_yaw_deg()` for yaw.
 
 ### `0x503` and `0x523` stay reserved
 

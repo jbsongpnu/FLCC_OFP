@@ -285,6 +285,10 @@ const AP_Scheduler::Task Copter::scheduler_tasks[] = {
     // stream rates are all zero, and a telemetry rate the ICD fixes is not the
     // operator's to set.
     SCHED_TASK(send_sar_status_tm,     5,     50, 166),
+    // PNU : the SAR's 10 Hz navigation snapshot.  It runs on the vehicle thread, beside
+    // AP_GPS::update(), so one bundle is built from one consistent GPS sample - see
+    // AP_PNUSAR.h.  The CAN driver thread only transmits what this leaves ready.
+    SCHED_TASK(sar_nav_snapshot,      10,    300, 167),
 #if HAL_BUTTON_ENABLED
     SCHED_TASK_CLASS(AP_Button,            &copter.button,              update,           5, 100, 168),
 #endif

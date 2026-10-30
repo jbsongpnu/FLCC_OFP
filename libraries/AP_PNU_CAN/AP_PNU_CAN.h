@@ -12,6 +12,10 @@
 #include <GCS_MAVLink/GCS_MAVLink.h>
 
 #include "AP_PNU_CAN_Backend.h"
+#include <AP_PNUSAR/AP_PNUSAR_config.h>
+#if AP_PNUSAR_ENABLED
+class AP_PNUSAR;
+#endif
 #include <AP_PNUGimbal/AP_PNUGimbal_config.h>
 #if AP_PNUGIMBAL_ENABLED
 #include <AP_PNUGimbal/AP_PNUGimbal_Backend.h>
@@ -95,6 +99,13 @@ public:
     AP_PNUGimbal_Backend *get_gimbal(void) const { return _gimbal; }
 #endif
 
+    // The SAR backend, or nullptr when CAN_Dn_PNU_OPTS bit 2 is clear.  Used by the
+    // vehicle's 10 Hz navigation snapshot task; callers must hold get_semaphore(),
+    // because the driver thread transmits from the same state.
+#if AP_PNUSAR_ENABLED
+    AP_PNUSAR *get_sar(void) const { return _sar; }
+#endif
+
     // guards every backend's state.  The driver thread writes it from its own loop; a
     // control layer reads and writes it from the vehicle thread.
     HAL_Semaphore &get_semaphore(void) { return _sem; }
@@ -169,6 +180,10 @@ private:
 #if AP_PNUGIMBAL_ENABLED
     // typed alias into _backends, so a control layer does not have to search
     AP_PNUGimbal_Backend *_gimbal = nullptr;
+#endif
+
+#if AP_PNUSAR_ENABLED
+    AP_PNUSAR *_sar = nullptr;
 #endif
 
     HAL_Semaphore _sem;

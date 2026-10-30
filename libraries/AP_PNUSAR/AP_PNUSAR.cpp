@@ -58,15 +58,30 @@ bool AP_PNUSAR::init(void)
 
 
 // -------------------------------------------------------------------------
-// update : the command layer and the heartbeat timeout
+// update : the command layer, the navigation bundle and the heartbeat timeout
 // -------------------------------------------------------------------------
-// The FC transmits nothing periodically in 3d.  0x501 and 0x502 go out once each, when
-// the GCS asks; the 10 Hz navigation bundle arrives in 3e behind _nav_tx_enabled.
+// The bundle is NOT paced here.  Its 10 Hz comes from the vehicle thread's snapshot
+// task, and this only drains whatever that task has left ready - so one snapshot
+// produces exactly one bundle, with no chance of the two clocks drifting into a
+// duplicated or skipped Snapshot_TimeUS.
 // -------------------------------------------------------------------------
 void AP_PNUSAR::update(uint32_t tick)
 {
     report_schk_once();
     check_ctrl();
+
+    if (_auto_stop_request) {
+        // Raised by nav_snapshot() on the vehicle thread; the frame goes out from here,
+        // because this is the only thread that touches the interface.  Navigation was
+        // already disabled at the moment the condition fired, so ICD 14.7's
+        // "immediately" is satisfied regardless of this one-tick delay.
+        _auto_stop_request = false;
+        if (_link_up) {
+            send_command(AP_PNUSAR_ID_STOP_CMD, PNUSAR_Pending::STOP, true);
+        }
+    }
+
+    send_bundle();
     check_pending();
 
     if ((tick % AP_PNUSAR_HEALTH_CHECK_TICKS) == 0) {
@@ -287,7 +302,7 @@ const char *AP_PNUSAR::start_blocked_reason(void) const
 // accept never reached the device, so letting it expire into state 4 would blame the SAR
 // for a fault on this side of the connector.
 // -------------------------------------------------------------------------
-bool AP_PNUSAR::send_command(uint32_t can_id, PNUSAR_Pending pending)
+bool AP_PNUSAR::send_command(uint32_t can_id, PNUSAR_Pending pending, bool automatic)
 {
     const uint8_t payload = AP_PNUSAR_CMD_PAYLOAD;
 
@@ -302,6 +317,16 @@ bool AP_PNUSAR::send_command(uint32_t can_id, PNUSAR_Pending pending)
 
     _pending = pending;
     _pending_sent_ms = AP_HAL::millis();
+    _pending_is_auto = automatic;
+
+    if (automatic) {
+        // ICD 14.7 : an FC-initiated Stop keeps its response and its timeout as internal
+        // results.  It must not clear a latch, move LAST_CONFIRMED_STATE or publish
+        // anything - the state is already the recovery-pending 0 that auto_terminate()
+        // set, and 14.6 warns that a state 4 from an automatic Stop must not be mistaken
+        // for a GCS transaction and retried.
+        return true;
+    }
 
     // ICD 14.5 : a GCS retry clears the preceding attempt's latch and publishes
     // LAST_CONFIRMED_STATE while the new window is open.  publish_state() does both,
@@ -330,6 +355,17 @@ void AP_PNUSAR::check_pending(void)
     // no open window and is discarded: 14.5 forbids retroactively counting an expired
     // response as success.
     _pending = PNUSAR_Pending::NONE;
+
+    if (_pending_is_auto) {
+        // ICD 14.7 : internal result.  No state 4, because the published state is already
+        // the recovery-pending 0 and because 14.5's latch belongs to a GCS attempt.
+        // Navigation went off when the condition fired, so there is nothing to undo.
+        _pending_is_auto = false;
+        GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "SAR: auto Stop unanswered (%lu)",
+                      (unsigned long)_auto_stop_cnt);
+        return;
+    }
+
     _not_responding = true;
 
     if (was_start) {
@@ -385,6 +421,7 @@ void AP_PNUSAR::check_health(void)
     _recovery_pending = true;
     _announce_reconnect = true;
     _nav_tx_enabled = false;
+    _bundle.ready = false;              // ICD 7.4 : discard unsent bundles immediately
 
     // Cancelled, NOT timed out.  A command whose device has gone off the bus has not
     // failed to answer within its window; it has no window left to answer in, and
@@ -576,12 +613,30 @@ bool AP_PNUSAR::handle_response(const AP_HAL::CANFrame &frame, PNUSAR_Pending ex
     }
 
     _pending = PNUSAR_Pending::NONE;
+
+    if (_pending_is_auto) {
+        // ICD 14.7 : the automatic Stop's response is an INTERNAL result.  Setting state
+        // 2 here would claim a confirmed normal Stop, when what actually happened is
+        // that the FC tore the observation down and the device acknowledged.
+        _pending_is_auto = false;
+        GCS_SEND_TEXT(MAV_SEVERITY_INFO, "SAR: auto Stop confirmed (%lu)",
+                      (unsigned long)_auto_stop_cnt);
+        return true;
+    }
+
     _not_responding = false;
     _last_confirmed = confirmed;
 
     // ICD 14.3.5 and 14.4.4 : the confirmed response is the only thing that moves the
-    // navigation gate, in either direction.  3e reads it; nothing transmits a bundle yet.
+    // navigation gate, in either direction.
     _nav_tx_enabled = (confirmed == PNUSAR_State::STARTED);
+    if (_nav_tx_enabled) {
+        // ICD 15.1 : the session is the acquisition unit after a valid Start response,
+        // and it has to begin in RTK_FIXED.  nav_snapshot() checks the first bundle.
+        _session_first_bundle = true;
+    } else {
+        _bundle.ready = false;          // 7.4 : discard unsent bundles on a normal Stop
+    }
 
     publish_state();
 

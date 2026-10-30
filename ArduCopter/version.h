@@ -7,7 +7,7 @@
 #include "ap_version.h"
 
 // PNU : This is a custom code modified by PNU Drone
-#define THISFIRMWARE "PNU_OFP V5.1.21"
+#define THISFIRMWARE "PNU_OFP V5.1.22"
 
 // NOTE: 5.1.6 is a DEV build on top of the 5.1.0 OFFICIAL release, which closed the
 // Copter-4.7.1 -> FLCC migration.  It closes D10 Stage 3: TM2's Zoom_POS_FB now carries
@@ -22,6 +22,51 @@
 // and a send_camera_settings() override that forwards real values instead of upstream's
 // NaN placeholders are all vendor-neutral and worth submitting to ArduPilot; only
 // AP_Q30 decides the value means times, which is where PNU-specific facts belong.
+//
+// 5.1.22 is SAR Integration Plan step 3e: the 10 Hz navigation bundle.
+//
+//   Nine frames, 0x400 through 0x408, 72 payload bytes per logical snapshot, every
+//   100 ms while an observation is running.  0x408 CLOSES the bundle with its
+//   acquisition timestamp; it does not wrap the others.
+//
+//   THE SNAPSHOT IS TAKEN ON THE VEHICLE THREAD, in a new 10 Hz Copter SCHED_TASK, and
+//   the CAN thread only writes out what it is handed.  AP_GPS::update() runs on the
+//   vehicle thread, so a snapshot there cannot straddle a GPS update; the same twenty-odd
+//   fields read from the CAN thread could have built one bundle out of two different
+//   samples, which is exactly what ICD 7.3's "same acquisition time" forbids.
+//
+//   0x404 ATTITUDE CARRIES SENTINELS, NOT ZEROS - INT16_MIN for Roll and Pitch, 0xFFFF
+//   for Yaw, ATT_Flags empty.  ICD 16.4 asks for sentinels when actual attitude is
+//   unavailable, and zeros would read as a level, north-facing SAR to anything that looks
+//   at values before flags.  ATT_Seq still advances, so a bundle lost before it reached
+//   the bus leaves a visible gap.  Step 3f fills it with the gimbal's real attitude.
+//
+//   CAN_Dn_PNU_SCHK NOW GOVERNS ICD 14.7 TOO.  The same bits that gate the Start
+//   interlock gate the matching automatic-termination conditions, because a bench allowed
+//   to Start without RTK would otherwise have the observation torn down 100 ms later.
+//   The vehicle's own navigation/EKF failsafe is NOT gated and always terminates: "SAR
+//   handling must not replace or delay the FC's own flight failsafe actions."
+//
+//   An automatic termination is NOT a normal Stop.  Navigation goes off first, then a
+//   0x502 is sent if the heartbeat is still live, and its response or its 2 s timeout is
+//   an INTERNAL result - never SAR_STATUS 2 or 4.  The published state is the
+//   recovery-pending 0 of ICD 14.8, which a reconnect does not release.
+//
+//   AP_GPS gains two small public accessors: get_rtcm_stats() for 0x407's RTCMFU/RTCMFD,
+//   which were private, and have_gps_yaw_accuracy() so that YAcc carries the unavailable
+//   sentinel instead of gps_yaw_deg()'s 10 degree fallback, which ICD 6.2 asks to be
+//   distinguished from a measured value.
+//
+//   12 new codec tests run SAR_ICD_PNU.md section 9.1's OWN byte vectors against the
+//   firmware's packer, including the document's -1.235 -> -124 rounding rule and the
+//   36000 -> 0 angle rule.  The fake SAR now assembles and decodes bundles under ICD
+//   7.3's boundary rules; 29 Python tests.
+//
+//   Measured in SITL against the fake SAR: 9.99 Hz, ATT_Seq 1:1 with no gaps, every field
+//   decoded to its expected physical value, the gate closing on a normal Stop, and three
+//   aborts - GPS age, fix degraded and heartbeat loss - each landing on state 0 with the
+//   bundle stopped.  A 50 ms staleness window dropped 6% of bundles and was the reason
+//   the drop accounting got fixed; at one full interval the loss is zero.
 //
 // 5.1.21 is SAR Integration Plan step 3d: the SAR's observation command layer.
 //

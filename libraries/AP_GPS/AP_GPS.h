@@ -478,6 +478,22 @@ public:
         return have_gps_yaw(primary_instance);
     }
 
+    // PNU : true if the yaw accuracy reported by gps_yaw_deg() came from the sensor
+    // rather than its 10 degree fallback.  SAR_ICD_PNU.md 6.2 requires a substituted
+    // default to be distinguished from a measured one, so that CAN 0x403 YAcc carries
+    // the unavailable sentinel instead of a plausible-looking number.
+    bool have_gps_yaw_accuracy(uint8_t instance) const {
+        return have_gps_yaw(instance) && state[instance].have_gps_yaw_accuracy;
+    }
+
+    // PNU : the RTCM fragment counters, for SAR CAN 0x407 RTCMFU/RTCMFD.  They are
+    // shared statistics rather than per-instance ones, which SAR_ICD_PNU.md 6.4 already
+    // allows for.  Same values the GPA log record carries.
+    void get_rtcm_stats(uint16_t &used, uint16_t &discarded) const {
+        used = rtcm_stats.fragments_used;
+        discarded = rtcm_stats.fragments_discarded;
+    }
+
     // return true if the GPS is configured to provide yaw. This will
     // be true if we expect the GPS to provide yaw, even if it
     // currently is not able to provide yaw

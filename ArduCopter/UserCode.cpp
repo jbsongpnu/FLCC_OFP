@@ -1,4 +1,5 @@
 #include "Copter.h"
+#include <AP_PNUSAR/AP_PNUSAR.h>     // PNU : PNU_SAR_nav_snapshot()
 
 #ifdef USERHOOK_INIT
 void Copter::userhook_init()
@@ -56,6 +57,21 @@ void Copter::userhook_MediumLoop()
 void Copter::send_sar_status_tm()
 {
     gcs().send_message(MSG_SAR_STATUS);
+}
+
+
+// PNU : acquire one SAR navigation snapshot, SAR_ICD_PNU.md 7.3.
+//
+// Here rather than in the CAN driver because AP_GPS::update() runs on this thread: a
+// snapshot taken here cannot straddle a GPS update, and the bundle is therefore built
+// from one sample as the ICD requires.
+//
+// failsafe.ekf is the one input a library cannot reach.  ICD 14.7 makes an FC
+// navigation/EKF failsafe an immediate observation termination with no age threshold to
+// wait for, so it is passed in rather than inferred from AHRS health.
+void Copter::sar_nav_snapshot()
+{
+    PNU_SAR_nav_snapshot(failsafe.ekf != 0);
 }
 
 #ifdef USERHOOK_SLOWLOOP
