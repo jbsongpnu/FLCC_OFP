@@ -2,13 +2,14 @@
 - This branch currently developing PNU-KAL FLCC OFP after official version (TAG) PNU-KAL-FLCC-5.1.0 (this is same code as 5.0.15 dev)  
 - PNU-ISSUE 10 & 11 still remains : For Gremsy camera and general camera mount library structure  
 - **CAN Update Plan step 2c is APPLIED and MEASURED in 5.1.18** - a **500 ms TC1 staleness reset** and a **10 s stop-before-start window**. **The defect was reproduced, not just the fix**: with guard 1 disabled the same cut-short Start burst started the engine 1.34 s after the last message; with it enabled, no start. Interlock duration measured at **1.50 s**, matching the bench's ~1-1.5 s. Driven by `Tools/pnu/sitl_can/tc1_inject.py`, and **re-run independently by PNU 2026-10-29 with every scenario reporting AS EXPECTED**  
-- **SAR Integration Plan step 3a is DONE in 5.1.19** - `AP_PNUSAR` is an `AP_PNU_CAN` backend, **protocol 17 is retired**, and the connection layer works: Heart_Beat `0x510`, the FC-maintained Live_Counter, the 3 s `T_HB` timeout and `SAR_STATUS` 0 and 1. **Builds only; no SAR hardware and no fake SAR yet**  
-- NEXT : **step 3b, the fake SAR** - and with it **the first shared-bus test this project has ever run**, fake PMU and fake SAR together at `CAN_D1_PNU_OPTS = 5`  
+- **SAR Integration Plan step 3a is DONE in 5.1.19** - `AP_PNUSAR` is an `AP_PNU_CAN` backend, **protocol 17 is retired**, and the connection layer works: Heart_Beat `0x510`, the FC-maintained Live_Counter, the 3 s `T_HB` timeout and `SAR_STATUS` 0 and 1. **Now exercised against the fake SAR** by step 3b; still **no SAR hardware**  
+- **SAR Integration Plan step 3b is DONE, tools only with no version bump** - `Tools/pnu/sitl_can/fake_sar.py`, and with it **the first shared-bus run this project has ever done**: fake PMU and fake SAR on one `vcan0` at `CAN_D1_PNU_OPTS = 5`. Measured 2026-10-30 - `SAR disconnected` **3.058 s** after the last heartbeat against the ICD's 3,000 ms, the reconnection announced in 16 ms **with the state staying Disconnected**, and the short frame, the reserved `0x523` and an intruding `0x400` each reported. The PMU answered **505 of 505 RTRs** on the shared wire throughout  
+- NEXT : **step 3c, MAVLink 50050 and 51050** - the TC, the 5 Hz TM, and the first point at which `Live_Counter` is observable at all  
 - **The ICD confirms the ID reservation made before it existed** - `0x400`-`0x7FF`, 11-bit, 1 Mbit/s - so the gimbal, PMU and SAR still share CAN1 without collision, and MAVLink 50050/51050 are free  
 - ALSO NEXT : **PNU's eye on two step 2c decisions** - the Stop window is measured from the **Start press** rather than from the interlock completing, and a **Stop** burst cut off mid-way no longer completes either. Both are recorded in the step 2c section. **Not tested against a real PMU, engine, KGCS or LTE link**  
-- ALSO NEXT : the fake **gimbal** (three CubeMars motors), the other half of step 2b - **displaced by the SAR work**. The **shared bus** is now first exercised by step 3b's fake SAR running beside the fake PMU, which is cheaper and arrives sooner  
+- ALSO NEXT : the fake **gimbal** (three CubeMars motors), the other half of step 2b - **displaced by the SAR work**. The **shared bus** no longer waits on it - step 3b exercised it with the fake SAR beside the fake PMU  
 - ALSO NEXT : **Bench-tune the homing parameters, then set `CAN_Dn_PNU_HOME=1`.** Step 1d is implemented but **defaults to OFF** - the stall threshold, approach velocity and the two gains are provisional and unmeasured. Nothing drives into a stop until somebody turns it on. See 6f near the end of this file for the tuning order  
-- THEN : **step 3** the SAR backend (protocol 17 retires there)  
+- THEN : **step 3d**, the Start and Stop commands with their responses, the FC's 2 s windows and the **RTK-Fixed start interlock**  
 - *Done in step 2b, tools only with no version bump :* the **fake PMU is validated** (`Tools/pnu/sitl_can/`, flown in SITL 2026-10-29 with Mission Planner on SERIAL0 and KGCS on SERIAL1 - choke, the choke crank, Start, warm-up idle, the cooling trip, Stop, takeoff and RTL with landing). **The D9 failsafe now runs end to end on a desk**: `silent` trips it to RTL, `resume` clears it, no connector pulled. **The start-up ORDER is not optional** - `vcan0` before SITL, Mission Planner on TCP 5760 before SERIAL1 and SERIAL2 exist at all; the validated sequence is in `Tools/pnu/sitl_can/README.md`  
 - **BENCH STATUS (5.1.16)** : PMU telemetry, command paths, prearm and the **in-flight failsafe** all PASSED 2026-10-19. **Outstanding** : the **shared bus** (`PNU_OPTS=3`, the test step 2 exists for), **Stop-command timing**, and the **~1.0 s interlock duration** after the 10 Hz rework  
 - *Done in the gimbal track :* step 1b (`AP_Mount_PNUGimbal`, 5.1.12) and step 1c (lifecycle state machine, 5.1.13). `AP_Mount` does stabilise against FC attitude and needs no camera, which is why the gimbal is an `AP_Mount` backend  
@@ -2956,7 +2957,7 @@ designed; they are not confirmed to be the right numbers for the aircraft.**
 
 ---
 
-## SAR Integration Plan - PLANNED 2026-10-30
+## SAR Integration Plan - PLANNED 2026-10-30, STEPS 3a AND 3b DONE
 
 *`SAR_ICD_PNU.md` (repository root) is Rev1.0 of the SAR ICD, supplied by PNU 2026-10-30
 and jointly owned with Lumir. It replaces the placeholder assumptions step 3 was written
@@ -3009,7 +3010,7 @@ gimbal can supply real attitude.** Recorded with its cost in "The one real risk"
 | Phase | Content | Files | Depends on |
 |---|---|---|---|
 | **3a** | **DONE in 5.1.19.** `AP_PNUSAR` becomes an `AP_PNU_CAN_Backend`; **protocol 17 retires**, deferred from step 2; `PNU_OPTS` bit 2 wires it up. `0x510` Heart_Beat, Live_Counter, the 3 s timeout, `SAR_STATUS` 0 and 1 | `AP_PNUSAR/`, `AP_CAN.h`, `AP_PNU_CAN.cpp`, `AP_CANManager/`, `AP_Arming.cpp` | nothing |
-| **3b** | **Fake SAR** on `vcan0`, same shape as the fake PMU. Heartbeat first, then grown phase by phase. **Carries the first shared-bus test there has ever been** - fake PMU and fake SAR together, which `PNU_OPTS=5` finally exercises | `Tools/pnu/sitl_can/` | 3a |
+| **3b** | **DONE 2026-10-30, tools only, no version bump.** **Fake SAR** on `vcan0`, same shape as the fake PMU. Heartbeat first, then grown phase by phase. **Carried the first shared-bus run there has ever been** - fake PMU and fake SAR together at `PNU_OPTS=5` | `Tools/pnu/sitl_can/` | 3a |
 | **3c** | MAVLink **50050** TC and **51050** TM in `pnu_kal.xml`; TM at 5 Hz unconditionally; TC ingest with a source check; `SAR connected` / `SAR reconnected` STATUSTEXT | `pnu_kal.xml`, `GCS_PNU.cpp` | 3a |
 | **3d** | Commands `0x501`/`0x502`, responses `0x521`/`0x522`, the 2 s FC windows, states 2/3/4, the **RTK-Fixed start interlock** | `AP_PNUSAR/` | 3c |
 | **3e** | The nine-frame **10 Hz navigation bundle** `0x400`-`0x408`, GPS freshness at 300 ms, automatic termination. **`0x404` is placeholder zeros** | `AP_PNUSAR/` | 3d |
@@ -3019,6 +3020,62 @@ gimbal can supply real attitude.** Recorded with its cost in "The one real risk"
 The fake SAR lands at 3b on purpose. Step 2c is the precedent: the fake PMU is what turned
 the interlock windows from reasoned into measured, and the same tool will do it for the
 3 s heartbeat timeout, the 2 s response windows and the bundle ordering rules.
+
+### Step 3b as built - MEASURED 2026-10-30
+
+Three files in `Tools/pnu/sitl_can/`: `sar_frames.py` (the 16 ids and the four frames a
+SAR transmits, wire format only), `fake_sar.py` (SocketCAN I/O and the console) and
+`test_fake_sar.py` (21 tests). Procedure, console table and the full measured results are
+in that directory's `README.md`.
+
+**There is no `sar_model.py`.** The PMU needed one because an engine has behaviour; in 3b
+the SAR beats once a second and answers commands, and the observation state machine
+belongs to 3d, where it lands with the FC side that drives it. Inventing it now would
+have meant inventing the parts the ICD leaves TBD.
+
+Four decisions worth recording:
+
+- **The fake answers `0x501`/`0x502` by default**, with `--no-respond` to stay quiet. A
+  real device answers, and 3d's state 4 - the FC's 2 s window expiring - can only be
+  tested by a device that does not. `--resp-delay` moves the answer inside or outside
+  that window.
+- **`--counter` starts `Raw_Counter` at 777000** in the validated run. ICD 3.3 says the
+  FC's `Live_Counter` counts receptions and must never copy `Raw_Counter`; with the fake
+  starting at zero the two would agree by accident and prove nothing.
+- **`intrude` transmits on an FC -> SAR id.** `AP_PNUSAR` deliberately leaves those
+  unclaimed, so the driver reports a second talker rather than swallowing it. The console
+  command is how that is proved rather than argued.
+- **The tests read both documents.** The ids and DLCs are checked against
+  `SAR_ICD_PNU.md`'s own section 5 table and against `AP_PNUSAR.h`, because a fake that
+  agrees only with itself proves nothing and the ICD is the document both sides signed.
+
+**The shared bus, finally.** Until 3b every PNU CAN test had exactly one device on the
+wire; the whole reason the three protocols became one driver had never been exercised.
+With `CAN_D1_PNU_OPTS = 5` and both fakes on one `vcan0`:
+
+| Drive | What the FC said | Interval |
+|---|---|---|
+| boot | `PNU_CAN: CAN_D1 PMU+SAR ready` | - |
+| first heartbeat | `SAR connected` | 15 ms |
+| `silent` | `SAR disconnected` | **3.058 s** after the last heartbeat, deadline 3,000 ms |
+| `resume` | `SAR reconnected, inspection pending` | 16 ms, **state stayed Disconnected** |
+| `short` | `PNU_CAN: short frame 0x510 dlc 3 (1 dropped)` | - |
+| `param-resp` | `SAR: 0x523 reserved, payload still TBD (1)` | - |
+| `intrude` | `PNU_CAN: unclaimed frame 0x400 (1 seen)` | - |
+| the PMU throughout | `[PMU] Connected!`, **505 of 505 RTRs answered**, 404 commands in 25 s | - |
+
+A second run at **0.4 Hz** - 2.5 s between beats, inside `T_HB` - produced no disconnect
+across 11 heartbeats, and then `SAR disconnected` 3.027 s after the fake stopped. The
+deadline is a wall clock, as ICD 3.3 words it, and not "three missed beats".
+
+**What it did not reach**, which matters as much as what it did:
+
+- **`Live_Counter` is still unobservable.** It leaves the FC only through TM 51050, which
+  is 3c. The run proves heartbeats were received and judged; it cannot yet show the count.
+- **The command path was not driven from the FC**, because nothing on the FC side
+  transmits before 3d. Responses are covered by unit tests only.
+- **No SAR hardware.** The 1 Hz on the wire, and its jitter, are the fake's.
+- The gimbal is still absent, so `PNU_OPTS = 7` - all three at once - remains untested.
 
 ### The GCS side is not ours
 
