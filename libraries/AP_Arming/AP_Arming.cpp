@@ -1353,7 +1353,6 @@ bool AP_Arming::can_checks(bool report)
                 case AP_CAN::Protocol::KDECAN:
                 case AP_CAN::Protocol::PNU_CAN:
                 case AP_CAN::Protocol::PNU_CAN_LEGACY:
-                case AP_CAN::Protocol::PNUSAR:
                 //PNU : Required to compile, but zero runtime effect.
                     break;
             }

@@ -7,7 +7,7 @@
 #include "ap_version.h"
 
 // PNU : This is a custom code modified by PNU Drone
-#define THISFIRMWARE "PNU_OFP V5.1.18"
+#define THISFIRMWARE "PNU_OFP V5.1.19"
 
 // NOTE: 5.1.6 is a DEV build on top of the 5.1.0 OFFICIAL release, which closed the
 // Copter-4.7.1 -> FLCC migration.  It closes D10 Stage 3: TM2's Zoom_POS_FB now carries
@@ -22,6 +22,37 @@
 // and a send_camera_settings() override that forwards real values instead of upstream's
 // NaN placeholders are all vendor-neutral and worth submitting to ArduPilot; only
 // AP_Q30 decides the value means times, which is where PNU-specific facts belong.
+//
+// 5.1.19 is SAR Integration Plan step 3a: the SAR becomes an AP_PNU_CAN backend.
+//
+//   SAR_ICD_PNU.md Rev1.0 arrived 2026-10-30 and PNU promoted the SAR ahead of the fake
+//   gimbal, against a real schedule for connection testing with Lumir's device.  The ICD
+//   confirmed the id range this project had already reserved before it existed -
+//   0x400-0x7FF, 11-bit standard, 1 Mbit/s - so the PMU, the gimbal and the SAR share
+//   CAN1 without collision.
+//
+//   PROTOCOL 17 (PNUSAR) IS RETIRED HERE, deferred from step 2.  AP_PNUSAR is no longer
+//   an AP_CANDriver; it is a backend of AP_PNU_CAN selected by CAN_Dn_PNU_OPTS bit 2 on
+//   protocol 15.  17 is NOT reused: a stored 17 in somebody's parameter file falls
+//   through to "no driver" rather than silently becoming a different device.
+//
+//   3a IS THE CONNECTION LAYER AND NOTHING ELSE: Heart_Beat 0x510, the FC-maintained
+//   Live_Counter, the ICD's 3 s T_HB timeout and SAR_STATUS 0 and 1.  Commands and
+//   responses arrive in 3d, the 10 Hz navigation bundle in 3e.  The command, response and
+//   navigation ids are already named and claimed so that a real device's early traffic is
+//   counted rather than reported as unknown.
+//
+//   Two ICD rules that are easy to get backwards and are implemented deliberately:
+//     - Live_Counter counts what the FC RECEIVED.  It is NOT the SAR's own Raw_Counter,
+//       which the heartbeat carries and which this code never reads (ICD 3.3).
+//     - A RECONNECTING HEARTBEAT DOES NOT RESTORE READY.  It is announced once and the
+//       state stays Disconnected, because the data contaminated by the outage has not
+//       been inspected and the release procedure is deferred by the ICD (ICD 14.8).
+//       Until that procedure exists the only way back is a power cycle, which is the
+//       intended behaviour rather than a missing feature.
+//
+//   NOT TESTED beyond builds.  No SAR hardware and no fake SAR yet; the fake lands in 3b
+//   and carries the first shared-bus test this project has ever run.
 //
 // 5.1.18 is CAN Update Plan step 2c: the two engine-start interlock windows.
 //

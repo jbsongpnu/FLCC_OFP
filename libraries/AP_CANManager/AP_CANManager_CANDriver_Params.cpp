@@ -56,8 +56,8 @@ const AP_Param::GroupInfo AP_CANManager::CANDriver_Params::var_info[] = {
 
 #if AP_PNU_CAN_ENABLED
     // PNU : every PNU device on this bus shares one driver and one parameter group.
-    // 17 (PNUSAR) is deliberately absent from the PROTOCOL list above - the SAR is a
-    // backend here, not a protocol of its own.
+    // 17 (PNUSAR) was retired in step 3a and is absent from the PROTOCOL list above -
+    // the SAR is a backend here, selected by PNU_OPTS bit 2, not a protocol of its own.
     // @Group: PNU_
     // @Path: ../AP_PNU_CAN/AP_PNU_CAN.cpp
     AP_SUBGROUPPTR(_pnu_can, "PNU_", 8, AP_CANManager::CANDriver_Params, AP_PNU_CAN),

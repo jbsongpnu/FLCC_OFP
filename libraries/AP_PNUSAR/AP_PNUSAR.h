@@ -2,101 +2,113 @@
 
 #include "AP_PNUSAR_config.h"
 
+#include <AP_Common/AP_Common.h>
+#include <stdint.h>
+
+// PNU : the SAR's published state, as MAVLink TM 51050 reports it.
+//
+// PNU-ISSUE(D14) : declared here and defined in AP_PNUSAR.cpp, and BOTH SIT OUTSIDE the
+// AP_PNUSAR_ENABLED guard below, because GCS_PNU.cpp will reference them whether or not
+// the CAN driver is in the build - AGENTS.md requires the base system to compile with
+// optional features disabled.  With no backend they keep their static-init values, which
+// read as "Disconnected, never heard from", exactly the truth in that configuration.
+struct PNU_SAR_Status {
+    uint8_t  status;            // ICD SAR_STATUS: 0 Disconnected, 1 Ready, 2 Stopped,
+                                // 3 Started, 4 SAR Not Responding
+    uint32_t live_counter;      // FC-maintained count of VALID Heart_Beat receptions
+};
+extern PNU_SAR_Status SAR_Status;
+
 #if AP_PNUSAR_ENABLED
 
-#include <AP_Common/AP_Common.h>
-#include <AP_CANManager/AP_CANDriver.h>
 #include <AP_HAL/CANIface.h>
-#include <AP_HAL/Semaphores.h>
-#include <GCS_MAVLink/GCS_MAVLink.h>
+#include <AP_PNU_CAN/AP_PNU_CAN_Backend.h>
 
-// PNU : CAN driver for the SAR radar payload.
+// PNU : the SAR radar payload, as specified by SAR_ICD_PNU.md Rev1.0 (repository root).
 //
-// Modelled on AP_PMUCAN: a private CAN protocol, NOT DroneCAN.  Like AP_PMUCAN it owns its
-// own thread, created in init(), and does all CAN work there - nothing here runs on the
-// vehicle scheduler.
+// Classical CAN, STANDARD 11-bit data frames, ids 0x400-0x7FF, 1 Mbit/s.  Nothing here is
+// DroneCAN.  The PMU on the same bus speaks 29-bit extended frames and the gimbal speaks
+// 11-bit in 0x000-0x2FF, so the three never collide - the ICD confirmed a range this
+// project had already reserved before it existed.
 //
-// INTENT, recorded 2026-10-15 before the implementation session:
+// STEP 3a IMPLEMENTS THE CONNECTION LAYER AND NOTHING ELSE: Heart_Beat 0x510, the
+// Live_Counter, the 3 s timeout and SAR_STATUS 0 and 1.  Commands, responses and the
+// navigation bundle arrive in 3d and 3e.  Ids are named here so that an early frame from
+// a real device is claimed and counted rather than reported as unknown traffic.
 //
-//   - This is the SAR radar payload itself.  It is **stabilised by AP_PNUGimbal**, which
-//     drives three CubeMars GL60 II KV28 motors and carries no camera.
-//   - Unlike AP_PNUGimbal, this one probably IS a device driver in the AP_PMUCAN sense:
-//     a complete device with its own CAN protocol, reporting status and taking commands.
-//
-// Open design question for the next session: where does SAR data go?  Candidates are
-// AP_Proximity (if it produces range/bearing usable for avoidance), a PNU-KAL ICD message
-// of its own in pnu_kal.xml alongside TM1/TM2/TM5, or a private path to the ground.  That
-// choice decides most of the rest of this file, so settle it first.
-//
-// TODO(AP_PNUSAR) : the ICD is not yet available.  Everything below marked TODO needs the
-// real CAN ids, DLCs and field layouts before this driver does anything useful.
+// THINGS THE ICD LEAVES TBD, and which this backend therefore does not invent:
+//   - 0x503 Observation_Mode_Command and 0x523 Observation_Param_Response payloads.
+//     Lumir expects to define them; they are named, never transmitted, never parsed.
+//   - Observation_Mode's CAN encoding, which depends on 0x503.
+//   - the detailed recovery-inhibit feature (ICD 14.8), deliberately deferred.
 
-#define AP_PNUSAR_LOOP_HZ          (100U)     // thread rate, 10 ms
-#define AP_PNUSAR_CMD_DLC          (8U)       // TODO : confirm against the ICD
-#define AP_PNUSAR_STS_DLC          (8U)       // TODO : confirm against the ICD
-#define AP_PNUSAR_SHORT_FRAME_WARN_MS (10000U) // rate limit for the short-frame warning
+// ids, SAR_ICD_PNU.md section 5.  All 11-bit standard.
+#define AP_PNUSAR_ID_NAV_FIRST      (0x400U)    // GPS_POSITION, first of the 9-frame bundle
+#define AP_PNUSAR_ID_NAV_LAST       (0x408U)    // SNAPSHOT_TIME_US, closes the bundle
+#define AP_PNUSAR_ID_START_CMD      (0x501U)    // FC -> SAR, DLC 1, payload 0x01
+#define AP_PNUSAR_ID_STOP_CMD       (0x502U)    // FC -> SAR, DLC 1, payload 0x01
+#define AP_PNUSAR_ID_MODE_CMD       (0x503U)    // RESERVED, payload TBD - never transmitted
+#define AP_PNUSAR_ID_HEARTBEAT      (0x510U)    // SAR -> FC, DLC 4, 1 Hz
+#define AP_PNUSAR_ID_START_RESP     (0x521U)    // SAR -> FC, DLC 1, payload 0x01
+#define AP_PNUSAR_ID_STOP_RESP      (0x522U)    // SAR -> FC, DLC 1, payload 0x01
+#define AP_PNUSAR_ID_PARAM_RESP     (0x523U)    // RESERVED, payload TBD - never parsed
 
-class AP_PNUSAR : public AP_CANDriver {
+// DLCs, SAR_ICD_PNU.md sections 12 and 13.  A frame of the wrong length is rejected and
+// counted, never parsed from the same offsets - PNU-ISSUE(D6), which cost the PMU a long
+// run of silently stale values.
+#define AP_PNUSAR_HEARTBEAT_DLC     (4U)
+#define AP_PNUSAR_CMD_DLC           (1U)
+#define AP_PNUSAR_RESP_DLC          (1U)
+#define AP_PNUSAR_NAV_DLC           (8U)
+#define AP_PNUSAR_RESERVED_DLC      (8U)
+
+// T_HB, SAR_ICD_PNU.md section 3.3.  At least this long without a valid Heart_Beat means
+// Disconnected and navigation off.  The ICD fixes it; it is not tuning.
+#define AP_PNUSAR_HB_TIMEOUT_MS     (3000U)
+
+// Health is evaluated at this rate, matching the PMU's leaky bucket so both devices on
+// the shared bus are judged on the same clock.
+#define AP_PNUSAR_HEALTH_CHECK_TICKS (2U)       // 50 Hz at AP_PNU_CAN_LOOP_HZ
+
+// ICD SAR_STATUS values, section 14.1.  START_PENDING and STOP_PENDING are internal and
+// are deliberately NOT in this enum - the ICD says they are not MAVLink states.
+enum class PNUSAR_State : uint8_t {
+    DISCONNECTED   = 0,
+    READY          = 1,
+    STOPPED        = 2,
+    STARTED        = 3,
+    NOT_RESPONDING = 4,
+};
+
+class AP_PNUSAR : public AP_PNU_CAN_Backend {
 public:
-    AP_PNUSAR();
-    ~AP_PNUSAR();
+    using AP_PNU_CAN_Backend::AP_PNU_CAN_Backend;
 
     CLASS_NO_COPY(AP_PNUSAR);
 
-    // AP_CANDriver
-    void init(uint8_t driver_index) override;
-    bool add_interface(AP_HAL::CANIface* can_iface) override;
-
-    // return the driver registered on @driver_index, or nullptr
-    static AP_PNUSAR *get_pnusar(uint8_t driver_index);
-
-    static AP_PNUSAR *get_singleton() { return _singleton; }
+    // AP_PNU_CAN_Backend
+    bool init(void) override;
+    void update(uint32_t tick) override;
+    bool handle_frame(const AP_HAL::CANFrame &frame) override;
+    bool healthy(void) const override;
+    const char *name(void) const override { return "SAR"; }
 
 private:
 
-    void loop(void);                // thread entry
-    void rx_spin(void);             // drain the interface and dispatch
-    void tx_spin(void);             // send whatever is pending
+    void check_health(void);
+    void set_state(PNUSAR_State state);
+    bool handle_heartbeat(const AP_HAL::CANFrame &frame);
 
-    // PNU-ISSUE(D6) lesson from AP_PMUCAN: validate the DLC before reading any field.
-    // A short or malformed frame must be rejected and counted, never parsed from fixed
-    // offsets - that produced silently stale values on the PMU for a long time.
-    void handle_frame(const AP_HAL::CANFrame &frame);
-    void report_short_frame(uint32_t frame_id, uint8_t dlc);
+    // PNU-ISSUE(D1) : every member carries an initialiser.  Backends are allocated with
+    // NEW_NOTHROW, which resolves to calloc, so this is hygiene rather than a bug fix.
+    PNUSAR_State _state = PNUSAR_State::DISCONNECTED;
 
-    // PNU-ISSUE(D15) lesson: the PMU is little-endian and so is the STM32, so fields are
-    // memcpy'd straight into native integers with no byte swap.  Confirm the same for this
-    // device before copying that pattern - and if it holds, say so at the site, because the
-    // absence of a swap otherwise looks like an oversight.
-    int send_frame(uint32_t can_id, const uint8_t *data, uint8_t dlc);
+    uint32_t _last_hb_ms = 0;           // arrival of the last VALID Heart_Beat
+    bool     _ever_connected = false;   // a Heart_Beat has been seen since boot
+    bool     _recovery_pending = false; // ICD 14.8 : connection was lost and not released
 
-    static AP_PNUSAR *_singleton;
-
-    // PNU-ISSUE(D1/D10) lesson: every member carries an initialiser.  Backends are
-    // allocated with NEW_NOTHROW, which resolves to calloc, so this is hygiene rather than
-    // a bug fix - but it removes a dependency on allocator behaviour that nothing states as
-    // a contract, and it keeps working if an instance is ever placed differently.
-    char _thread_name[12] = {};
-    bool _initialized = false;
-    uint8_t _driver_index = 0;
-    AP_HAL::CANIface *_can_iface = nullptr;
-
-    // the interface signals this when a frame arrives; handed to set_event_handle() in
-    // add_interface(), same as AP_PMUCAN
-    HAL_BinarySemaphore sem_handle;
-
-    uint32_t _loop_cnt = 0;
-    uint32_t _short_frame_cnt = 0;          // frames rejected for a short DLC
-    uint32_t _last_short_frame_warn_ms = 0; // rate limit for the warning above
-
-    // PNU-ISSUE(D6) note: AP_PMUCAN accumulated five counters that were incremented and
-    // never read anywhere in the tree.  Do not repeat that - add a counter only when
-    // something reports it, or it is RAM that tells nobody anything.
-    uint32_t _tx_err_cnt = 0;               // reported by report_short_frame()'s sibling
-};
-
-namespace AP {
-    AP_PNUSAR *pnusar();
+    uint32_t _reserved_rx_cnt = 0;      // 0x523 seen while its payload is still TBD
+    uint32_t _last_reserved_warn_ms = 0;
 };
 
 #endif  // AP_PNUSAR_ENABLED

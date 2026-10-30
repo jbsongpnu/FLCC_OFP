@@ -2,14 +2,24 @@
 - This branch currently developing PNU-KAL FLCC OFP after official version (TAG) PNU-KAL-FLCC-5.1.0 (this is same code as 5.0.15 dev)  
 - PNU-ISSUE 10 & 11 still remains : For Gremsy camera and general camera mount library structure  
 - **CAN Update Plan step 2c is APPLIED and MEASURED in 5.1.18** - a **500 ms TC1 staleness reset** and a **10 s stop-before-start window**. **The defect was reproduced, not just the fix**: with guard 1 disabled the same cut-short Start burst started the engine 1.34 s after the last message; with it enabled, no start. Interlock duration measured at **1.50 s**, matching the bench's ~1-1.5 s. Driven by `Tools/pnu/sitl_can/tc1_inject.py`, and **re-run independently by PNU 2026-10-29 with every scenario reporting AS EXPECTED**  
-- NEXT : **PNU's eye on two step 2c decisions** - the Stop window is measured from the **Start press** rather than from the interlock completing, and a **Stop** burst cut off mid-way no longer completes either. Both are recorded in the step 2c section. **Not tested against a real PMU, engine, KGCS or LTE link**  
-- ALSO NEXT : the fake **gimbal** (three CubeMars motors), the other half of step 2b, and the only thing that will exercise the **shared bus**  
+- **SAR Integration Plan step 3a is DONE in 5.1.19** - `AP_PNUSAR` is an `AP_PNU_CAN` backend, **protocol 17 is retired**, and the connection layer works: Heart_Beat `0x510`, the FC-maintained Live_Counter, the 3 s `T_HB` timeout and `SAR_STATUS` 0 and 1. **Builds only; no SAR hardware and no fake SAR yet**  
+- NEXT : **step 3b, the fake SAR** - and with it **the first shared-bus test this project has ever run**, fake PMU and fake SAR together at `CAN_D1_PNU_OPTS = 5`  
+- **The ICD confirms the ID reservation made before it existed** - `0x400`-`0x7FF`, 11-bit, 1 Mbit/s - so the gimbal, PMU and SAR still share CAN1 without collision, and MAVLink 50050/51050 are free  
+- ALSO NEXT : **PNU's eye on two step 2c decisions** - the Stop window is measured from the **Start press** rather than from the interlock completing, and a **Stop** burst cut off mid-way no longer completes either. Both are recorded in the step 2c section. **Not tested against a real PMU, engine, KGCS or LTE link**  
+- ALSO NEXT : the fake **gimbal** (three CubeMars motors), the other half of step 2b - **displaced by the SAR work**. The **shared bus** is now first exercised by step 3b's fake SAR running beside the fake PMU, which is cheaper and arrives sooner  
 - ALSO NEXT : **Bench-tune the homing parameters, then set `CAN_Dn_PNU_HOME=1`.** Step 1d is implemented but **defaults to OFF** - the stall threshold, approach velocity and the two gains are provisional and unmeasured. Nothing drives into a stop until somebody turns it on. See 6f near the end of this file for the tuning order  
 - THEN : **step 3** the SAR backend (protocol 17 retires there)  
 - *Done in step 2b, tools only with no version bump :* the **fake PMU is validated** (`Tools/pnu/sitl_can/`, flown in SITL 2026-10-29 with Mission Planner on SERIAL0 and KGCS on SERIAL1 - choke, the choke crank, Start, warm-up idle, the cooling trip, Stop, takeoff and RTL with landing). **The D9 failsafe now runs end to end on a desk**: `silent` trips it to RTL, `resume` clears it, no connector pulled. **The start-up ORDER is not optional** - `vcan0` before SITL, Mission Planner on TCP 5760 before SERIAL1 and SERIAL2 exist at all; the validated sequence is in `Tools/pnu/sitl_can/README.md`  
 - **BENCH STATUS (5.1.16)** : PMU telemetry, command paths, prearm and the **in-flight failsafe** all PASSED 2026-10-19. **Outstanding** : the **shared bus** (`PNU_OPTS=3`, the test step 2 exists for), **Stop-command timing**, and the **~1.0 s interlock duration** after the 10 Hz rework  
 - *Done in the gimbal track :* step 1b (`AP_Mount_PNUGimbal`, 5.1.12) and step 1c (lifecycle state machine, 5.1.13). `AP_Mount` does stabilise against FC attitude and needs no camera, which is why the gimbal is an `AP_Mount` backend  
-- IN THIS VERSION : V5.1.18 - **CAN Update Plan step 2c, the two engine-start interlock windows** (`AP_PMUCAN` only), **measured in SITL and with the original defect reproduced**. See the step 2c section  
+- IN THIS VERSION : V5.1.19 - **SAR Integration Plan step 3a: the SAR becomes an `AP_PNU_CAN` backend and protocol 17 retires.** See the SAR Integration Plan; **not tested beyond builds**  
+   - **`AP_PNUSAR` is no longer an `AP_CANDriver`.** It is a backend selected by `CAN_Dn_PNU_OPTS` bit 2 on protocol 15, so the PMU, the gimbal and the SAR are three protocols behind one driver - which is the only arrangement `AP_CANManager` allows on one interface  
+   - **Protocol 17 is retired and NOT reused.** A stored 17 falls through to "no driver" rather than silently becoming a different device  
+   - **Live_Counter counts what the FC RECEIVED**, not the SAR's own `Raw_Counter`, which the heartbeat carries and which this code never reads (ICD 3.3)  
+   - **A reconnecting heartbeat does not restore Ready** (ICD 14.8). It is announced once and the state stays Disconnected, because the data contaminated by the outage has not been inspected and the release procedure is deferred by the ICD. Until it exists the only way back is a power cycle  
+   - Command, response and navigation ids are named and claimed already, so a real device's early traffic is counted rather than reported as unknown  
+- For 5.1.18 version :  
+   - **CAN Update Plan step 2c, the two engine-start interlock windows** (`AP_PMUCAN` only), **measured in SITL and with the original defect reproduced**. See the step 2c section  
    - **TC1 staleness, 500 ms.** `engineonoffstate()`'s counters are a tick timer, not a count of operator alternations - the command pair only changes when a new TC1 arrives but the function runs at 10 Hz regardless, so a frozen pair kept counting and **a link dying mid-burst completed the start on its own about a second later**. Counting now stops  
    - **Stop before start, 10 s.** KGCS forces a Stop before a Start, so the FC requires the same and refuses a Start that does not follow a recent one - covering the link dying *between* the two  
    - **Both windows are stamped only where a NEW TC1 is detected.** The frozen pair stays a valid Stop alternation from the end of one burst to the start of the next, so testing it at 10 Hz would have held the window permanently open. That is why this is in `transmit_slot()` and not in `engineonoffstate()`  
@@ -1102,7 +1112,7 @@ make a wholesale copy a regression.
 | 4 `pmucan_*.hpp` deleted (1163 lines) | vendored libuavcan v0; only 3 constants were used, all identical in `AP_HAL::CANFrame` / `CANIface` |
 | Mount task kept at 50 Hz | `AP_Mount_Viewpro::update()` self-throttles to 100 ms, so gimbal traffic is 10 Hz either way; at a 10 Hz task rate the period *equals* the throttle and late ticks cause 5 Hz bursts. See D8 |
 | msg 285 suppression made opt-in | V5.0.8 suppressed it for every gimbal, not just Viewpro. See D8 |
-| `version.h` is **5.1.18 DEV** | 5.1.0 OFFICIAL closed the migration; the 5.1.x DEV series carries the post-release D10 work - Stage 1 in 5.1.1, the Gremsy analysis and pitch relocation in 5.1.2, Stage 2a routing in 5.1.3, Gremsy hardware validation in 5.1.4, Stage 2b closure in 5.1.5, Stage 3 in 5.1.6, its bench confirmation in 5.1.7, the KGCS backward-compatibility fix in 5.1.8, the `AP_PNUGimbal` / `AP_PNUSAR` CAN driver skeletons in 5.1.9, `AP_PNUGimbal`'s CubeMars protocol backend in 5.1.10, CAN Update Plan step 1 in 5.1.11, step 1b in 5.1.12, step 1c in 5.1.13, step 1d in 5.1.14, step 2 in 5.1.15, the bench fixes in 5.1.16, the PMU failsafe's scheduling fix in 5.1.17 and CAN Update Plan step 2c in 5.1.18 - and goes OFFICIAL when D10/D11 land |
+| `version.h` is **5.1.19 DEV** | 5.1.0 OFFICIAL closed the migration; the 5.1.x DEV series carries the post-release D10 work - Stage 1 in 5.1.1, the Gremsy analysis and pitch relocation in 5.1.2, Stage 2a routing in 5.1.3, Gremsy hardware validation in 5.1.4, Stage 2b closure in 5.1.5, Stage 3 in 5.1.6, its bench confirmation in 5.1.7, the KGCS backward-compatibility fix in 5.1.8, the `AP_PNUGimbal` / `AP_PNUSAR` CAN driver skeletons in 5.1.9, `AP_PNUGimbal`'s CubeMars protocol backend in 5.1.10, CAN Update Plan step 1 in 5.1.11, step 1b in 5.1.12, step 1c in 5.1.13, step 1d in 5.1.14, step 2 in 5.1.15, the bench fixes in 5.1.16, the PMU failsafe's scheduling fix in 5.1.17 CAN Update Plan step 2c in 5.1.18 and SAR Integration Plan step 3a in 5.1.19 - and goes OFFICIAL when D10/D11 land |
 | `GCS.h` dead CAM macros removed, `OFP_VER_*` tracked against `version.h` | were stale/unused; guarded by `static_assert` in `Copter.cpp` |
 | `AP_PMUCAN` fixes | dropped-frame at RX budget, dead branch, `&`->`&&`, `RXdrain()` extraction, named constants, ctor init, `TXspin` void. See git log |
 | `send_proximity()` upward-distance block **not** commented out | V5.0.8 wrapped it in `/* Currently, no upward sensor */`. `AP_Proximity::get_upward_distance()` already returns false when no backend supplies one (`AP_Proximity.cpp:498`), and TeraRanger Tower Evo is not one of the backends that does - so the comment-out is a no-op here and a silent regression for `AP_Proximity_RangeFinder` / `_MAV` / scripting users. Not applied |
@@ -1820,7 +1830,7 @@ gimbal Master ID or any gimbal command id, rather than letting the demux be ambi
 | **2** | **DONE in 5.1.15, BENCH-TESTED 2026-10-19 except the shared bus.** **PMU becomes a backend.** `AP_PMUCAN` changes base class; protocol **15** instantiates `AP_PNU_CAN`, so `CAN_Dn_PNU_OPTS` bit 0 becomes live; the 10 Hz per-message rate is **explicit**; health is **id-based**; **16 kept as a deprecated alias**. Protocol 17 deferred to step 3 | `AP_PMUCAN/`, `AP_PNU_CAN/`, `AP_CAN.h`, `AP_CANManager.{h,cpp}`, `AP_Arming.cpp` | **HIGH** | **PASSED**: telemetry, command paths, prearm, in-flight failsafe and recovery. **OUTSTANDING**: shared bus with `PNU_OPTS=3`, and Stop-command timing. The ~1.0 s interlock duration PASSED at ~1-1.5 s |
 | **2b** | **Simulated CAN devices for SITL.** **Fake PMU VALIDATED in SITL 2026-10-29.** Fake CubeMars motors still to come. **Ordered before 2c on purpose** - it is how 2c's windows get measured instead of reasoned about. See the section below | `Tools/pnu/sitl_can/` - no firmware change | low | **SITL-flown by PNU**: choke, the choke crank, Start, warm-up idle, cooling trip, Stop, takeoff, RTL with landing, and **the silent trigger tripping the D9 failsafe to RTL**. 43 offline tests pass |
 | **2c** | **DONE in 5.1.18, MEASURED IN SITL.** Two independent time windows on PNU-ISSUE(D7)'s start sequence - a **500 ms TC1 staleness reset** and a **10 s stop-before-start window**. See the section below | `AP_PMUCAN/` | **HIGH** - engine start logic | **all four scenarios AS EXPECTED, and the original defect reproduced with guard 1 disabled.** Not tested against a real PMU, engine, KGCS or LTE link |
-| **3** | **SAR backend** under the same driver, 11-bit, ids `0x400`-`0x7FF`. Protocol 17 retires here, deferred from step 2 | `AP_PNUSAR/` | low | build; real work waits on the ICD |
+| **3** | **SAR backend** under the same driver, 11-bit, ids `0x400`-`0x7FF`. Protocol 17 retires here, deferred from step 2. **The ICD arrived 2026-10-30 (`SAR_ICD_PNU.md`) and PNU promoted this ahead of the fake gimbal** - see the SAR Integration Plan below, which breaks it into 3a-3g | `AP_PNUSAR/`, `pnu_kal.xml`, `GCS_PNU.cpp`, `Tools/pnu/sitl_can/` | **MEDIUM** - observation lifecycle and an RTK start interlock | **3a done in 5.1.19**, builds only; 3b-3g ahead |
 | **4** | Bus documentation, bitrate note, README and `version.h` | `README.md`, `version.h` | none | - |
 
 **Protocol number: 15 is kept.** The enumerator is renamed `PMUCAN = 15` -> `PNU_CAN = 15`; the
@@ -2943,6 +2953,125 @@ safe. If Start ever becomes flaky, look there.
 sends what the KGCS protocol specifies, not what KGCS actually emits. The LTE link is not
 simulated, so the bunching above is not exercised. **The numbers are confirmed to behave as
 designed; they are not confirmed to be the right numbers for the aircraft.**
+
+---
+
+## SAR Integration Plan - PLANNED 2026-10-30
+
+*`SAR_ICD_PNU.md` (repository root) is Rev1.0 of the SAR ICD, supplied by PNU 2026-10-30
+and jointly owned with Lumir. It replaces the placeholder assumptions step 3 was written
+against. **Read it before touching any of this** - it is unusually precise about byte
+order, sentinels and what is still TBD, and it explicitly forbids inventing the TBDs.*
+
+**Step 3 is promoted ahead of the fake gimbal, by PNU 2026-10-30**, against a real
+schedule for connection testing with Lumir's device. The gimbal is a stabiliser; the SAR
+provides the mission function.
+
+### What the ICD got right before we asked
+
+| Item | ICD | What we had already reserved |
+|---|---|---|
+| ID range | `0x400`-`0x7FF`, 11-bit standard | the same, reserved in step 1 before the ICD existed |
+| Bitrate | 1 Mbit/s | the same, forced by the CubeMars motors |
+| MAVLink ids | 50050 TC, 51050 TM | free in `pnu_kal.xml` (50001/2/4, 51001/2/3/5 in use) |
+
+So no collision with the gimbal's `0x000`-`0x2FF` or the PMU's 29-bit extended ids, and
+`CAN_Dn_PNU_OPTS` bit 2 already exists for the SAR.
+
+### It is two bodies of work, not one
+
+**A - the SAR interface.** 16 CAN ids, a nine-frame 10 Hz snapshot bundle, two MAVLink
+messages, a five-state machine with 3 s and 2 s timers, the RTK-Fixed start interlock and
+automatic termination. This is step 3.
+
+**B - gimbal semantics for the SAR**, ICD section 16: a per-axis 25 deg stabilisation
+envelope, yaw held to the **waypoint-segment heading** within 15 deg of error, and actual
+attitude feedback with mounting transforms. The ICD assigns it to PNU Drone, but it is
+`AP_PNUGimbal` work needing mission access and real gimbal feedback. **It is not step 3**
+and is not costed here beyond the phase that carries it.
+
+### The dependency that shapes the order
+
+`0x404 ATTITUDE` must carry the **actual** attitude of the gimbal-stabilised SAR. Section
+16.4 forbids substituting setpoints and marking them valid. Two consequences:
+
+- Section 14.7 makes **ATT source age over 40 ms an automatic observation termination**,
+  so with no attitude source every Start would abort at once.
+- 40 ms freshness needs at least 25 Hz of gimbal feedback, and **the CubeMars feedback
+  rate is unknown** - `AP_PNUGimbal_CubeMars.h` lists it among the things the manual does
+  not specify and that we refused to invent. Homing is also still untuned, `PNU_HOME=0`.
+
+**PNU's decision 2026-10-30: `0x404` carries hard-coded zero Roll/Pitch/Yaw until the
+gimbal can supply real attitude.** Recorded with its cost in "The one real risk" below.
+
+### Phases
+
+| Phase | Content | Files | Depends on |
+|---|---|---|---|
+| **3a** | **DONE in 5.1.19.** `AP_PNUSAR` becomes an `AP_PNU_CAN_Backend`; **protocol 17 retires**, deferred from step 2; `PNU_OPTS` bit 2 wires it up. `0x510` Heart_Beat, Live_Counter, the 3 s timeout, `SAR_STATUS` 0 and 1 | `AP_PNUSAR/`, `AP_CAN.h`, `AP_PNU_CAN.cpp`, `AP_CANManager/`, `AP_Arming.cpp` | nothing |
+| **3b** | **Fake SAR** on `vcan0`, same shape as the fake PMU. Heartbeat first, then grown phase by phase. **Carries the first shared-bus test there has ever been** - fake PMU and fake SAR together, which `PNU_OPTS=5` finally exercises | `Tools/pnu/sitl_can/` | 3a |
+| **3c** | MAVLink **50050** TC and **51050** TM in `pnu_kal.xml`; TM at 5 Hz unconditionally; TC ingest with a source check; `SAR connected` / `SAR reconnected` STATUSTEXT | `pnu_kal.xml`, `GCS_PNU.cpp` | 3a |
+| **3d** | Commands `0x501`/`0x502`, responses `0x521`/`0x522`, the 2 s FC windows, states 2/3/4, the **RTK-Fixed start interlock** | `AP_PNUSAR/` | 3c |
+| **3e** | The nine-frame **10 Hz navigation bundle** `0x400`-`0x408`, GPS freshness at 300 ms, automatic termination. **`0x404` is placeholder zeros** | `AP_PNUSAR/` | 3d |
+| **3f** | Real gimbal attitude into `0x404`, and the `ATT_FRESH` 40 ms contract | `AP_PNUGimbal/`, `AP_PNUSAR/` | **measured gimbal feedback rate** |
+| **3g** | ICD section 16: the 25 deg envelope and **yaw to waypoint-segment heading** | `AP_PNUGimbal/`, mission access | 3f |
+
+The fake SAR lands at 3b on purpose. Step 2c is the precedent: the fake PMU is what turned
+the interlock windows from reasoned into measured, and the same tool will do it for the
+3 s heartbeat timeout, the 2 s response windows and the bundle ordering rules.
+
+### The GCS side is not ours
+
+ICD section 14.6 - the 3 s per-attempt windows, the single retry, Start-button enabling -
+is **PNU-GCS work and is already under way**. This plan is FC-side only. The FC implements
+its own 2 s window and performs **no retry of its own**; section 14.5 prohibits one,
+because an FC retry loop would exceed the GCS's two-attempt limit.
+
+### One codebase gap, and it is small
+
+`RTCMFU`/`RTCMFD` come from `AP_GPS::rtcm_stats`, which is **private** (`AP_GPS.h:746`,
+under the `private:` at 643). Everything else the ICD needs is public: `get_undulation()`
+for `AEl`, `last_message_time_ms()` and `last_message_delta_time_ms()` for `SMS` and
+`Delta`, the accuracy and DOP getters, and `gps_yaw_deg()` for yaw and `YAcc`.
+
+The ICD's `RTCM_STATS_AVAILABLE` bit exists for exactly this case, so **3e ships with
+GPS_Flags bit 6 clear and both counters zero**, which the ICD defines as correct. A public
+accessor on `AP_GPS` is a separate, clean, upstreamable commit and is not on this path.
+
+### `0x503` and `0x523` stay reserved
+
+Lumir expects to define them soon, which is why they are named rather than left as holes.
+**Interfaces and names only; no transmission, no invented payload, no parsing** - ICD
+sections 5 and 13 both say so explicitly. The eight bytes stay opaque.
+
+### Bus loading is not a constraint
+
+| Source | Frames/s | Share of 1 Mbit/s |
+|---|---:|---:|
+| SAR navigation, 9 frames at 10 Hz | 90 | ~1.2% |
+| PMU, 5 RTR + 5 responses + 5 commands at 10 Hz | ~150 | ~2.2% |
+| Gimbal, 3 axes command and feedback at 100 Hz | ~600 | ~7.8% |
+
+About 11% in total. The nine-frame bundle takes roughly 1.2 ms of a 100 ms period, so the
+ICD's "do not overlap or interleave navigation bundles" is comfortable. What does need
+care is that **all nine frames are enqueued in one driver tick**: a full TX queue would
+publish a partial bundle, which the receiver must discard. Count that, never paper over it.
+
+### The one real risk
+
+**Hard-coded zero attitude in `0x404` is what ICD section 16.4 forbids** - "do not
+substitute zero/segment_heading setpoints and mark them valid". The hazard is not to the
+FC. It is that **Lumir may validate their processing against attitude that is always
+level, and not discover it until the gimbal is fitted.**
+
+Three mitigations, and the third is the one that matters:
+
+1. A parameter rather than a literal, so the placeholder can be switched off without a
+   firmware build, and so its existence is visible in a parameter dump.
+2. A boot-time `GCS_SEND_TEXT` warning whenever the placeholder is active, on the pattern
+   of the `PNU_HOME=0` warning, so no flight starts without somebody being told.
+3. **Lumir is told in writing that `0x404` is a placeholder for this phase.** That is a
+   project action, not a code change, and no amount of firmware care substitutes for it.
 
 ---
 

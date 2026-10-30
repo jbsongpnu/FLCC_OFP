@@ -12,6 +12,7 @@
 #include <GCS_MAVLink/GCS.h>
 
 #include <AP_PMUCAN/AP_PMUCAN.h>
+#include <AP_PNUSAR/AP_PNUSAR.h>
 #include <AP_PNUGimbal/AP_PNUGimbal_CubeMars.h>
 
 extern const AP_HAL::HAL &hal;
@@ -381,10 +382,14 @@ void AP_PNU_CAN::create_backends(void)
     }
 #endif
 
+#if AP_PNUSAR_ENABLED
     if (opts & DEVICE_SAR) {
-        // the SAR backend lands with its ICD; until then the bit is accepted and named
-        set_init_error("PNU_OPTS bit 2 (SAR) has no backend yet");
+        AP_PNUSAR *sar = NEW_NOTHROW AP_PNUSAR(*this);
+        if (!add_backend(sar)) {
+            set_init_error("SAR backend failed to start");
+        }
     }
+#endif
 }
 
 // Take ownership of a backend, or destroy it if it will not run.

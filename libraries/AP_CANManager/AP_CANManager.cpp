@@ -42,7 +42,6 @@
 #include <AP_Common/sorting.h>
 #include <AP_Logger/AP_Logger.h>
 #include <AP_PNU_CAN/AP_PNU_CAN.h>        // PNU
-#include <AP_PNUSAR/AP_PNUSAR.h>        // PNU
 
 extern const AP_HAL::HAL& hal;
 
@@ -229,15 +228,6 @@ void AP_CANManager::init()
                 continue;
             }
             AP_Param::load_object_from_eeprom((AP_PNU_CAN*)_drivers[drv_num], AP_PNU_CAN::var_info);
-            break;
-#endif
-#if AP_PNUSAR_ENABLED
-        case AP_CAN::Protocol::PNUSAR : // PNU : SAR radar, private CAN protocol
-            _drivers[drv_num] = _drv_param[drv_num]._pnusar = NEW_NOTHROW AP_PNUSAR;
-            if (_drivers[drv_num] == nullptr) {
-                AP_BoardConfig::allocation_error("PNUSAR %d", drv_num + 1);
-                continue;
-            }
             break;
 #endif
         default:

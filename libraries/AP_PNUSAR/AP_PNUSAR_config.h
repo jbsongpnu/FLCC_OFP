@@ -1,11 +1,11 @@
 #pragma once
 
-#include <AP_HAL/AP_HAL_Boards.h>
-#include <AP_CANManager/AP_CANManager_config.h>
+#include <AP_PNU_CAN/AP_PNU_CAN_config.h>
 
-// PNU : AP_PNUSAR is a CAN driver for the SAR radar payload.  It speaks a
-// private CAN protocol, NOT DroneCAN, in the same shape as AP_PMUCAN.  Enabled only where
-// there is a CAN interface to speak it on.
+// PNU : AP_PNUSAR is a PROTOCOL BACKEND of AP_PNU_CAN, not a CAN driver of its own.
+// Protocol 17 (PNUSAR) was retired in step 3a - see README's SAR Integration Plan.  The
+// SAR shares CAN1 with the PMU and the gimbal, and AP_CANManager cannot hand one
+// interface to three drivers, so all three are backends behind one driver.
 #ifndef AP_PNUSAR_ENABLED
-#define AP_PNUSAR_ENABLED (HAL_MAX_CAN_PROTOCOL_DRIVERS > 0)
+#define AP_PNUSAR_ENABLED AP_PNU_CAN_ENABLED
 #endif
