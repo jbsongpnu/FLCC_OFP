@@ -276,6 +276,73 @@ reported by the driver as unclaimed traffic instead of being quietly swallowed. 
 how a second talker on our ids becomes visible, and `intrude` is how it is proved rather
 than argued.
 
+## The fake gimbal
+
+Three CubeMars GLII motors on `vcan0`, so that `AP_PNUGimbal` can be driven without
+hardware. `gimbal_frames.py` is the wire format, `gimbal_model.py` is the motion, and
+`fake_gimbal.py` is I/O and the console.
+
+```sh
+Tools/pnu/sitl_can/fake_gimbal.py --interface vcan0
+```
+
+**Start it BEFORE SITL.** The driver's whole bring-up - clear errors, enable, and the
+first state transitions - happens in the first second or two after boot. A fake started
+afterwards sees none of it, and neither does a GCS: those statustexts fire long before
+anything has connected, which is how the first bug below stayed invisible.
+
+**THE FEEDBACK TRIGGER IS AN ASSUMPTION, NOT A MEASUREMENT.** The manual never says what
+makes a motor send a feedback frame - `PNUGimbal_CAN_Protocol_Type_CubeMars.md` sec 1 and
+sec 9.6 both record the gap and say to measure it. So `--fb-mode` selects the behaviour
+and the fake announces which one it is using at startup and in every `status` line:
+
+| `--fb-mode` | Behaviour |
+|---|---|
+| `per-command` *(default)* | one frame per command received, including the universal commands |
+| `periodic` with `--fb-rate N` | N frames per second per axis, independent of commands |
+| `off` | nothing at all, for testing the driver's loss handling |
+
+Nothing in SITL can tell you which one the real motors do. Run the bench measurement
+before trusting any rate seen here.
+
+| Command | Effect |
+|---|---|
+| `status` | mode, master id, feedback mode, wrong-mode and unknown-id counts, every command id received |
+| `axes` | per axis: status, mechanical angle, **reported** angle, velocity, torque, stops |
+| `fault AXIS CODE` | inject a status code in hex - `8` overvoltage, `9` undervoltage, `A` overcurrent, `B` MOS overtemp, `C` winding overtemp, `D` comms loss, `E` overload |
+| `clear [AXIS]` | back to Enabled/Disabled, as the universal clear-errors would |
+| `temp AXIS DRIVER MOTOR` | set the two signed int8 temperatures |
+| `pos AXIS DEG` | teleport an axis, to start a run from somewhere awkward |
+| `travel AXIS LOW HIGH` | **move the mechanical stops at runtime** - the way to make homing fail on purpose |
+| `stiffness X` | stop stiffness in Nm/rad across all axes |
+| `fb per-command\|periodic N\|off` | change the feedback trigger without restarting |
+| `silent` / `resume` | stop and resume feedback entirely - every axis should go stale |
+| `quit` | exit |
+
+`kill -USR1 <pid>` toggles silence, as with the other two.
+
+### What the gimbal model is, and is not
+
+The fake PMU carries a real engine model because an engine has physics this project
+knows. A gimbal motor does not: the manual gives no inertia, no friction, no thermal
+coefficients and no current model. So the model covers exactly what Appendix 1's homing
+sequence needs and nothing more - where each axis is, how fast it is moving, where its
+stops are, and what the encoder zero means. **Temperatures and faults are not simulated**,
+they are set from the console, because a fault that fires on invented physics teaches the
+wrong lesson.
+
+The joint is **massless**: it follows the velocity at which the MIT impedance law's torque
+is zero, so there is no overshoot, no settling time and no torque ripple, and the fake
+must not be read as evidence about any of them. Appendix 1 item 4 detects an endpoint by
+angle alone, and that is what this supports.
+
+**The stops are compliant, and that is deliberate.** A real heavy SAR payload gives a
+little when a motor leans on its stop, and `--stop-stiffness` sets how much. A rigid stop
+would make homing look easier in SITL than it will be on the bench and would leave
+`PNU_HRTOL` untested. The default produces about a quarter of a degree at the homing
+defaults - half of `PNU_HRTOL`. **It is a knob, not a measurement**: nobody has measured
+this mount. Lower it until homing fails; that is the useful experiment.
+
 ## The shared-bus run
 
 Both fakes, one bus, `CAN_D1_PNU_OPTS = 5`:
@@ -350,11 +417,21 @@ No dependencies, no vcan interface, no SITL:
 Tools/pnu/sitl_can/test_pmu_model.py
 Tools/pnu/sitl_can/test_fake_pmu.py
 Tools/pnu/sitl_can/test_fake_sar.py
+Tools/pnu/sitl_can/test_fake_gimbal.py
 ```
 
 The frame tests transcribe the byte offsets out of `AP_PMUCAN::handle_frame()` by hand
 rather than importing them, so that a change on either side fails the test instead of
-agreeing with itself.
+agreeing with itself. The SAR and gimbal tests go further and read the documents: the SAR
+ids and DLCs against `SAR_ICD_PNU.md`'s own table and `AP_PNUSAR.h`, and the gimbal's DLCs
+and universal command bytes against `AP_PNUGimbal_CubeMars.h`, with its published command
+vectors taken byte for byte out of `PNUGimbal_CAN_Protocol_Type_CubeMars.md` section 8.
+
+One gimbal test deliberately **pins a known error in that manual**. The published MIT
+speed vectors decode to 4.74 and -4.84 rather than the +/-6 they claim, because the
+manual's transmit function uses `2^N` where its receive function uses `2^N - 1`. The test
+asserts the wrong values on purpose, so that a future session cannot "fix" the codec until
+those rows pass and thereby break agreement with everything else in the document.
 
 ## Status
 
@@ -446,13 +523,78 @@ Three things this run did not reach:
 - **No SAR hardware.** The 1 Hz on the wire, and its jitter, are this fake's, not
   Lumir's.
 
+### Step 2b's other half, the fake gimbal - MEASURED 2026-10-30
+
+Written at last, long after the fake PMU it was supposed to accompany, and it earned its
+keep in its first run by finding a bug that would have stopped the gimbal dead on the
+bench.
+
+**Finding 1, fixed: `AP_PNUGimbal` never brought the motors up at all.** The backend's
+`_state` is initialised to `State::INIT`, and `set_state(State::INIT)` early-returns when
+the state is unchanged - so INIT's entry actions, the per-axis clear-errors and the
+enable, were never performed at boot. The driver transmitted **nothing**: no feedback
+could arrive, `all_axes_enabled()` stayed false, and INIT timed out into FAULT after 5 s,
+whose own entry queued a disable. Those three disables were the only frames the motors
+ever saw in a 47-second run. `init()` now performs the entry actions through a shared
+`enter_init()`.
+
+It was invisible for a reason worth remembering: every statustext that would have
+explained it - `INIT -> FAULT`, the timeout, the disable - fires in the first seconds
+after boot, **before any GCS has connected and before the dataflash logger has started**.
+The same shape as the one-shot startup line that went missing in 5.1.16. Start the fake
+**before** SITL or you will not see the bring-up either.
+
+**Finding 2, open, and it decides step 3f: with per-command feedback the driver faults.**
+Nothing in `AP_PNUGimbal` keeps the conversation alive between the enable and the first
+motion command, and motion is transmitted only in RUN. With `--fb-mode per-command` the
+last feedback arrives with the enable, and `AP_PNUGIMBAL_FB_TIMEOUT_MS` expires 500 ms
+later - measured at exactly **523 ms** from enable to the FAULT disable. With
+`--fb-mode periodic --fb-rate 50` the same build reaches RUN and streams motion normally.
+
+So the driver as written **assumes the motors feed back autonomously**. The manual does
+not say whether they do. That makes it the first thing to measure on the bench, ahead of
+the rate question: if the real motors only answer commands, the driver needs a keep-alive
+and the 40 ms `ATT_FRESH` budget of step 3f has to be re-derived around it.
+
+**The Appendix 1 homing sequence ran for the first time**, with `PNU_HOME=1` and periodic
+feedback:
+
+| What the FC reported | |
+|---|---|
+| `PNUGimbal: roll travel 60.6 deg, mid -0.1` | roll homed at 14.4 s |
+| `PNUGimbal: pitch travel 60.6 deg, mid -0.1` | pitch homed at 28.9 s |
+| `PNUGimbal: yaw travel 40.5 deg, mid -0.1` | yaw homed at 40.4 s |
+| `PNUGimbal: HOMING -> ALIGN -> RUN` | the whole sequence, roll then pitch then yaw, in 40 s |
+
+**The measured travel carries the stop compliance, and that is the number the bench
+tuning needs.** The mechanical travel is 60 and 40 degrees; the FC measured 60.6 and 40.5,
+because each endpoint is found a quarter of a degree inside the stop's deflection. At the
+homing defaults the stall torque is `HKD x HVEL` = 0.087 Nm, and the model's default
+20 Nm/rad turns that into 0.25 deg per end. **0.6 deg of a 3 deg `PNU_HTOL` is consumed by
+compliance alone** - a fifth of the tolerance, before any real-world asymmetry. A softer
+mount eats more; that is what `stiffness` is for.
+
+**All three devices on one bus at last.** `CAN_D1_PNU_OPTS = 7`, fake PMU, fake gimbal and
+fake SAR on one `vcan0`: the gimbal homed all three axes while exchanging 11,356 commands
+and 8,118 feedback frames, and the SAR beat 57 times, with no unclaimed-frame or
+demultiplexing complaint from the driver. That configuration had never been run before.
+
+**What this does NOT prove.** The feedback trigger and rate are the fake's, not the
+motors'. There is no inertia, no friction, no backlash and no thermal behaviour, so
+nothing here says anything about tuning `HKD`, `HVEL` or `HSTL` against a real payload.
+The stop stiffness is a knob somebody chose, not a measurement. Homing on the bench is
+still the hazardous operation it always was - this rehearsal only means the sequence
+itself, and the driver that runs it, work.
+
 ## What is still NOT covered
 
 - **Step 2c's engine-start interlock timing**, which is what step 2b was ordered first to
   measure. The fake logs every `ENGONOFF` frame with a timestamp for exactly this.
 - A **measured** failsafe latency. The silent trigger fires it correctly, but nobody has
   timed it against the ~100-200 ms the constants predict.
-- The **gimbal** fake, which does not exist yet, and therefore `PNU_OPTS = 7`.
+- The real motors' **feedback trigger and rate**, which the manual does not specify and
+  no fake can supply. See finding 2 above: the driver currently assumes autonomous
+  feedback, and that assumption is untested against hardware.
 - Stop compliance, stall thresholds, real motor dynamics and real PMU firmware behaviour.
   These fakes do not replace the bench; they move the logic errors off it.
 
