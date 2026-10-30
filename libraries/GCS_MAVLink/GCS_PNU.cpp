@@ -17,6 +17,8 @@
      TM2  51002  SYS_ICD_FLCC_GCS_CAM_ATTITUDE_STATUS      camera attitude to KGCS
      TM3  51003  SYS_ICD_GCS_FLCC_PMU_CTRL_ECHO            PMU command echo to KGCS
      TM5  51005  SYS_ICD_FLCC_GCS_OBJECT_AVOIDANCE_STATUS  avoidance status to KGCS
+     TC50 50050  SYS_ICD_GCS_FLCC_SAR_CTRL                 SAR observation control from KGCS
+     TM50 51050  SYS_ICD_FLCC_GCS_SAR_STATUS               SAR status to KGCS, 5 Hz
  */
 
 #include "GCS_config.h"
@@ -36,6 +38,9 @@
 // They used to be extern'd by hand here, unchecked against their definitions.
 #include <AP_Q30/AP_Q30.h>
 #include <AP_PMUCAN/AP_PMUCAN.h>
+// PNU-ISSUE(D13/D14) : AP_PNUSAR.h declares SAR_Status OUTSIDE its enable guard for
+// exactly this include - TM50 is sent whether or not the CAN driver is in the build.
+#include <AP_PNUSAR/AP_PNUSAR.h>
 
 // PNU : incoming-message debug for Viewpro IR pseudo-color/palette commands.
 // Set to 1 to report the Tracking_CMD received by handle_gcs_flcc_cam_cmd() to the GCS.
@@ -44,6 +49,10 @@
 // PNU-ISSUE(D10) : how long after boot TM2 waits before deciding the mount cannot
 // report zoom, in milliseconds.  Covers the gimbal's startup telemetry delay.
 #define PNU_CAM_ZOOM_GRACE_MS 10000
+
+// PNU : how long the TC50 wrong-source warning is suppressed for, in milliseconds.
+// Same shape as the PNU_CAN driver's warnings: the first is always reported.
+#define PNU_SAR_TC_REJECT_WARN_MS 10000
 
 // PNU : object-avoidance warning thresholds reported to KGCS in TM5, in centimetres
 #define PNU_OA_ALERT_DISTANCE_CM 1000
@@ -335,6 +344,112 @@ void GCS_MAVLINK::handle_gcs_flcc_pmu_ctrl(const mavlink_message_t &msg)
                        gcs().PMU_Ctrl.Engine_CHK_CMD);
 #endif
 }
+
+// -------------------------------------------------------------------------
+// Send SAR status to GCS (TM50 / msg 51050)
+// -------------------------------------------------------------------------
+// SAR_ICD_PNU.md 3.2 : 5 Hz, "periodically regardless of connection or observation
+// state".  So this is NOT gated on a SAR backend existing: with none, SAR_Status holds
+// its static-init values and TM50 reports Disconnected with a zero count, which is the
+// truth in that configuration.  The 5 Hz schedule is Copter::send_sar_status_tm().
+//
+// Live_Counter counts VALID 0x510 RECEPTIONS (ICD 3.3) and is maintained by AP_PNUSAR.
+// It is NOT incremented here: once per TM transmission would be five times too fast and
+// would measure this function instead of the SAR.
+//
+// The argument order below is the XML DECLARATION order, SAR_STATUS then Live_Counter.
+// The wire order is the other way round - MAVLink 2 sorts base fields by native size,
+// so Live_Counter's four bytes come first (ICD 3.2).  The generated code does that; it
+// is listed in the ICD because both endpoints have to agree on the payload offsets.
+// -------------------------------------------------------------------------
+void GCS_MAVLINK::send_message_flcc_gcs_sar_status() const
+{
+    mavlink_msg_sys_icd_flcc_gcs_sar_status_send(
+            chan,
+            SAR_Status.status,
+            SAR_Status.live_counter);
+
+#if HAL_LOGGING_ENABLED
+    AP::logger().Write("SARS", "TimeUS,STAT,LIVE", "QBI",
+                       AP_HAL::micros64(),
+                       SAR_Status.status,
+                       SAR_Status.live_counter);
+#endif
+}
+
+
+// -------------------------------------------------------------------------
+// Receive SAR observation control from GCS (TC50 / msg 50050)
+// -------------------------------------------------------------------------
+// STEP 3c RECORDS THE COMMAND AND DOES NOT ACT ON IT.  The CAN side - 0x501/0x502, the
+// 2 s response windows and the RTK-Fixed start interlock - is step 3d.  A Start that
+// vanished silently is precisely PNU-ISSUE(D6), so the operator is told instead.
+// -------------------------------------------------------------------------
+void GCS_MAVLINK::handle_gcs_flcc_sar_ctrl(const mavlink_message_t &msg)
+{
+    // ICD 3.1 : "FLCC checks the permitted GCS source sysid/compid and ingress path."
+    // TC50 carries no target_system / target_component, so nothing in the payload
+    // addresses a vehicle and the sender is the only thing left to check.
+    // sysid_is_gcs() is MAV_GCS_SYSID (and _HIGH), the same gate RC_CHANNELS_OVERRIDE
+    // uses, so the permitted station is configured once for the whole aircraft.
+    //
+    // THE COMPONENT ID IS DELIBERATELY NOT ENFORCED.  The ICD names no permitted value
+    // and ground stations differ - Mission Planner is 190, KGCS need not be - so a
+    // filter here would be invented, not specified.  It is logged instead, which is
+    // what makes a wrong one diagnosable.
+    mavlink_sys_icd_gcs_flcc_sar_ctrl_t sar_ctrl;
+    mavlink_msg_sys_icd_gcs_flcc_sar_ctrl_decode(&msg, &sar_ctrl);
+
+#if HAL_LOGGING_ENABLED
+    // EVERY TC50 is logged, before either test, with the sender and the channel it
+    // arrived on.  A command refused for its source or its value is the one somebody
+    // will be looking for afterwards, and it is the only record of who sent it.
+    AP::logger().Write("SARC", "TimeUS,CTL,MODE,SYS,COMP,CHAN", "QBBBBB",
+                       AP_HAL::micros64(),
+                       sar_ctrl.Observation_Control,
+                       sar_ctrl.Observation_Mode,
+                       msg.sysid,
+                       msg.compid,
+                       (uint8_t)chan);
+#endif
+
+    if (!gcs().sysid_is_gcs(msg.sysid)) {
+        const uint32_t now_ms = AP_HAL::millis();
+        if ((now_ms - gcs().SAR_Ctrl_reject_ms) >= PNU_SAR_TC_REJECT_WARN_MS) {
+            gcs().SAR_Ctrl_reject_ms = now_ms;
+            // names the parameter, because the likely cause is KGCS sending from a
+            // system id that MAV_GCS_SYSID does not cover - TC1 never checked, so
+            // nothing before TC50 depended on that parameter being right
+            GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "SAR: TC50 sysid %u not MAV_GCS_SYSID",
+                          (unsigned)msg.sysid);
+        }
+        return;
+    }
+
+    // ICD 3.1 : "Observation_Control values 3 through 255 are undefined and must not be
+    // executed."  Not clamped to Stop and not treated as Prepare - refused.
+    if (sar_ctrl.Observation_Control > 2) {
+        GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "SAR: TC50 Control %u undefined",
+                      (unsigned)sar_ctrl.Observation_Control);
+        return;
+    }
+
+    // Observation_Mode is RETAINED WHOLE, every value 0-255 (ICD 3.1).  Its CAN
+    // encoding depends on 0x503, which the manufacturer has not defined, so it is
+    // stored and not interpreted.
+    gcs().SAR_Ctrl = sar_ctrl;
+    gcs().SAR_Ctrl_Seq++;           // AP_PNUSAR consumes the increment in step 3d
+
+    // ICD 3.1 and 8 : Control = 0 Prepare has no device command at all - readiness is
+    // decided by the heartbeat - so it is recorded and nothing more.  Start and Stop
+    // DO have one, and this build cannot send it yet.
+    if (sar_ctrl.Observation_Control == 1) {
+        GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "SAR: Start not implemented yet");
+    } else if (sar_ctrl.Observation_Control == 2) {
+        GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "SAR: Stop not implemented yet");
+    }
+}
+
 
 #if HAL_PROXIMITY_ENABLED && AP_AVOIDANCE_ENABLED
 // -------------------------------------------------------------------------

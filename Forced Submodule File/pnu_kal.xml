@@ -2,7 +2,7 @@
 <!--
   PNU-KAL HD FLCC ICD dialect.
 
-  These 7 messages used to be appended to modules/mavlink/message_definitions/v1.0/
+  These messages used to be appended to modules/mavlink/message_definitions/v1.0/
   common.xml, which meant they were invisible to git and a stale copy of common.xml
   had to be kept in this folder.  They now live here, tracked in the parent repo.
   Tools/pnu/stage_mavlink_defs.sh copies this file next to the submodule's definitions
@@ -48,6 +48,20 @@
   <message id="50004" name="SYS_ICD_GCS_FLCC_OBJECT_AVOIDANCE_CMD">
   <description>TC4 (OA).</description>
     <field type="uint8_t" name="OA_Mode" units="N/A">0: Normal, 1: OA Level1, 2: OA Level2[SF:N/A, MIN:0, MAX:2]</field>
+  </message>
+
+  <!-- SAR_ICD_PNU.md section 3.4 gives these two messages verbatim.  Two deliberate
+       departures from the house style above, both required by ICD section 3:
+         - NO units="N/A".  "For fields without units, omit the XML units attribute
+           rather than setting units=N/A"; the documentation shows N/A instead.
+         - the descriptions are the ICD's own words, so that the FC dialect and
+           Lumir's generated code are diff-able.
+       Field names and their capitalisation are fixed by the ICD and must not be
+       tidied.  CRC_EXTRA is generated from this XML and compared at both ends. -->
+  <message id="50050" name="SYS_ICD_GCS_FLCC_SAR_CTRL">
+  <description>SAR observation control from GCS to FLCC. One initial request and at most one GCS retry; repeated commands must not toggle observation.</description>
+    <field type="uint8_t" name="Observation_Control">Observation control: 0 Prepare, 1 Start, 2 Stop. Values 3 through 255 are undefined.</field>
+    <field type="uint8_t" name="Observation_Mode">Observation mode selection. All values from 0 through 255 are allowed; detailed mapping is TBD.</field>
   </message>
 
  <!-- TM -->
@@ -108,6 +122,12 @@
     <field type="uint8_t" name="Object_Avoidance_Status" units="N/A">0:Normal, 1:Warning, 2:Alert[SF:1, MIN:0, MAX:2]</field>
     <field type="uint8_t" name="Object_Avoidance_Mode" units="N/A">0: Normal, 1: OA Level1, 2: OA Level2[SF:1, MIN:0, MAX:2]</field>
     <field type="uint8_t" name="Object_Existence" units="N/A">Bit0~Bit7 to Sectors 0~7, 0:none, 1:object exists[SF:N/A, MIN:0, MAX:255]</field>
+  </message>
+
+  <message id="51050" name="SYS_ICD_FLCC_GCS_SAR_STATUS">
+  <description>SAR device status from FLCC to GCS, sent periodically at 5 Hz.</description>
+    <field type="uint8_t" name="SAR_STATUS">SAR observation status: 0 Disconnected, 1 Ready, 2 Stopped, 3 Started, 4 SAR Not Responding after the FC 2-second response window.</field>
+    <field type="uint32_t" name="Live_Counter">FC-maintained valid SAR Heart_Beat reception count. Increment by one per valid CAN 0x510, not per TM transmission. Reset on FC boot during the common single-battery power reset; no persistence or separate SAR reboot detection. No terminal-count handling required in the operating lifetime.</field>
   </message>
   <!-- PNU-KAL -->
   </messages>

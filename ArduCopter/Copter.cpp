@@ -279,6 +279,12 @@ const AP_Scheduler::Task Copter::scheduler_tasks[] = {
 #ifdef USERHOOK_SUPERSLOWLOOP
     SCHED_TASK(userhook_SuperSlowLoop, 1,     75, 165),
 #endif
+    // PNU : TM50 is fixed at 5 Hz by SAR_ICD_PNU.md 3.2, "regardless of connection or
+    // observation state", so it gets a task of its own rather than a divider inside
+    // userhook_MediumLoop's 10 Hz.  It is NOT in a stream group: Copter's default
+    // stream rates are all zero, and a telemetry rate the ICD fixes is not the
+    // operator's to set.
+    SCHED_TASK(send_sar_status_tm,     5,     50, 166),
 #if HAL_BUTTON_ENABLED
     SCHED_TASK_CLASS(AP_Button,            &copter.button,              update,           5, 100, 168),
 #endif

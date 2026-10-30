@@ -7,7 +7,7 @@
 #include "ap_version.h"
 
 // PNU : This is a custom code modified by PNU Drone
-#define THISFIRMWARE "PNU_OFP V5.1.19"
+#define THISFIRMWARE "PNU_OFP V5.1.20"
 
 // NOTE: 5.1.6 is a DEV build on top of the 5.1.0 OFFICIAL release, which closed the
 // Copter-4.7.1 -> FLCC migration.  It closes D10 Stage 3: TM2's Zoom_POS_FB now carries
@@ -22,6 +22,42 @@
 // and a send_camera_settings() override that forwards real values instead of upstream's
 // NaN placeholders are all vendor-neutral and worth submitting to ArduPilot; only
 // AP_Q30 decides the value means times, which is where PNU-specific facts belong.
+//
+// 5.1.20 is SAR Integration Plan step 3c: the SAR's two MAVLink messages.
+//
+//   TC 50050 SYS_ICD_GCS_FLCC_SAR_CTRL and TM 51050 SYS_ICD_FLCC_GCS_SAR_STATUS, added
+//   to the PNU dialect from SAR_ICD_PNU.md 3.4 verbatim.  Generated CRC_EXTRA is 231 for
+//   the TC and 7 for the TM; both endpoints must agree, so they are recorded here.
+//
+//   TM50 IS 5 Hz UNCONDITIONALLY, ICD 3.2 - "regardless of connection or observation
+//   state".  It is its own SCHED_TASK rather than a stream-group entry, because Copter's
+//   default stream rates are all zero and a rate the ICD fixes is not the operator's to
+//   set, and it is not gated on a SAR backend existing: with none, it reports
+//   Disconnected and a zero count, which is the truth in that configuration.
+//
+//   LIVE_COUNTER IS VISIBLE FOR THE FIRST TIME, and was measured against the fake SAR:
+//   the FC reported 6 after six heartbeats while the device's own Raw_Counter read
+//   777005.  Two different quantities, which is exactly what ICD 3.3 requires.  A
+//   rejected short heartbeat did not increment it, and it held its value across a
+//   disconnect and continued on reconnect.
+//
+//   TC50 CHECKS ITS SOURCE, ICD 3.1: the message has no target_system field, so the
+//   sender is all there is to check, and sysid_is_gcs() - MAV_GCS_SYSID - is the gate.
+//   OPERATIONAL CONSEQUENCE: KGCS must send TC50 from a system id MAV_GCS_SYSID covers,
+//   default 255, or it is refused with a message naming the parameter.  TC1 never
+//   checked, so nothing before this depended on that parameter being right.  The
+//   component id is NOT filtered - the ICD names no permitted value - and is logged.
+//
+//   Control values 3-255 are refused rather than clamped (ICD 3.1).  Observation_Mode is
+//   retained whole and not interpreted, because its CAN encoding depends on 0x503, which
+//   the manufacturer has not defined.
+//
+//   3c RECORDS THE COMMAND AND DOES NOT ACT ON IT.  Start and Stop answer "not
+//   implemented yet" until step 3d adds 0x501/0x502, the 2 s windows and the RTK-Fixed
+//   interlock - a press that vanished silently is PNU-ISSUE(D6).
+//
+//   Measured in SITL against the fake SAR: TM50 at 5.01 Hz, every state transition and
+//   every refusal as above.  No SAR hardware and no KGCS.
 //
 // 5.1.19 is SAR Integration Plan step 3a: the SAR becomes an AP_PNU_CAN backend.
 //

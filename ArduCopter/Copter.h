@@ -833,6 +833,7 @@ private:
     void do_failsafe_action(FailsafeAction action, ModeReason reason);
     void announce_failsafe(const char *type, const char *action_undertaken=nullptr);
     void failsafe_pmucan_check(void);       // PMU failsafe action (PNU)
+    void send_sar_status_tm(void);          // TM50 SAR status at 5 Hz (PNU)
 
     // failsafe.cpp
     void failsafe_enable();

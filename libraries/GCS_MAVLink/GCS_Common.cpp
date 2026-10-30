@@ -1213,6 +1213,7 @@ ap_message GCS_MAVLINK::mavlink_id_to_ap_message_id(const uint32_t mavlink_id) c
 #if HAL_PROXIMITY_ENABLED && AP_AVOIDANCE_ENABLED
         { MAVLINK_MSG_ID_SYS_ICD_FLCC_GCS_OBJECT_AVOIDANCE_STATUS, MSG_OBJECT_AVOIDANCE_STATUS},
 #endif
+        { MAVLINK_MSG_ID_SYS_ICD_FLCC_GCS_SAR_STATUS, MSG_SAR_STATUS},
     };
 
     for (uint8_t i=0; i<ARRAY_SIZE(map); i++) {
@@ -4706,6 +4707,10 @@ void GCS_MAVLINK::handle_message(const mavlink_message_t &msg)
         handle_gcs_flcc_pmu_ctrl(msg);
         break;
 
+    case MAVLINK_MSG_ID_SYS_ICD_GCS_FLCC_SAR_CTRL:
+        handle_gcs_flcc_sar_ctrl(msg);
+        break;
+
 #if AP_Q30_ENABLED
     case MAVLINK_MSG_ID_SYS_ICD_GCS_FLCC_CAM_CMD:
         handle_gcs_flcc_cam_cmd(msg);
@@ -6843,6 +6848,11 @@ bool GCS_MAVLINK::try_send_message(const enum ap_message id)
     case MSG_PMU_CTRL_ECHO:
         CHECK_PAYLOAD_SIZE(SYS_ICD_GCS_FLCC_PMU_CTRL_ECHO);
         send_message_gcs_flcc_pmu_ctrl_echo();
+        break;
+
+    case MSG_SAR_STATUS:
+        CHECK_PAYLOAD_SIZE(SYS_ICD_FLCC_GCS_SAR_STATUS);
+        send_message_flcc_gcs_sar_status();
         break;
 
 #if HAL_PROXIMITY_ENABLED && AP_AVOIDANCE_ENABLED

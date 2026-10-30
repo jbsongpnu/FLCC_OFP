@@ -4,16 +4,24 @@
 - **CAN Update Plan step 2c is APPLIED and MEASURED in 5.1.18** - a **500 ms TC1 staleness reset** and a **10 s stop-before-start window**. **The defect was reproduced, not just the fix**: with guard 1 disabled the same cut-short Start burst started the engine 1.34 s after the last message; with it enabled, no start. Interlock duration measured at **1.50 s**, matching the bench's ~1-1.5 s. Driven by `Tools/pnu/sitl_can/tc1_inject.py`, and **re-run independently by PNU 2026-10-29 with every scenario reporting AS EXPECTED**  
 - **SAR Integration Plan step 3a is DONE in 5.1.19** - `AP_PNUSAR` is an `AP_PNU_CAN` backend, **protocol 17 is retired**, and the connection layer works: Heart_Beat `0x510`, the FC-maintained Live_Counter, the 3 s `T_HB` timeout and `SAR_STATUS` 0 and 1. **Now exercised against the fake SAR** by step 3b; still **no SAR hardware**  
 - **SAR Integration Plan step 3b is DONE, tools only with no version bump** - `Tools/pnu/sitl_can/fake_sar.py`, and with it **the first shared-bus run this project has ever done**: fake PMU and fake SAR on one `vcan0` at `CAN_D1_PNU_OPTS = 5`. Measured 2026-10-30 - `SAR disconnected` **3.058 s** after the last heartbeat against the ICD's 3,000 ms, the reconnection announced in 16 ms **with the state staying Disconnected**, and the short frame, the reserved `0x523` and an intruding `0x400` each reported. The PMU answered **505 of 505 RTRs** on the shared wire throughout  
-- NEXT : **step 3c, MAVLink 50050 and 51050** - the TC, the 5 Hz TM, and the first point at which `Live_Counter` is observable at all  
+- **SAR Integration Plan step 3c is DONE in 5.1.20** - TC **50050** and TM **51050**, the TM at **5 Hz unconditionally**, and TC ingest that checks its source. **`Live_Counter` is now observable and was measured against the fake SAR**: 6 receptions counted while the device's own `Raw_Counter` read 777005  
+- NEXT : **step 3d, the Start and Stop commands** - `0x501`/`0x502`, their responses, the FC's 2 s windows, states 2/3/4 and the **RTK-Fixed start interlock**. Until then the FC refuses a Start out loud rather than silently  
 - **The ICD confirms the ID reservation made before it existed** - `0x400`-`0x7FF`, 11-bit, 1 Mbit/s - so the gimbal, PMU and SAR still share CAN1 without collision, and MAVLink 50050/51050 are free  
 - ALSO NEXT : **PNU's eye on two step 2c decisions** - the Stop window is measured from the **Start press** rather than from the interlock completing, and a **Stop** burst cut off mid-way no longer completes either. Both are recorded in the step 2c section. **Not tested against a real PMU, engine, KGCS or LTE link**  
 - ALSO NEXT : the fake **gimbal** (three CubeMars motors), the other half of step 2b - **displaced by the SAR work**. The **shared bus** no longer waits on it - step 3b exercised it with the fake SAR beside the fake PMU  
 - ALSO NEXT : **Bench-tune the homing parameters, then set `CAN_Dn_PNU_HOME=1`.** Step 1d is implemented but **defaults to OFF** - the stall threshold, approach velocity and the two gains are provisional and unmeasured. Nothing drives into a stop until somebody turns it on. See 6f near the end of this file for the tuning order  
-- THEN : **step 3d**, the Start and Stop commands with their responses, the FC's 2 s windows and the **RTK-Fixed start interlock**  
+- THEN : **step 3e**, the nine-frame 10 Hz navigation bundle `0x400`-`0x408`, with **`0x404` carrying placeholder zeros** until the gimbal can supply real attitude  
 - *Done in step 2b, tools only with no version bump :* the **fake PMU is validated** (`Tools/pnu/sitl_can/`, flown in SITL 2026-10-29 with Mission Planner on SERIAL0 and KGCS on SERIAL1 - choke, the choke crank, Start, warm-up idle, the cooling trip, Stop, takeoff and RTL with landing). **The D9 failsafe now runs end to end on a desk**: `silent` trips it to RTL, `resume` clears it, no connector pulled. **The start-up ORDER is not optional** - `vcan0` before SITL, Mission Planner on TCP 5760 before SERIAL1 and SERIAL2 exist at all; the validated sequence is in `Tools/pnu/sitl_can/README.md`  
 - **BENCH STATUS (5.1.16)** : PMU telemetry, command paths, prearm and the **in-flight failsafe** all PASSED 2026-10-19. **Outstanding** : the **shared bus** (`PNU_OPTS=3`, the test step 2 exists for), **Stop-command timing**, and the **~1.0 s interlock duration** after the 10 Hz rework  
 - *Done in the gimbal track :* step 1b (`AP_Mount_PNUGimbal`, 5.1.12) and step 1c (lifecycle state machine, 5.1.13). `AP_Mount` does stabilise against FC attitude and needs no camera, which is why the gimbal is an `AP_Mount` backend  
-- IN THIS VERSION : V5.1.19 - **SAR Integration Plan step 3a: the SAR becomes an `AP_PNU_CAN` backend and protocol 17 retires.** See the SAR Integration Plan; **not tested beyond builds**  
+- IN THIS VERSION : V5.1.20 - **SAR Integration Plan step 3c: the SAR's two MAVLink messages.** TC **50050** and TM **51050** in `pnu_kal.xml`, the TM at **5 Hz unconditionally**, TC ingest with a source check. **Measured in SITL against the fake SAR**; no SAR hardware and no KGCS  
+   - **`Live_Counter` is observable for the first time.** Measured: the FC reported **6** after six heartbeats while the device's own `Raw_Counter` read **777005** - two different quantities, which is what ICD 3.3 requires. A rejected short heartbeat did **not** increment it, and it **held its value across a disconnect** and continued on reconnect  
+   - **TM50 is 5 Hz whatever else is true** (ICD 3.2), so it is its own `SCHED_TASK` and not a stream-group entry - Copter's default stream rates are all zero, and a rate the ICD fixes is not the operator's to set. With no SAR backend in the build it reports Disconnected and a zero count, which is the truth in that configuration. Measured at **5.01 Hz**  
+   - **OPERATIONAL : KGCS must send TC50 from a system id `MAV_GCS_SYSID` covers** (default 255), or it is refused with a message naming the parameter. TC50 has no `target_system` field, so ICD 3.1 asks the FC to check the sender, and `sysid_is_gcs()` is that gate. **TC1 never checked, so nothing before this depended on that parameter being right.** The component id is deliberately not filtered - the ICD names no permitted value - and is logged instead  
+   - **`Observation_Control` 3-255 is refused, not clamped** (ICD 3.1), and `Observation_Mode` is retained whole and never interpreted, because its CAN encoding depends on `0x503` and the manufacturer has not defined it  
+   - **3c records the command and does not act on it.** Start and Stop answer `SAR: Start/Stop not implemented yet` until step 3d. A press that vanished silently is PNU-ISSUE(D6)  
+   - **CRC_EXTRA is 231 (TC50) and 7 (TM50)**, generated from the dialect and independently re-derived; both endpoints must agree. Every TC50 is logged as `SARC` with its sender, channel and the refusal that followed; TM50 is logged as `SARS`  
+- For 5.1.19 version : **SAR Integration Plan step 3a: the SAR becomes an `AP_PNU_CAN` backend and protocol 17 retires.** See the SAR Integration Plan; **not tested beyond builds**  
    - **`AP_PNUSAR` is no longer an `AP_CANDriver`.** It is a backend selected by `CAN_Dn_PNU_OPTS` bit 2 on protocol 15, so the PMU, the gimbal and the SAR are three protocols behind one driver - which is the only arrangement `AP_CANManager` allows on one interface  
    - **Protocol 17 is retired and NOT reused.** A stored 17 falls through to "no driver" rather than silently becoming a different device  
    - **Live_Counter counts what the FC RECEIVED**, not the SAR's own `Raw_Counter`, which the heartbeat carries and which this code never reads (ICD 3.3)  
@@ -280,7 +288,7 @@ beside it and the build reads the staged copy.
 
 | Piece | Tracked? | Role |
 |---|:--:|---|
-| `Forced Submodule File/pnu_kal.xml` | yes | the 7 message definitions |
+| `Forced Submodule File/pnu_kal.xml` | yes | the 9 message definitions (7 PNU-KAL, plus the SAR's TC50/TM50 from 5.1.20) |
 | `Tools/pnu/stage_mavlink_defs.sh` | yes | copies the 19 upstream XMLs + `pnu_kal.xml` into the staging dir, drops `cubepilot.xml`, stamps the source commit |
 | `Tools/pnu/mavlink_defs/` | **no - gitignored** | the staged copy (~944 KB), regenerated, never committed |
 | `wscript` (1 line) | yes | builds from `Tools/pnu/mavlink_defs/all.xml` |
@@ -2957,7 +2965,7 @@ designed; they are not confirmed to be the right numbers for the aircraft.**
 
 ---
 
-## SAR Integration Plan - PLANNED 2026-10-30, STEPS 3a AND 3b DONE
+## SAR Integration Plan - PLANNED 2026-10-30, STEPS 3a, 3b AND 3c DONE
 
 *`SAR_ICD_PNU.md` (repository root) is Rev1.0 of the SAR ICD, supplied by PNU 2026-10-30
 and jointly owned with Lumir. It replaces the placeholder assumptions step 3 was written
@@ -3011,7 +3019,7 @@ gimbal can supply real attitude.** Recorded with its cost in "The one real risk"
 |---|---|---|---|
 | **3a** | **DONE in 5.1.19.** `AP_PNUSAR` becomes an `AP_PNU_CAN_Backend`; **protocol 17 retires**, deferred from step 2; `PNU_OPTS` bit 2 wires it up. `0x510` Heart_Beat, Live_Counter, the 3 s timeout, `SAR_STATUS` 0 and 1 | `AP_PNUSAR/`, `AP_CAN.h`, `AP_PNU_CAN.cpp`, `AP_CANManager/`, `AP_Arming.cpp` | nothing |
 | **3b** | **DONE 2026-10-30, tools only, no version bump.** **Fake SAR** on `vcan0`, same shape as the fake PMU. Heartbeat first, then grown phase by phase. **Carried the first shared-bus run there has ever been** - fake PMU and fake SAR together at `PNU_OPTS=5` | `Tools/pnu/sitl_can/` | 3a |
-| **3c** | MAVLink **50050** TC and **51050** TM in `pnu_kal.xml`; TM at 5 Hz unconditionally; TC ingest with a source check; `SAR connected` / `SAR reconnected` STATUSTEXT | `pnu_kal.xml`, `GCS_PNU.cpp` | 3a |
+| **3c** | **DONE in 5.1.20.** MAVLink **50050** TC and **51050** TM in `pnu_kal.xml`; TM at 5 Hz unconditionally; TC ingest with a source check. The `SAR connected` / `SAR reconnected` STATUSTEXT already landed in 3a | `pnu_kal.xml`, `GCS_PNU.cpp`, `GCS.h`, `GCS_Common.cpp`, `ap_message.h`, `Copter.cpp`, `UserCode.cpp` | 3a |
 | **3d** | Commands `0x501`/`0x502`, responses `0x521`/`0x522`, the 2 s FC windows, states 2/3/4, the **RTK-Fixed start interlock** | `AP_PNUSAR/` | 3c |
 | **3e** | The nine-frame **10 Hz navigation bundle** `0x400`-`0x408`, GPS freshness at 300 ms, automatic termination. **`0x404` is placeholder zeros** | `AP_PNUSAR/` | 3d |
 | **3f** | Real gimbal attitude into `0x404`, and the `ATT_FRESH` 40 ms contract | `AP_PNUGimbal/`, `AP_PNUSAR/` | **measured gimbal feedback rate** |
@@ -3076,6 +3084,59 @@ deadline is a wall clock, as ICD 3.3 words it, and not "three missed beats".
   transmits before 3d. Responses are covered by unit tests only.
 - **No SAR hardware.** The 1 Hz on the wire, and its jitter, are the fake's.
 - The gimbal is still absent, so `PNU_OPTS = 7` - all three at once - remains untested.
+
+### Step 3c as built - MEASURED 2026-10-30
+
+The two messages come from `SAR_ICD_PNU.md` 3.4 verbatim, into `Forced Submodule File/pnu_kal.xml`
+(the tracked dialect; `Tools/pnu/stage_mavlink_defs.sh` stages it, the submodule is never
+touched). Two deliberate departures from the house style of the other seven messages, both
+required by ICD section 3: **no `units="N/A"`** - the ICD says to omit the attribute rather
+than set it - and the ICD's own wording for every description, so that the FC dialect and
+Lumir's generated code are diff-able.
+
+**Generated CRC_EXTRA: `231` for TC50, `7` for TM50.** Both endpoints have to agree, and the
+ICD refuses to assign unverified values, so they are recorded here. Re-derived independently
+from the field list and matched against the firmware's generated headers.
+
+| Decision | Why |
+|---|---|
+| TM50 is its own 5 Hz `SCHED_TASK` | ICD 3.2 fixes 200 ms "regardless of connection or observation state". A stream-group entry would be user-settable and **Copter's defaults are all zero**; `userhook_MediumLoop` is 10 Hz |
+| TM50 is **not** gated on a SAR backend | With none in the build, `SAR_Status` holds its static-init values and the TM reports Disconnected with a zero count - the truth in that configuration. This is what the D14 globals outside the enable guard were for |
+| `Live_Counter` is not touched here | It counts **valid `0x510` receptions** (ICD 3.3) and belongs to `AP_PNUSAR`. Incrementing per TM would be five times too fast and would measure the sender |
+| TC50 source check is `sysid_is_gcs()` | ICD 3.1: the message has no `target_system`, so the sender is the only thing to check. `MAV_GCS_SYSID` is the parameter ArduPilot already uses for RC override and GCS failsafe |
+| the component id is **not** filtered | The ICD names no permitted value and ground stations differ. A filter here would be invented; it is logged instead |
+| `Control` 3-255 refused, not clamped | ICD 3.1: "undefined and must not be executed" |
+| `Observation_Mode` retained whole | All 256 values are legal (ICD 3.1) and its CAN encoding waits on `0x503`, which is TBD |
+
+**OPERATIONAL, and new: KGCS must send TC50 from a system id `MAV_GCS_SYSID` covers.** The
+default is 255. TC1 never checked its sender - an accepted residual of PNU-ISSUE(D7) - so
+nothing before TC50 depended on that parameter being right. A refusal says
+`SAR: TC50 sysid N not MAV_GCS_SYSID`, which names the parameter to fix.
+
+Measured in SITL with the fake SAR on `vcan0`, `CAN_D1_PNU_OPTS = 5`:
+
+| Step | Result |
+|---|---|
+| before any heartbeat | TM50 flowing, `status=0 Live_Counter=0` |
+| six heartbeats | `status=1 Live_Counter=6`, while the device's `Raw_Counter` read **777005** |
+| `short` (DLC 3) | `PNU_CAN: short frame 0x510 dlc 3`, and `Live_Counter` advanced by exactly 3 over the next 3 s - **the rejected frame did not count** |
+| `silent` | `SAR disconnected` 3.07 s later, `status=0`, **counter held at 10** |
+| `resume` | `SAR reconnected, inspection pending`, counter continued to 14, **state stayed 0** |
+| TC50 `Control=0` Prepare | recorded, **no device command and no message** - ICD 8 |
+| TC50 `Control=1 Mode=7` | `SAR: Start not implemented yet`; the log shows `MODE=7` retained |
+| TC50 `Control=2` | `SAR: Stop not implemented yet` |
+| TC50 `Control=7` | `SAR: TC50 Control 7 undefined` |
+| TC50 from sysid 42 | `SAR: TC50 sysid 42 not MAV_GCS_SYSID`; the repeat 2 s later was logged but **not** announced again |
+| TM50 rate | **5.01 Hz** over 36 s |
+| dataflash | `SARC` has all six TC50s including both refused ones, with sender, component and channel; `SARS` has 181 records |
+
+**Not covered:** no SAR hardware and no KGCS, so the GCS-side 3 s windows and the single
+retry (ICD 14.6, PNU-GCS's work) are untested; and nothing yet consumes `SAR_Ctrl_Seq` -
+that is step 3d.
+
+*Verified:* CubeOrangePlus **1,734,516 B, 231,560 free** (+644 B over 5.1.19), SITL, and
+**SITL with `AP_PNU_CAN_ENABLED=0`** - the last one is the point of the D14 globals: TM50
+still compiles and still reports Disconnected when there is no CAN driver at all.
 
 ### The GCS side is not ours
 

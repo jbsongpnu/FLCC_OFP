@@ -47,6 +47,17 @@ void Copter::userhook_MediumLoop()
 }
 #endif
 
+// PNU : TM50 SAR status, 5 Hz, scheduled from Copter.cpp.
+//
+// Not inside userhook_MediumLoop() with TM2 and TM5, because that hook is 10 Hz and
+// SAR_ICD_PNU.md 3.2 fixes this one at 200 ms.  Nothing is gated here: the ICD says
+// the TM goes out whether or not a SAR is connected, and with no SAR backend in the
+// build SAR_Status still reads Disconnected with a zero count - which is correct.
+void Copter::send_sar_status_tm()
+{
+    gcs().send_message(MSG_SAR_STATUS);
+}
+
 #ifdef USERHOOK_SLOWLOOP
 void Copter::userhook_SlowLoop()
 {

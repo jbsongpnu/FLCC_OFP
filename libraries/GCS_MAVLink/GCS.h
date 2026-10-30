@@ -742,6 +742,7 @@ protected:
     void handle_gcs_flcc_cam_cmd(const mavlink_message_t &msg);                 // PNU : Handle Message of 'gcs_flcc_cam_cmd'
     void handle_gcs_flcc_pmu_ctrl(const mavlink_message_t &msg);                // PNU : Handle Message of 'gcs_flcc_pmu_cmd'
     void handle_gcs_flcc_object_avoidance_cmd(const mavlink_message_t &msg);    // PNU : Handle Message of 'GCS_FLCC_OBJECT_AVOIDANCE_CMD'
+    void handle_gcs_flcc_sar_ctrl(const mavlink_message_t &msg);               // PNU : Handle Message of 'GCS_FLCC_SAR_CTRL' (TC50)
 
     /*
       handle MAV_CMD_CAN_FORWARD and CAN_FRAME messages for CAN over MAVLink
@@ -1141,6 +1142,7 @@ private:
     // -------------------------------------------------------------------------
     // Declare extra additional functions
     void send_message_flcc_gcs_object_avoidance_status() const;		// PNU : Send object avoidance status to GCS with Mavlink Message
+    void send_message_flcc_gcs_sar_status() const;                  // PNU : Send SAR status to GCS with Mavlink Message (TM50)
 
 };
 
@@ -1257,6 +1259,14 @@ public:
     uint8_t PMU_Ctrl_Seq;                                                                   // PNU : Sequence Number of PMU Control Command
     mavlink_sys_icd_gcs_flcc_object_avoidance_cmd_t		GCS_Ctrl_OA_Mode;					// PNU : MAVLINK Message for Object Avoidance Level Control
     mavlink_sys_icd_flcc_gcs_object_avoidance_status_t	OA_Status;							// PNU : MAVLINK Message sent to GCS for Object Avoidance Status
+    // PNU : TC50 as received, and a sequence number AP_PNUSAR consumes in step 3d.
+    // Same shape as PMU_Ctrl / PMU_Ctrl_Seq above, deliberately: the handler validates
+    // and records, and the device-facing library decides what to do about it.  Nothing
+    // reads these yet - the CAN commands are step 3d - and handle_gcs_flcc_sar_ctrl()
+    // says so to the operator rather than swallowing the press.
+    mavlink_sys_icd_gcs_flcc_sar_ctrl_t    SAR_Ctrl;                                        // PNU : MAVLINK Message for SAR observation control
+    uint8_t SAR_Ctrl_Seq;                                                                   // PNU : Sequence Number of SAR Control Command
+    uint32_t SAR_Ctrl_reject_ms;                                                            // PNU : rate limit for the TC50 wrong-source warning
     uint8_t prev_Ctrl_OA_Mode = 4;
     bool prev_prx_failed;                                                                   // PNU : latches the proximity healthy/failed edge for the TM5 warning (D12)
     bool prev_zoom_unavailable = false;                                                     // PNU : latches the TM2 zoom available/unavailable edge (D10).  false at boot, so the first unavailable report past the grace period is an edge and is announced
