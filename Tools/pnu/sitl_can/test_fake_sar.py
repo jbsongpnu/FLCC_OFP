@@ -27,7 +27,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import sar_frames as icd                                                        # noqa: E402
 from fake_sar import FakeSAR, CAN_EFF_FLAG, CAN_RTR_FLAG, CAN_ERR_FLAG          # noqa: E402
-from fake_sar import CAN_FRAME_FMT                                              # noqa: E402
+from fake_sar import CAN_FRAME_FMT, BundleAssembler                             # noqa: E402
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                          '..', '..', '..'))
@@ -303,6 +303,133 @@ def test_an_unsolicited_response_can_carry_a_wrong_payload():
     # The ICD defines one payload and the fake must not quietly normalise the other one
     # away: the whole point of "bad" is that the FC gets to refuse it.
     assert icd.BAD_RESPONSE_BYTE != icd.RESPONSE_BYTE
+
+
+# ---------------------------------------------------------------------------
+# the navigation bundle - SAR_ICD_PNU.md sections 5, 6, 7.3 and 9.1
+# ---------------------------------------------------------------------------
+
+# Five of these nine frames are the ICD's OWN worked examples from section 9.1, byte for
+# byte.  The other four have no published vector, so they are built here from the section
+# 5 layout - which still catches an offset or a byte order that moved.
+ICD_91_FRAMES = {
+    0x400: bytes.fromhex('8093DC1480D6E34C'),   # Lat 35.0 deg, Lng 129.0 deg
+    0x401: bytes.fromhex('10270000F4012823'),   # Alt 100.0 m, Spd 5.0 m/s, GCrs 90.0 deg
+    0x402: bytes.fromhex('CEFF881350007800'),   # VZ -0.5, GPS_Yaw 50.0, HDop 0.8, VDop 1.2
+    0x403: bytes.fromhex('0200030004000500'),   # HAcc/VAcc/SAcc/YAcc 0.02/0.03/0.04/0.05
+    0x404: bytes.fromhex('85FFEA008813010F'),   # Roll -1.23, Pitch 2.34, Yaw 50.0, Seq 1
+    # GMS 123456789 ms, GWk 2300, Status 6 RTK_FIXED, NSats 18
+    0x405: struct.pack('<IHBB', 123456789, 2300, 6, 18),
+    # SMS 987654 ms, Delta 100 ms, I 0, GPS_Flags 0x6F
+    0x406: struct.pack('<IHBB', 987654, 100, 0, 0x6F),
+    # AEl 123.45 m, RTCMFU 7, RTCMFD 1
+    0x407: struct.pack('<iHH', 12345, 7, 1),
+    0x408: struct.pack('<Q', 1234567890123),
+}
+
+NAV_ORDER = [0x400, 0x401, 0x402, 0x403, 0x404, 0x405, 0x406, 0x407, 0x408]
+
+
+def feed_bundle(asm, frames=None, order=None, dlc=icd.NAV_DLC):
+    frames = frames or ICD_91_FRAMES
+    last = None
+    for can_id in (order or NAV_ORDER):
+        last = asm.feed(can_id, dlc, frames[can_id])
+    return last
+
+
+def near(got, want, tol=1e-6):
+    return got is not None and abs(got - want) <= tol
+
+
+def test_the_icd_9_1_vectors_decode_to_their_physical_values():
+    bundle = feed_bundle(BundleAssembler())
+    assert bundle is not None, 'the closing 0x408 did not complete the bundle'
+    assert near(bundle['Lat'], 35.0), bundle['Lat']
+    assert near(bundle['Lng'], 129.0), bundle['Lng']
+    assert near(bundle['Alt'], 100.0), bundle['Alt']
+    assert near(bundle['Spd'], 5.0), bundle['Spd']
+    assert near(bundle['GCrs'], 90.0), bundle['GCrs']
+    # VZ is the NED down component: ICD 6.2 says positive downward, so -0.5 is climbing
+    assert near(bundle['VZ'], -0.5), bundle['VZ']
+    assert near(bundle['GPS_Yaw'], 50.0), bundle['GPS_Yaw']
+    assert near(bundle['HDop'], 0.8), bundle['HDop']
+    assert near(bundle['VDop'], 1.2), bundle['VDop']
+    assert near(bundle['HAcc'], 0.02), bundle['HAcc']
+    assert near(bundle['YAcc'], 0.05), bundle['YAcc']
+    assert near(bundle['Roll'], -1.23), bundle['Roll']
+    assert near(bundle['Pitch'], 2.34), bundle['Pitch']
+    assert near(bundle['Yaw'], 50.0), bundle['Yaw']
+    assert bundle['ATT_Seq'] == 1
+    assert bundle['ATT_Flags'] == 0x0F
+    assert bundle['Status'] == 6 and bundle['NSats'] == 18
+    assert bundle['GMS'] == 123456789 and bundle['GWk'] == 2300
+    assert bundle['SMS'] == 987654 and bundle['Delta'] == 100
+    assert near(bundle['AEl'], 123.45), bundle['AEl']
+    assert bundle['RTCMFU'] == 7 and bundle['RTCMFD'] == 1
+    assert bundle['Snapshot_TimeUS'] == 1234567890123
+
+
+def test_sentinels_decode_as_unavailable_and_not_as_numbers():
+    # ICD 2.3 : zero must never stand for invalid, so the decoder returns None
+    frames = dict(ICD_91_FRAMES)
+    frames[0x402] = struct.pack('<hHHH', icd.INVALID_I16, icd.INVALID_U16,
+                                icd.INVALID_U16, icd.INVALID_U16)
+    frames[0x404] = struct.pack('<hhHBB', icd.INVALID_I16, icd.INVALID_I16,
+                                icd.INVALID_U16, 42, 0)
+    frames[0x405] = struct.pack('<IHBB', icd.INVALID_U32, icd.INVALID_U16, 0, 0)
+    frames[0x407] = struct.pack('<iHH', icd.INVALID_I32, 0, 0)
+    bundle = feed_bundle(BundleAssembler(), frames)
+    for key in ('VZ', 'GPS_Yaw', 'HDop', 'VDop', 'Roll', 'Pitch', 'Yaw',
+                'GMS', 'GWk', 'AEl'):
+        assert bundle[key] is None, '%s decoded as %r, not unavailable' % (key, bundle[key])
+    # this is exactly what step 3e transmits for 0x404 until the gimbal exists
+    assert bundle['ATT_Flags'] == 0
+    assert bundle['ATT_Seq'] == 42, 'the sequence still counts while the axes are invalid'
+
+
+def test_an_incomplete_bundle_is_discarded():
+    # ICD 7.3 : missing ids discard the bundle; gaps are never filled from an older one
+    asm = BundleAssembler()
+    order = [0x400, 0x401, 0x403, 0x404, 0x405, 0x406, 0x407, 0x408]    # 0x402 missing
+    assert feed_bundle(asm, order=order) is None
+    assert asm.complete == 0
+    assert asm.discarded >= 1
+
+
+def test_a_duplicate_id_is_discarded():
+    asm = BundleAssembler()
+    order = [0x400, 0x401, 0x401, 0x402, 0x403, 0x404, 0x405, 0x406, 0x407, 0x408]
+    assert feed_bundle(asm, order=order) is None
+    assert asm.complete == 0
+    assert asm.discarded >= 1
+
+
+def test_a_short_nav_frame_discards_the_bundle():
+    asm = BundleAssembler()
+    asm.feed(0x400, icd.NAV_DLC, ICD_91_FRAMES[0x400])
+    asm.feed(0x401, 4, ICD_91_FRAMES[0x401][:4])
+    assert asm.discarded == 1
+    assert asm.expect == icd.NAV_FIRST, 'the assembler must resynchronise on 0x400'
+
+
+def test_the_assembler_resynchronises_on_the_next_boundary():
+    asm = BundleAssembler()
+    feed_bundle(asm, order=[0x400, 0x403])          # a broken bundle
+    assert asm.complete == 0 and asm.discarded == 1
+    assert feed_bundle(asm) is not None, 'a clean bundle after a broken one must complete'
+    assert asm.complete == 1
+
+
+def test_the_fake_assembles_bundles_from_the_wire():
+    sar = make_sar()
+    for can_id in NAV_ORDER:
+        sar.handle_frame(struct.pack(CAN_FRAME_FMT, can_id, icd.NAV_DLC,
+                                     ICD_91_FRAMES[can_id].ljust(8, b'\x00')))
+    assert sar.nav.complete == 1
+    assert sar.nav.last['Status'] == 6
+    # the navigation ids are FC -> SAR, so a real device never answers them
+    assert sar.sent == []
 
 
 if __name__ == '__main__':

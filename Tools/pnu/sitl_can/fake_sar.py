@@ -51,6 +51,61 @@ CAN_FRAME_SIZE = struct.calcsize(CAN_FRAME_FMT)
 TICK_HZ = 100.0
 
 
+class BundleAssembler(object):
+    '''ICD 7.3 bundle boundaries, as a receiver is required to enforce them.
+
+    "SAR collects freshly received periodic IDs into a new buffer after the previous
+    bundle boundary and applies the closing 0x408 timestamp.  Do not assemble arbitrary
+    cached latest values.  Discard a bundle with missing IDs, duplicates or order errors;
+    never fill gaps from an older bundle.  Resynchronize at a valid subsequent boundary."
+
+    The fake enforces it so the FC's transmitter is checked against the rule rather than
+    against a receiver willing to accept anything.  There is no per-frame sequence number
+    to help - the ICD declines to add one in this revision - so order is the only thing
+    a boundary can be built from.
+    '''
+
+    def __init__(self):
+        self.frames = {}
+        self.expect = icd.NAV_FIRST
+        self.complete = 0
+        self.discarded = 0
+        self.last = None
+        self.last_discard = None
+
+    def _discard(self, reason):
+        if self.frames:
+            self.discarded += 1
+            self.last_discard = reason
+        self.frames = {}
+        self.expect = icd.NAV_FIRST
+
+    def feed(self, frame_id, dlc, data):
+        '''returns the decoded bundle when this frame closed a valid one, else None'''
+        if dlc != icd.NAV_DLC:
+            self._discard('0x%03X has DLC %u, ICD says %u' % (frame_id, dlc, icd.NAV_DLC))
+            return None
+
+        if frame_id != self.expect:
+            self._discard('expected 0x%03X, got 0x%03X' % (self.expect, frame_id))
+            if frame_id != icd.NAV_FIRST:
+                return None
+            # a 0x400 is always a new boundary, so resynchronise on it immediately
+            # rather than throwing away the bundle that just started
+
+        self.frames[frame_id] = bytes(data)
+        if frame_id != icd.NAV_LAST:
+            self.expect = frame_id + 1
+            return None
+
+        bundle = icd.decode_bundle(self.frames)
+        self.complete += 1
+        self.frames = {}
+        self.expect = icd.NAV_FIRST
+        self.last = bundle
+        return bundle
+
+
 class FakeSAR(object):
 
     def __init__(self, interface, hb_rate=1.0, respond=True, resp_delay=0.05,
@@ -75,6 +130,8 @@ class FakeSAR(object):
         self._hb_sent = 0
         self._rx_counts = {}            # can_id -> frames received
         self._rtr_seen = 0
+        self.nav = BundleAssembler()
+        self._nav_logged = 0            # complete bundles printed in full
 
         self.sock = None
 
@@ -132,7 +189,9 @@ class FakeSAR(object):
                      % (frame_id, icd.name_of(frame_id), dlc, data.hex(),
                         '' if self.verbose else '  (further frames on this id are counted, not logged)'))
 
-        if frame_id == icd.START_CMD:
+        if icd.NAV_FIRST <= frame_id <= icd.NAV_LAST:
+            self.handle_nav(frame_id, dlc, data)
+        elif frame_id == icd.START_CMD:
             self.answer(frame_id, icd.START_RESP, icd.build_start_response(), dlc)
         elif frame_id == icd.STOP_CMD:
             self.answer(frame_id, icd.STOP_RESP, icd.build_stop_response(), dlc)
@@ -140,6 +199,28 @@ class FakeSAR(object):
             # ICD 13 : 0x503's payload is TBD and 0x523's trigger is TBD, so there is no
             # defined answer to invent.  Noted and ignored.
             self.log('RX 0x503 Observation_Mode_Command - payload TBD, no response defined')
+
+    def handle_nav(self, frame_id, dlc, data):
+        before = self.nav.discarded
+        bundle = self.nav.feed(frame_id, dlc, data)
+        if self.nav.discarded != before:
+            self.log('NAV bundle discarded: %s (%u discarded, %u complete)'
+                     % (self.nav.last_discard, self.nav.discarded, self.nav.complete))
+        if bundle is None:
+            return
+
+        # The first two bundles are printed in full, then one line every 10 s.  90 frames
+        # a second would bury every other event in the log, and the first bundle is the
+        # one worth reading field by field.
+        if self._nav_logged < 2:
+            self._nav_logged += 1
+            self.log('NAV bundle %u complete:' % self.nav.complete)
+            for line in icd.format_bundle(bundle):
+                self.log('    %s' % line)
+        elif self.verbose or (self.nav.complete % 100) == 0:
+            self.log('NAV bundle %u: Status %u ATT_Seq %u GPS_Flags 0x%02X TimeUS %u'
+                     % (self.nav.complete, bundle['Status'], bundle['ATT_Seq'],
+                        bundle['GPS_Flags'], bundle['Snapshot_TimeUS']))
 
     def answer(self, cmd_id, resp_id, payload, dlc):
         '''queue the ICD response to a command, or decline to - ICD 12.2 and 12.3'''
@@ -238,6 +319,8 @@ class FakeSAR(object):
         elif cmd == 'param-resp':
             self.send(icd.PARAM_RESP, icd.build_param_response())
             self.log('TX 0x523 Observation_Param_Response, eight opaque bytes')
+        elif cmd == 'nav':
+            self.report_nav()
         elif cmd == 'respond':
             self.respond = not arg.startswith('off')
             self.log('command responses are %s' % ('ON' if self.respond else 'OFF'))
@@ -247,7 +330,7 @@ class FakeSAR(object):
             self.running = False
         elif cmd == 'help':
             self.log('silent | resume | status | hb | short | counter N | '
-                     'start-resp [bad] | stop-resp [bad] | param-resp | '
+                     'start-resp [bad] | stop-resp [bad] | param-resp | nav | '
                      'respond on|off | intrude [id] | quit')
         else:
             self.log('unknown command "%s", try help' % cmd)
@@ -264,6 +347,16 @@ class FakeSAR(object):
         self.send(resp_id, payload)
         self.log('TX 0x%03X %s, unsolicited, payload 0x%02X'
                  % (resp_id, icd.name_of(resp_id), payload[0]))
+
+    def report_nav(self):
+        self.log('NAV bundles complete %u, discarded %u, last discard: %s'
+                 % (self.nav.complete, self.nav.discarded,
+                    self.nav.last_discard or 'none'))
+        if self.nav.last is None:
+            self.log('    no complete bundle yet')
+            return
+        for line in icd.format_bundle(self.nav.last):
+            self.log('    %s' % line)
 
     def set_counter(self, arg):
         '''ICD 3.3 : the FC must not infer a reboot from a Raw_Counter decrease, so this
@@ -302,9 +395,11 @@ class FakeSAR(object):
         received = ', '.join('0x%03X %s x%u' % (can_id, icd.name_of(can_id), count)
                              for can_id, count in sorted(self._rx_counts.items())) or 'nothing'
         return ('silent=%s  responses=%s  heartbeats sent %u  next Raw_Counter %u  '
-                'RTRs %u\n            received: %s'
+                'RTRs %u  NAV bundles %u complete / %u discarded'
+                '\n            received: %s'
                 % (self.silent, 'on' if self.respond else 'off', self._hb_sent,
-                   self.raw_counter, self._rtr_seen, received))
+                   self.raw_counter, self._rtr_seen, self.nav.complete,
+                   self.nav.discarded, received))
 
     # -- main loop --------------------------------------------------------------------
 

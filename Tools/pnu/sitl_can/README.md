@@ -234,17 +234,31 @@ Tools/pnu/sitl_can/fake_sar.py --interface vcan0 --counter 777000
 | Command | Effect |
 |---|---|
 | `silent` / `resume` | **stop / resume beating** - the FC must report Disconnected 3 s later |
-| `status` | heartbeats sent, next `Raw_Counter`, and every id received with its count |
+| `status` | heartbeats sent, next `Raw_Counter`, every id received with its count, and the bundle tally |
+| `nav` | the **last complete navigation bundle**, decoded field by field, with the complete and discarded counts |
 | `hb` | one heartbeat now, to end a silence at a chosen instant |
 | `short` | a **DLC 3** heartbeat. The FC must reject it and say so, and must not count it |
 | `counter N` | set `Raw_Counter`, **including downwards** - ICD 3.3 forbids inferring a reboot from a decrease |
 | `start-resp [bad]` / `stop-resp [bad]` | an unsolicited `0x521` / `0x522`; `bad` sends `0xFF` instead of `0x01`, which ICD 12.2 says the FC must not accept as a confirmation |
 | `param-resp` | `0x523`, eight opaque bytes |
 | `respond on` / `off` | answer `0x501`/`0x502` or stay quiet; `off` is how the FC's 2 s window is driven into `SAR_STATUS` 4 |
-| `intrude [id]` | transmit on an **FC -> SAR** id, default `0x400` |
+| `intrude [id]` | transmit on an **FC -> SAR** id, default `0x400`. With an observation running this also lands mid-bundle, which is how the ICD 7.3 boundary rules get exercised |
 | `quit` | exit |
 
 `kill -USR1 <pid>` toggles silence, as with the PMU.
+
+**The fake assembles the 10 Hz navigation bundle the way the ICD requires a receiver to.**
+Section 7.3: collect freshly received ids into a new buffer after the previous boundary,
+apply the closing `0x408` timestamp, and **discard a bundle with missing ids, duplicates
+or order errors** rather than filling the gap from an older one. There is no per-frame
+sequence number to help - the ICD declines to add one - so arrival order is the only thing
+a boundary can be built from. A receiver willing to accept anything would prove nothing
+about the FC's transmitter, which is why the rule is enforced here and not just described.
+
+The first two complete bundles are printed field by field, then one summary line every
+10 s; `nav` prints the latest on demand. Sentinels decode as `n/a`, never as numbers -
+ICD 2.3 - so `0x404`'s `Roll n/a Pitch n/a Yaw n/a ATT_Flags 0x00` is what a correct FC
+looks like until step 3f supplies real attitude.
 
 Switches: `--hb-rate` in Hz (`0` disables beating entirely), `--counter` the initial
 `Raw_Counter`, `--resp-delay` seconds before answering a command, `--no-respond` to never
