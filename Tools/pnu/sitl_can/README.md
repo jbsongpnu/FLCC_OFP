@@ -1,11 +1,17 @@
 # Simulated PNU CAN devices for SITL
 
-CAN Update Plan **step 2b**. See the main `README.md` for the plan and for the fake PMU's
-engine model; the wire format is `PMU CAN Comm Protocol.md` in the repository root.
+CAN Update Plan **step 2b** (the PMU) and SAR Integration Plan **step 3b** (the SAR). See
+the main `README.md` for both plans and for the fake PMU's engine model; the wire formats
+are `PMU CAN Comm Protocol.md` and `SAR_ICD_PNU.md` in the repository root.
 
 Everything in the PNU CAN stack except the CubeMars codec used to be compile-verified
 only. These fakes exist so the state machines, the health logic and the engine-start
 interlock timing can be exercised on a desk instead of against a running engine.
+
+**The two fakes run together on one `vcan0`**, which is what `CAN_D1_PNU_OPTS = 5`
+exercises and what the project had never been able to test before 3b: the PMU is 29-bit
+extended, the SAR is 11-bit standard in `0x400`-`0x7FF`, and each process filters in the
+kernel for its own frames.
 
 | File | What it is |
 |---|---|
@@ -13,8 +19,15 @@ interlock timing can be exercised on a desk instead of against a running engine.
 | `pmu_frames.py` | the five status frames. Wire format only, no state |
 | `fake_pmu.py` | SocketCAN I/O, the operator console and MAVLink takeoff detection |
 | `tc1_inject.py` | TC1 injector and stopwatch for the step 2c interlock windows |
+| `sar_frames.py` | the SAR's 16 ids and the four frames a SAR transmits. Wire format only |
+| `fake_sar.py` | SocketCAN I/O and the operator console for the SAR |
 | `test_pmu_model.py` | 17 tests: the RPM ladder, and every field at the offset `AP_PMUCAN` reads |
 | `test_fake_pmu.py` | 26 tests: RTR dispatch, command decode, the silent trigger, takeoff detection |
+| `test_fake_sar.py` | 21 tests: heartbeat framing, command responses, and the ids checked against both the ICD and `AP_PNUSAR.h` |
+
+There is no `sar_model.py`. In 3b the device has almost no behaviour - it beats once a
+second and answers commands - and the observation state machine belongs to step 3d, where
+it lands with the FC side that drives it.
 
 ## Setting up the bus
 
@@ -188,7 +201,7 @@ skip the CAN watch.
 something huge, rebuild, and run `cut-start` again: the engine starts about 1.3 s after the
 last message, with no further input. Put the constant back afterwards.
 
-## The console
+## The fake PMU console
 
 `fake_pmu.py` reads commands on stdin:
 
@@ -208,6 +221,113 @@ Takeoff is FC state and never appears on CAN, so it is read from SITL's MAVLink 
 is used when the vehicle sends it, otherwise armed-and-above-`--takeoff-alt`. pymavlink is
 imported lazily and is not needed if the console is used instead.
 
+## The fake SAR
+
+`fake_sar.py` stands in for Lumir's radar payload. Unlike the PMU it **transmits on its
+own**: `Heart_Beat 0x510` is periodic at 1 Hz and nothing asks for it, so `silent` here
+means ceasing to beat, which is what the FC's 3 s `T_HB` is written against.
+
+```sh
+Tools/pnu/sitl_can/fake_sar.py --interface vcan0 --counter 777000
+```
+
+| Command | Effect |
+|---|---|
+| `silent` / `resume` | **stop / resume beating** - the FC must report Disconnected 3 s later |
+| `status` | heartbeats sent, next `Raw_Counter`, and every id received with its count |
+| `hb` | one heartbeat now, to end a silence at a chosen instant |
+| `short` | a **DLC 3** heartbeat. The FC must reject it and say so, and must not count it |
+| `counter N` | set `Raw_Counter`, **including downwards** - ICD 3.3 forbids inferring a reboot from a decrease |
+| `start-resp` / `stop-resp` | an unsolicited `0x521` / `0x522` |
+| `param-resp` | `0x523`, eight opaque bytes |
+| `respond on` / `off` | answer `0x501`/`0x502` or stay quiet, for the FC's 2 s window in 3d |
+| `intrude [id]` | transmit on an **FC -> SAR** id, default `0x400` |
+| `quit` | exit |
+
+`kill -USR1 <pid>` toggles silence, as with the PMU.
+
+Switches: `--hb-rate` in Hz (`0` disables beating entirely), `--counter` the initial
+`Raw_Counter`, `--resp-delay` seconds before answering a command, `--no-respond` to never
+answer one, `--silent` to start quiet, `--verbose` to log every received frame rather
+than the first on each id.
+
+**`--counter` is not cosmetic.** ICD 3.3 says the FC's `Live_Counter` counts *receptions*
+and must not copy the SAR's `Raw_Counter`; starting the fake at 777000 makes the two
+impossible to confuse. The FC's value is not observable until the 51050 TM arrives in
+step 3c.
+
+**`intrude` is the test for a deliberate omission.** `AP_PNUSAR::handle_frame()` leaves
+the FC -> SAR ids unclaimed, so a navigation or command frame arriving from the wire is
+reported by the driver as unclaimed traffic instead of being quietly swallowed. That is
+how a second talker on our ids becomes visible, and `intrude` is how it is proved rather
+than argued.
+
+## The shared-bus run
+
+Both fakes, one bus, `CAN_D1_PNU_OPTS = 5`:
+
+```sh
+# 1. the bus, once per boot
+sudo modprobe vcan
+sudo ip link add vcan0 type vcan && sudo ip link set vcan0 up
+
+# 2. SITL.  Running the binary directly keeps sim_vehicle.py from reconfiguring the
+#    waf board, and --serial0 tcp:0 opens all three ports with no ground station
+build/sitl/bin/arducopter -S -I0 --model + --speedup 1 --serial0 tcp:0 \
+    --defaults Tools/autotest/default_params/copter.parm,/tmp/pnu_sar.parm \
+    --home 35.2345,129.0789,10,0
+
+# 3. both fakes, in either order
+Tools/pnu/sitl_can/fake_pmu.py --interface vcan0 --mavlink none
+Tools/pnu/sitl_can/fake_sar.py --interface vcan0 --counter 777000
+```
+
+`/tmp/pnu_sar.parm`, or the same four values set from Mission Planner followed by a
+reboot:
+
+```text
+SIM_CAN_TYPE1    2     # SocketCAN on vcan0, instead of the default multicast UDP
+CAN_P1_DRIVER    1
+CAN_D1_PROTOCOL  15    # PNU_CAN
+CAN_D1_PNU_OPTS  5     # bit 0 PMU + bit 2 SAR; 7 adds the gimbal once that fake exists
+```
+
+Watch the FC's messages in Mission Planner, or on SERIAL1 with any MAVLink client. The
+sequence worth driving, and what each step must produce:
+
+| Drive | The FC must say |
+|---|---|
+| boot, both fakes running | `PNU_CAN: CAN_D1 PMU+SAR ready`, then `SAR connected` on the first heartbeat |
+| `silent` | `SAR disconnected`, **3 s** after the last heartbeat |
+| `resume` | `SAR reconnected, inspection pending` - and the state stays Disconnected, ICD 14.8 |
+| `short` | `PNU_CAN: short frame 0x510 dlc 3` |
+| `param-resp` | `SAR: 0x523 reserved, payload still TBD (1)` |
+| `intrude` | `PNU_CAN: unclaimed frame 0x400` |
+
+The PMU must stay healthy throughout, and its `status` must show the RTR count still
+climbing: that is the shared bus working, and it is the part of 3b that no unit test can
+reach.
+
+### Without root
+
+Creating `vcan0` needs root, but only in the namespace the test runs in. A user
+namespace is enough, which makes the whole run scriptable on a machine where `sudo`
+needs a password:
+
+```sh
+unshare -rn bash -c '
+    ip link set lo up
+    ip route add 224.0.0.0/4 dev lo    # SITL exits if its multicast socket cannot connect
+    ip link add vcan0 type vcan && ip link set vcan0 up
+    ... SITL and both fakes, all inside this namespace ...'
+```
+
+Everything - SITL, both fakes, any MAVLink client - has to run inside that namespace,
+because it has its own loopback as well as its own `vcan0`. The multicast route is not
+optional: `SITL_State.cpp:452` calls `exit(1)` when the servo multicast socket cannot
+connect, and a fresh namespace has no route for `239.x`. The `vcan` module still has to
+be loadable; if `ip link add` fails there, it needs `sudo modprobe vcan` once.
+
 ## Tests
 
 No dependencies, no vcan interface, no SITL:
@@ -215,6 +335,7 @@ No dependencies, no vcan interface, no SITL:
 ```sh
 Tools/pnu/sitl_can/test_pmu_model.py
 Tools/pnu/sitl_can/test_fake_pmu.py
+Tools/pnu/sitl_can/test_fake_sar.py
 ```
 
 The frame tests transcribe the byte offsets out of `AP_PMUCAN::handle_frame()` by hand
@@ -222,6 +343,8 @@ rather than importing them, so that a change on either side fails the test inste
 agreeing with itself.
 
 ## Status
+
+### Step 2b, the fake PMU
 
 **VALIDATED IN SITL BY PNU, 2026-10-29**, with Mission Planner on SERIAL0 and KGCS on
 SERIAL1. The full sequence flew as specified:
@@ -269,13 +392,53 @@ fallback also gained hysteresis, and `LANDED_STATE_UNDEFINED` is treated as no d
 relative altitude, landed state and heartbeat count, and the fake warns once if no vehicle
 telemetry has arrived after 15 s.
 
+### Step 3b, the fake SAR and the first shared bus
+
+**MEASURED IN SITL 2026-10-30**: fake PMU and fake SAR on one `vcan0`, `CAN_D1_PNU_OPTS
+= 5`. This is the first time the driver has carried two devices at once - until now
+every PNU CAN test had exactly one device on the wire. The run was scripted rather than
+hand-flown, with the four parameters loaded as boot defaults and the SAR console driven
+from a file.
+
+| Drive | What the FC said | Interval |
+|---|---|---|
+| boot, both fakes up | `PNU_CAN: CAN_D1 PMU+SAR ready` | - |
+| first heartbeat | `SAR connected` | 15 ms after the frame |
+| `silent` | `SAR disconnected` | **3.058 s** after the last heartbeat |
+| `resume` | `SAR reconnected, inspection pending` | 16 ms; **state stayed Disconnected** |
+| `short` | `PNU_CAN: short frame 0x510 dlc 3 (1 dropped)` | - |
+| `param-resp` | `SAR: 0x523 reserved, payload still TBD (1)` | - |
+| `intrude` | `PNU_CAN: unclaimed frame 0x400 (1 seen)` | - |
+| the PMU, throughout | `[PMU] Connected!`, and `status` showed **RTR seen 505, answered 505, commands 404** in 25 s | - |
+
+3.058 s against a 3,000 ms deadline is the expected shape: `check_health()` runs every
+20 ms and the rest is MAVLink transit and the observer's own timestamp.
+
+**A second run at `--hb-rate 0.4`** - 2.5 s between beats, inside `T_HB` - produced no
+disconnect at all across 11 heartbeats, and then `SAR disconnected` 3.027 s after the
+fake stopped. The deadline is a wall clock, exactly as ICD 3.3 words it, and not "three
+missed beats".
+
+**The fake SAR received nothing from the FC**, which is what step 3a intends: the FC
+transmits no SAR frame at all until 3d.
+
+Three things this run did not reach:
+
+- **`Live_Counter` is still unobservable.** It leaves the FC only through TM 51050,
+  which is step 3c. The fake starts `Raw_Counter` at 777000 precisely so that the two
+  cannot be confused on the day it becomes visible.
+- **The command and response path** is covered only by the unit tests. Nothing on the
+  FC side can send `0x501`/`0x502` before 3d.
+- **No SAR hardware.** The 1 Hz on the wire, and its jitter, are this fake's, not
+  Lumir's.
+
 ## What is still NOT covered
 
 - **Step 2c's engine-start interlock timing**, which is what step 2b was ordered first to
   measure. The fake logs every `ENGONOFF` frame with a timestamp for exactly this.
 - A **measured** failsafe latency. The silent trigger fires it correctly, but nobody has
   timed it against the ~100-200 ms the constants predict.
-- The gimbal and SAR fakes, which do not exist yet, and therefore the shared bus.
+- The **gimbal** fake, which does not exist yet, and therefore `PNU_OPTS = 7`.
 - Stop compliance, stall thresholds, real motor dynamics and real PMU firmware behaviour.
   These fakes do not replace the bench; they move the logic errors off it.
 
