@@ -81,7 +81,7 @@ public:
 
     enum class State : uint8_t {
         INIT        = 0,    // clearing faults, enabling, waiting for all axes
-        HOMING      = 1,    // the Appendix 1 endpoint search - STEP 1d, NOT IMPLEMENTED
+        HOMING      = 1,    // the Appendix 1 endpoint search - step 1d, CAN_Dn_PNU_HOME
         ALIGN       = 2,    // seed the command from the measured angle
         RUN         = 3,    // normal operation; mount targets accepted
         MAINTENANCE = 4,    // FC off the bus so a PC can configure a motor over UART
@@ -223,6 +223,7 @@ private:
 
     void run_state_machine(void);
     void set_state(State state, const char *reason);
+    void enter_init(void);              // INIT entry actions, shared with init()
 
     // AP_PNUGimbal_Homing.cpp
     void start_homing(void);

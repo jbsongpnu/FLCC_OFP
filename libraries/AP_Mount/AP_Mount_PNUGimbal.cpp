@@ -69,10 +69,14 @@ void AP_Mount_PNUGimbal::send_target_angles(const MountAngleTarget& angle_rad)
 // against the body-frame demand - and the difference between them IS the AHRS correction.
 // That is what makes step 1b provable from a log with no motors connected.
 //
-// TODO(step 1c): once the state machine drives the motors, report the MEASURED angles from
-// gimbal->get_feedback() when they are valid.  Unlike AP_Mount_Servo, which notes "No
-// feedback from gimbal so simply report demanded servo angles", this mount has real
-// encoder feedback, so GIMBAL_DEVICE_ATTITUDE_STATUS can carry truth rather than intent.
+// TODO(step 3f): report the MEASURED angles from gimbal->get_feedback() when they are
+// valid, rather than the demand.  Unlike AP_Mount_Servo, which notes "No feedback from
+// gimbal so simply report demanded servo angles", this mount has real encoder feedback,
+// so GIMBAL_DEVICE_ATTITUDE_STATUS can carry truth rather than intent.
+//
+// This is the same gap step 3f has to close for SAR CAN 0x404, and for the same reason:
+// the feedback is already decoded and timestamped per axis, and nothing consumes it.
+// Was labelled step 1c, which shipped in 5.1.13 without touching this.
 bool AP_Mount_PNUGimbal::get_attitude_quaternion(Quaternion& att_quat)
 {
     att_quat.from_euler(constrain_float(_angle_bf_output_rad.x,

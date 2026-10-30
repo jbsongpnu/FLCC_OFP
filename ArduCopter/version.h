@@ -7,7 +7,7 @@
 #include "ap_version.h"
 
 // PNU : This is a custom code modified by PNU Drone
-#define THISFIRMWARE "PNU_OFP V5.1.22"
+#define THISFIRMWARE "PNU_OFP V5.1.23"
 
 // NOTE: 5.1.6 is a DEV build on top of the 5.1.0 OFFICIAL release, which closed the
 // Copter-4.7.1 -> FLCC migration.  It closes D10 Stage 3: TM2's Zoom_POS_FB now carries
@@ -22,6 +22,40 @@
 // and a send_camera_settings() override that forwards real values instead of upstream's
 // NaN placeholders are all vendor-neutral and worth submitting to ArduPilot; only
 // AP_Q30 decides the value means times, which is where PNU-specific facts belong.
+//
+// 5.1.23 is one AP_PNUGimbal fix, found by the fake gimbal on its first run.
+//
+//   AP_PNUGIMBAL NEVER BROUGHT THE MOTORS UP AT ALL.  The backend's _state is
+//   initialised to State::INIT, and set_state(State::INIT) early-returns when the state
+//   is unchanged - so INIT's entry actions, the per-axis clear-errors and the enable,
+//   were never performed at boot.  The driver transmitted NOTHING: no feedback could
+//   arrive, all_axes_enabled() stayed false, and INIT timed out into FAULT after 5 s,
+//   whose own entry queued a disable.  Those three disables were the only frames the
+//   motors saw in a 47 second run.  init() now performs the entry actions through a
+//   shared enter_init(), so the two paths cannot drift apart.
+//
+//   Wrong since the lifecycle state machine landed in 5.1.13, and invisible because
+//   every statustext that would have explained it - INIT -> FAULT, the timeout, the
+//   disable - fires in the first seconds after boot, before any GCS has connected AND
+//   before the dataflash logger has started.  The same shape as the one-shot startup
+//   line that went missing in 5.1.16.  It would have stopped the gimbal dead on the
+//   bench with no message to say why.
+//
+//   With the fix, the Appendix 1 homing sequence ran END TO END FOR THE FIRST TIME
+//   against the new fake gimbal: roll travel 60.6 deg, pitch 60.6, yaw 40.5, each
+//   midpoint -0.1, zero set per axis, then HOMING -> ALIGN -> RUN in 40 s.  The 0.6 and
+//   0.5 degrees above the true 60 and 40 are the modelled stop compliance, which eats a
+//   fifth of PNU_HTOL's 3 degree default before any real-world asymmetry.
+//
+//   CAN_Dn_PNU_OPTS = 7 - the PMU, the gimbal and the SAR on one bus - also ran for the
+//   first time, with no demultiplexing complaint from the driver.
+//
+//   STILL OPEN, and it decides step 3f: the driver ASSUMES THE MOTORS FEED BACK
+//   AUTONOMOUSLY.  Nothing keeps the conversation alive between the enable and the first
+//   motion command, and motion is transmitted only in RUN, so with feedback sent only in
+//   reply to a command the backend faults 523 ms after the enable - the 500 ms
+//   AP_PNUGIMBAL_FB_TIMEOUT_MS.  The manual specifies no feedback trigger at all, so this
+//   is the first thing to measure on real motors, ahead of the rate.
 //
 // 5.1.22 is SAR Integration Plan step 3e: the 10 Hz navigation bundle.
 //

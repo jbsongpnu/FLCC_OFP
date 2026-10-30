@@ -133,7 +133,31 @@ bool AP_PNUGimbal_Backend::init(void)
     }
 
     _state_entered_ms = AP_HAL::millis();
+
+    // THE STATE MACHINE IS ALREADY IN INIT - that is the member's initial value - so
+    // set_state(State::INIT) early-returns and INIT's entry actions would never run at
+    // boot.  They are performed here instead.
+    //
+    // Found by the fake gimbal on its very first run, 2026-10-30.  Without this the
+    // driver transmitted NOTHING at boot: no clear-errors, no enable, no motion.  No
+    // feedback could therefore arrive, all_axes_enabled() stayed false, and INIT timed
+    // out into FAULT after 5 s - whose own entry queued a disable, which was the only
+    // frame the motors ever saw.  A real gimbal would have behaved identically on the
+    // bench, and the statustexts explaining it all fire before any GCS has connected.
+    enter_init();
     return true;
+}
+
+
+// The INIT entry actions, in one place so that init() and set_state() cannot drift
+// apart.  Clear any latched fault first, then ask for motor control.
+void AP_PNUGimbal_Backend::enter_init(void)
+{
+    for (uint8_t axis = 0; axis < AP_PNUGIMBAL_NUM_AXES; axis++) {
+        queue_clear_errors(axis);
+        _axis[axis].target_valid = false;
+    }
+    queue_enable(true);
 }
 
 // ---------------------------------------------------------------------------
@@ -173,12 +197,7 @@ void AP_PNUGimbal_Backend::set_state(State state, const char *reason)
 
     switch (state) {
     case State::INIT:
-        // clear any latched fault first, then ask for motor control
-        for (uint8_t axis = 0; axis < AP_PNUGIMBAL_NUM_AXES; axis++) {
-            queue_clear_errors(axis);
-            _axis[axis].target_valid = false;
-        }
-        queue_enable(true);
+        enter_init();
         break;
 
     case State::HOMING:
