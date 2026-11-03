@@ -1,17 +1,19 @@
 # Simulated PNU CAN devices for SITL
 
-CAN Update Plan **step 2b** (the PMU) and SAR Integration Plan **step 3b** (the SAR). See
-the main `README.md` for both plans and for the fake PMU's engine model; the wire formats
-are `PMU CAN Comm Protocol.md` and `SAR_ICD_PNU.md` in the repository root.
+CAN Update Plan **step 2b** (the PMU), SAR Integration Plan **step 3b** (the SAR) and the
+fake gimbal. See the main `README.md` for both plans and for the fake PMU's engine model;
+the wire formats are `PMU CAN Comm Protocol.md`, `SAR_ICD_PNU.md` and
+`PNUGimbal_CAN_Protocol_Type_CubeMars.md` in the repository root.
 
 Everything in the PNU CAN stack except the CubeMars codec used to be compile-verified
 only. These fakes exist so the state machines, the health logic and the engine-start
 interlock timing can be exercised on a desk instead of against a running engine.
 
-**The two fakes run together on one `vcan0`**, which is what `CAN_D1_PNU_OPTS = 5`
+**All three fakes run together on one `vcan0`**, which is what `CAN_D1_PNU_OPTS = 7`
 exercises and what the project had never been able to test before 3b: the PMU is 29-bit
-extended, the SAR is 11-bit standard in `0x400`-`0x7FF`, and each process filters in the
-kernel for its own frames.
+extended, the gimbal is 11-bit standard below `0x300`, the SAR is 11-bit standard in
+`0x400`-`0x7FF`, and each process filters in the kernel for its own frames.
+`run_all3.sh` starts the lot in the order that works.
 
 | File | What it is |
 |---|---|
@@ -21,9 +23,16 @@ kernel for its own frames.
 | `tc1_inject.py` | TC1 injector and stopwatch for the step 2c interlock windows |
 | `sar_frames.py` | the SAR's 16 ids and the four frames a SAR transmits. Wire format only |
 | `fake_sar.py` | SocketCAN I/O and the operator console for the SAR |
+| `gimbal_frames.py` | the CubeMars MIT, position-speed and speed frames. Wire format only |
+| `gimbal_model.py` | three gimbal axes: impedance following and compliant hard stops |
+| `fake_gimbal.py` | SocketCAN I/O and the operator console for three CubeMars motors |
+| `run_all3.sh` | starts all three fakes and SITL together, collects the logs, tears down |
+| `mav_tap.py` | logs the FC's statustexts and TM50 for a run with no ground station |
 | `test_pmu_model.py` | 17 tests: the RPM ladder, and every field at the offset `AP_PMUCAN` reads |
 | `test_fake_pmu.py` | 26 tests: RTR dispatch, command decode, the silent trigger, takeoff detection |
-| `test_fake_sar.py` | 21 tests: heartbeat framing, command responses, and the ids checked against both the ICD and `AP_PNUSAR.h` |
+| `test_fake_sar.py` | 29 tests: heartbeat framing, command responses, the navigation bundle, and the ids checked against both the ICD and `AP_PNUSAR.h` |
+| `test_fake_gimbal.py` | 23 tests: the codec against the manual's own vectors, the model, the stops |
+| `test_mav_tap.py` | 10 tests: MAVLink2 framing, and TM50 read in wire order |
 
 There is no `sar_model.py`. In 3b the device has almost no behaviour - it beats once a
 second and answers commands - and the observation state machine belongs to step 3d, where
@@ -343,7 +352,81 @@ would make homing look easier in SITL than it will be on the bench and would lea
 defaults - half of `PNU_HRTOL`. **It is a knob, not a measurement**: nobody has measured
 this mount. Lower it until homing fails; that is the useful experiment.
 
-## The shared-bus run
+## All three at once - `run_all3.sh`
+
+```sh
+Tools/pnu/sitl_can/run_all3.sh                      # holds until Ctrl-C
+Tools/pnu/sitl_can/run_all3.sh --duration 60        # unattended
+Tools/pnu/sitl_can/run_all3.sh --gimbal-home        # with the Appendix 1 sequence
+```
+
+It creates `vcan0` if it is missing, starts the three fakes, then SITL, then holds.
+Everything it produces goes to `--out`, default `/tmp/pnu_all3`:
+
+| | |
+|---|---|
+| `statustext.log` | what the FC said, from the first millisecond - see `mav_tap.py` below |
+| `gimbal.log` `sar.log` `pmu.log` | each fake, wall-clock stamped so they line up |
+| `sitl.log` | SITL's own stdout, and `logs/` beside it holds the dataflash log |
+| `pnu_all3.parm` | the parameters the run actually used |
+
+**The order is the point.** The CAN driver attaches to the bus during boot and the
+gimbal driver sends its enable within the first few hundred milliseconds, so a fake
+started after SITL misses the conversation meant to bring it up and the gimbal sits in
+INIT until it faults. The script starts the fakes first, every time. Doing it by hand
+and getting that wrong costs a confusing half hour; it already has.
+
+While it runs, each fake's console is reachable from any other shell:
+
+```sh
+Tools/pnu/sitl_can/run_all3.sh say gimbal fault 0 2
+Tools/pnu/sitl_can/run_all3.sh say sar silent
+Tools/pnu/sitl_can/run_all3.sh say pmu start
+```
+
+Ports, with SERIAL0 left free for a ground station:
+
+| | | |
+|---|---|---|
+| SERIAL0 | `tcp:127.0.0.1:5760` | Mission Planner |
+| SERIAL1 | `tcp:127.0.0.1:5762` | KGCS |
+| SERIAL2 | `tcp:127.0.0.1:5763` | the fake PMU's takeoff watcher, `--pmu-mavlink` |
+| SERIAL5 | `tcp:127.0.0.1:5765` | `mav_tap.py`, `--no-tap` to leave it free |
+
+`--scenario FILE` runs a script once SITL is up and tears everything down afterwards.
+The script is given four arguments - the KGCS MAVLink URL and the three console FIFOs -
+so it can both fly the vehicle and reach into the devices:
+
+```sh
+Tools/pnu/sitl_can/run_all3.sh --scenario /tmp/my_scenario.py
+#   argv: tcp:127.0.0.1:5762  <out>/gimbal.fifo  <out>/sar.fifo  <out>/pmu.fifo
+```
+
+Other options: `--opts` for `CAN_D1_PNU_OPTS`, `--fb-mode` and `--fb-rate` for the
+gimbal's feedback trigger, `--home`, `--param FILE`, `--no-wipe` to keep the existing
+`eeprom.bin`, and `--no-root` to build the bus in a private namespace (see below).
+
+### `mav_tap.py`
+
+A run with no ground station used to leave no record of the FC side at all, and the
+dataflash log is not a substitute: **the logger opens about six seconds after boot**, so
+`PNU_CAN: CAN_D1 PMU+Gimbal+SAR ready` and everything the gimbal says on its way out of
+INIT are already gone by the time it starts. Two sessions were spent re-running SITL to
+read a message that had been printed and thrown away.
+
+The tap parses MAVLink2 by hand, as the fakes parse CAN by hand. It has no dependencies,
+and more to the point pymavlink only knows the standard dialect: **TM 51050 is in the PNU
+dialect and comes back as `BAD_DATA`**. Keeping the parser here also keeps it honest
+about wire order - `Live_Counter` is a `uint32` at offset 0 and `SAR_STATUS` a `uint8` at
+offset 4, which is not the order the XML lists them in. It logs every statustext, every
+change of `SAR_STATUS`, and arm and mode changes. It can be run on its own against any
+SITL whose SERIAL5 is MAVLink:
+
+```sh
+Tools/pnu/sitl_can/mav_tap.py tcp:127.0.0.1:5765
+```
+
+## The shared-bus run, by hand
 
 Both fakes, one bus, `CAN_D1_PNU_OPTS = 5`:
 
@@ -418,6 +501,7 @@ Tools/pnu/sitl_can/test_pmu_model.py
 Tools/pnu/sitl_can/test_fake_pmu.py
 Tools/pnu/sitl_can/test_fake_sar.py
 Tools/pnu/sitl_can/test_fake_gimbal.py
+Tools/pnu/sitl_can/test_mav_tap.py
 ```
 
 The frame tests transcribe the byte offsets out of `AP_PMUCAN::handle_frame()` by hand
@@ -432,6 +516,10 @@ speed vectors decode to 4.74 and -4.84 rather than the +/-6 they claim, because 
 manual's transmit function uses `2^N` where its receive function uses `2^N - 1`. The test
 asserts the wrong values on purpose, so that a future session cannot "fix" the codec until
 those rows pass and thereby break agreement with everything else in the document.
+
+`test_mav_tap.py` pins the exact bytes of the GCS heartbeat the tap sends. They were
+checked once against pymavlink, which parsed the frame and read back `MAV_TYPE_GCS`; the
+hex in the test is the record of that cross-check, so the hand-written CRC cannot drift.
 
 ## Status
 
@@ -585,6 +673,38 @@ nothing here says anything about tuning `HKD`, `HVEL` or `HSTL` against a real p
 The stop stiffness is a knob somebody chose, not a measurement. Homing on the bench is
 still the hazardous operation it always was - this rehearsal only means the sequence
 itself, and the driver that runs it, work.
+
+### All three fakes and one runner - MEASURED 2026-11-03
+
+`run_all3.sh --duration 70 --gimbal-home`, `CAN_D1_PNU_OPTS = 7`, no ground station:
+
+Times are from the tap's connect, about a tenth of a second after SITL starts.
+
+| | |
+|---|---|
+| FC | `PNU_CAN: CAN_D1 PMU+Gimbal+SAR ready` at 0.235 s, `SAR connected` at 0.819 s, `[PMU] Connected!` at 1.222 s - 34 statustexts in all |
+| gimbal | `roll travel 60.6 deg, mid -0.1` and homed at 14.3 s, pitch at 28.7 s, yaw `40.5 deg` at 40.2 s, then `HOMING -> ALIGN -> RUN`; 10,437 frames out, ~5,184 commands per axis in, 0 wrong-mode, 0 unknown ids |
+| SAR | 71 heartbeats, `SAR_STATUS` 1 Ready throughout |
+| PMU | 2,592 RTRs seen, 2,592 answered |
+
+The homing numbers are the same as the gimbal-only run of 2026-10-30, to the tenth of a
+degree: **the PMU and SAR traffic did not disturb it**. `PreArm: Mount: not healthy`
+appears at 30.4 s and is correct - the mount is unhealthy until homing finishes.
+
+Two things this run is NOT evidence for. **vcan performs no arbitration**, so nothing
+here says anything about contention on a real 1 Mbit/s wire. And the gimbal answered
+with `--fb-mode periodic` because that is what the driver needs; the real trigger is
+still unmeasured, and with `--fb-mode per-command` the driver still faults 523 ms after
+the enable.
+
+One thing the tap had to learn on the way, recorded because it misled this session for
+half an hour: **a statustext longer than 50 characters is not truncated, it is chunked**
+(`GCS_Common.cpp:2564-2592`), and MAVLink2 then **drops every trailing zero byte**, so a
+chunk whose `id` is below 256 arrives 52 bytes long rather than 54 and its `chunk_seq` is
+not on the wire at all. A reader that expects the full extension fields sees no id, logs
+the halves as two messages, and `PNUGimbal: ALIGN -> RUN (command seeded from measured)`
+reads as a firmware bug that does not exist. `mav_tap.py` reassembles the chunks and
+`test_mav_tap.py` pins both the trimmed and untrimmed forms.
 
 ## What is still NOT covered
 
