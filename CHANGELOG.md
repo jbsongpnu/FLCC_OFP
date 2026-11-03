@@ -43,6 +43,12 @@ A feature exercised only in SITL is **not** hardware-verified. Entries say so ex
 - The `HOMING` enum comment in `AP_PNUGimbal_Backend.h` still said "STEP 1d, NOT
   IMPLEMENTED"; corrected. The measured-angle TODO in `AP_Mount_PNUGimbal.cpp` was
   relabelled from step 1c to step 3f.
+- **2026-11-03: the firmware version this release reports was wrong and is corrected.**
+  `THISFIRMWARE` had read V5.1.23 since this version was cut, but `FIRMWARE_VERSION`,
+  `FW_PATCH` and `OFP_VER_REV` still read **16**, so MAVLink `AUTOPILOT_VERSION` and TM13's
+  `Version_FLCC_*` told the ground station 5.1.16 - seven versions of drift that D4's
+  `static_assert`s could not see, because they compare the three numeric defines against each
+  other and never against the version string. All three now read 23. See `GCS-001`.
 
 **Verification**
 
@@ -55,6 +61,8 @@ A feature exercised only in SITL is **not** hardware-verified. Entries say so ex
 - **SITL**: `CAN_Dn_PNU_OPTS = 7` - PMU, gimbal and SAR on one bus - ran for the first
   time, with no demultiplexing complaint.
 - **Build**: CubeOrangePlus **1,737,920 B, 228,152 free**.
+- **SITL, 2026-11-03**, for the version correction: `AUTOPILOT_VERSION.flight_sw_version` read
+  back as **5.1.23, type DEV** from a running SITL.
 
 **Known Limitations**
 
@@ -169,7 +177,8 @@ No firmware file changed.
 **Changes**
 
 - Nine frames `0x400`-`0x408` every 100 ms while an observation runs, 72 payload bytes per
-  logical snapshot, plus ICD 14.7 **automatic termination**.
+  logical snapshot, plus ICD 14.7 **automatic termination**. **`0x408` CLOSES the bundle** with
+  its acquisition timestamp; it does not wrap the others.
 - **The snapshot is taken on the VEHICLE thread**, in a new 10 Hz Copter `SCHED_TASK`, and
   the CAN thread only writes out what it is handed. `AP_GPS::update()` runs on the vehicle
   thread, so a snapshot taken there cannot straddle a GPS update - the same twenty-odd
@@ -188,8 +197,8 @@ No firmware file changed.
   if the heartbeat is still live, and its response or its 2 s timeout is an **internal
   result** - never `SAR_STATUS` 2 or 4. The published state is ICD 14.8's recovery-pending 0,
   which a reconnect does not release.
-- **Two small public accessors added to `AP_GPS`**: `get_rtcm_stats()` for `0x407`, which was
-  private, and `have_gps_yaw_accuracy()` so `YAcc` carries the unavailable sentinel instead
+- **Two small public accessors added to `AP_GPS`**: `get_rtcm_stats()` for `0x407`'s
+  `RTCMFU`/`RTCMFD`, which were private, and `have_gps_yaw_accuracy()` so `YAcc` carries the unavailable sentinel instead
   of `gps_yaw_deg()`'s 10 degree fallback - a distinction ICD 6.2 asks for by name. Both are
   `const`, four lines each, change no behaviour, and are a clean upstreamable commit on their
   own. The ICD's `RTCM_STATS_AVAILABLE` bit exists for exactly the private-field case, and 3e
@@ -688,15 +697,24 @@ The engine model the fake implements is specified in **Appendix B** below.
 
 **Changes**
 
-- `failsafe_pmucan_check()` becomes its own `SCHED_TASK` at priority 92, same 10 Hz.
+- `failsafe_pmucan_check()` becomes its own `SCHED_TASK` **at priority 92, beside `ekf_check`,
+  `check_vibration` and `gpsglitch_check`** - the other 10 Hz safety checks, none of which are
+  logging-gated. **The rate is unchanged at 10 Hz on purpose**: PNU-ISSUE(D9)'s ~100-200 ms
+  response was measured against it, confirmed on the bench 2026-10-19 by pulling the CAN
+  connector and again in SITL 2026-10-29 with the fake PMU's silent trigger.
 
 **Bug Fixes**
 
 - **A logging-free build had no PMU failsafe at all, and said nothing about it.**
   `failsafe_pmucan_check()` was called from `ten_hz_logging_loop()`, which sits inside
   `#if HAL_LOGGING_ENABLED`.
-- **Found by reading, not by a failure** - and no shippable image was ever exposed, because
-  Copter does not currently build with logging off anyway.
+- **Found by reading, not by a failure**, while preparing the SITL silent-trigger test.
+- **How exposed was it, honestly: not at all, today.** ArduCopter does not currently build with
+  `HAL_LOGGING_ENABLED=0` whatever this file does - `AC_CustomControl.cpp:190` calls
+  `AP::logger()` with no guard and the build stops there (verified 2026-10-29, and that failure
+  is upstream's, not ours). So no shippable image could have lost the failsafe this way. **The
+  coupling was still wrong and the fix still belongs here, but this is a latent structural
+  defect that was made safe, not a bug that bit anyone.**
 
 **Verification**
 
@@ -724,8 +742,9 @@ The engine model the fake implements is specified in **Appendix B** below.
   5 s from the CAN thread; KGCS had not connected, the statustext was dropped, and being
   one-shot it never returned - so **neither `PMU ready` nor the protocol-16 deprecation warning
   was ever seen, and 15 and 16 looked identical on the bench.** It now waits for
-  `GCS_MAVLINK::active_channel_mask()` to be non-zero, with **no upper bound**. A one-shot
-  message nobody receives is the silence D6 exists to remove.
+  `GCS_MAVLINK::active_channel_mask()` to be non-zero, with **no upper bound**: a GCS connecting
+  ten minutes in still gets the line, and if none ever connects there is nobody to tell. A
+  one-shot message nobody receives is the silence D6 exists to remove.
 
 **Verification**
 
@@ -798,7 +817,10 @@ The engine model the fake implements is specified in **Appendix B** below.
 
 **Known Limitations**
 
-- **NOT BENCH-TESTED at the time of release.**
+- **NOT BENCH-TESTED at the time of release.** The release note required it to be run against a
+  real PMU before it flew, covering **engine Start/Stop interlock timing, failsafe trigger and
+  recovery, and TM1/TM1x content** - all of which the 2026-10-19 bench then did, except the
+  shared bus.
 - The shared bus (`PNU_OPTS=3`) and Stop-command timing remained outstanding.
 
 ---
@@ -808,13 +830,16 @@ The engine model the fake implements is specified in **Appendix B** below.
 **Changes**
 
 - **`CAN_Dn_PNU_HOME` DEFAULTS TO 0, deliberately.** This routine drives a bulky payload into
-  three sets of hard stops with the mechanical clamp *disabled*, and the tuning is provisional -
-  only the 1 s stall dwell is settled. **Nothing drives into a stop until it is switched on.**
-  With it off the driver says so once per boot and the zero is set by hand.
+  three sets of hard stops with the mechanical clamp *disabled* - **before the zero is found
+  that clamp is relative to wherever the mount powered up, so honouring it would prevent ever
+  reaching an endpoint** - and the tuning is provisional, with only the 1 s stall dwell settled.
+  **Nothing drives into a stop until it is switched on.** With it off the driver says so once
+  per boot - `PNU_HOME=0, zero not found - limits are relative` - and the zero is set by hand.
 - **MIT mode is mandatory and enforced.** `init()` refuses to arm the sequence unless
   `PNU_MODE=0`, naming it in the message. MIT is the only mode where the host bounds the push
-  into a stop: a sweep sends `kp=0, kd=PNU_HKD, v=+/-PNU_HVEL`, so the stall torque settles at
-  **HKD x HVEL** - a number the operator picks. Position/velocity mode runs a cascaded loop
+  into a stop: a sweep sends `kp=0, kd=PNU_HKD, v=+/-PNU_HVEL`, which is **velocity-style
+  impedance control**, so at stall the torque settles at **HKD x HVEL** - a number the operator
+  picks. Position/velocity mode runs a cascaded loop
   whose torque the CAN frame cannot limit at all.
 - **Endpoint detection is by ANGLE ONLY** (Appendix 1 item 4) - overcurrent, undervoltage and
   overload are *emergency stops, not endpoint criteria*. An endpoint is "the angle stopped
@@ -833,7 +858,9 @@ The engine model the fake implements is specified in **Appendix B** below.
   operating range, and below that it aborts as obstructed. A measurement between the operating
   and mechanical ranges is **accepted, and `MNT1_*` stays nominal** - limits are *not* derived
   from the measurement, because stop compliance under a heavy payload would make the mount's
-  reach vary with how hard it happened to press. Upper bound stays mechanical + `PNU_HTOL`.
+  reach vary with how hard it happened to press. **The upper bound stays mechanical +
+  `PNU_HTOL`, because compliance only ever reads smaller** - so an over-reading means a false
+  endpoint or a PMAX mismatch, not a bigger mount.
 - **Per-axis rotation direction: `PNU_DRLL` / `DPIT` / `DYAW`** (0 normal, 1 reversed). The
   mount is still undergoing mechanical design changes, so motor direction is configuration, not
   a source constant. Everything inside `AP_PNUGimbal_Backend` is stored in the **motor frame**
@@ -951,7 +978,7 @@ The engine model the fake implements is specified in **Appendix B** below.
   opposite vehicle roll and pitch, which is the AHRS correction and the whole of what step 1b
   set out to prove. **Provable with no new logging code** - `AP_Mount_Backend::write_log()`
   already writes `MNT`, whose *desired* columns are the earth-frame target and whose *actual*
-  columns this backend fills with the body-frame demand.
+  columns this backend fills with the body-frame demand. **No new log message was needed.**
 - **Yaw looked wrong and is not** - see `GIMBAL-003` in `ISSUES.md`: `MNT0.YawB` did not move
   and `MNT0.YawE` read the same as `ANG.Yaw`, because yaw stabilisation goes through
   `MountAngleTarget::get_bf_yaw()`, which subtracts heading **only when `yaw_is_ef` is set**.
@@ -1093,8 +1120,8 @@ The engine model the fake implements is specified in **Appendix B** below.
   own thread created in `init()`, nothing on the vehicle scheduler.
 - Registered as `AP_CAN::Protocol` **16** (`PNUGimbal`) and **17** (`PNUSAR`). Slots in
   `AP_CANManager`, factory cases behind `#if`, and both listed in `ArduCopter/wscript`.
-- **STRUCTURE ONLY**: `rx_spin()`, `tx_spin()`, `handle_frame()` and `send_frame()` were stubs
-  marked `TODO`, with no parameters, no `CAN_Dn_PROTOCOL` `@Values` entry and no vehicle-side
+- **STRUCTURE ONLY, because the ICDs were not yet available**: `rx_spin()`, `tx_spin()`,
+  `handle_frame()` and `send_frame()` were stubs marked `TODO`, with no parameters, no `CAN_Dn_PROTOCOL` `@Values` entry and no vehicle-side
   consumers.
 - The skeletons carry this project's own lessons rather than copying `AP_PMUCAN` verbatim:
   **DLC validation before reading any field** with a rate-limited short-frame report (D6),
@@ -1328,9 +1355,13 @@ The engine model the fake implements is specified in **Appendix B** below.
 - **Gremsy firmware defect recorded**: the yaw fields of `GIMBAL_DEVICE_INFORMATION` are sent in
   degrees where msg 283 specifies radians, giving `MNT1_YAW_MAX` a default of
   18334 = `degrees(320)`. Roll and pitch are correct. See `GCS-003` in `ISSUES.md`.
-- **Aircraft settings required** - see the release note in `ArduCopter/version.h`: pitch limits
-  in physical convention, yaw limits set explicitly on a Gremsy, `CAM1_TYPE` 4 for Viewpro / 6
-  for Gremsy, and a Gremsy VIO's camera component set to 100 rather than its default 101.
+- **Aircraft settings required**, which the firmware cannot apply itself - the full table is in
+  `README.md` section 8: `MNT1_PITCH_MIN`/`MAX` in physical convention (Viewpro -90 / 45, the
+  Gremsy VIO bench-verified at -90 / 15); `MNT1_YAW_MIN`/`MAX` set explicitly to -180 / 180 on a
+  Gremsy, to override the bad default the gimbal supplies; `CAM1_TYPE` 4 for Viewpro and 6 for
+  Gremsy, load-bearing for the KGCS camera path since 5.1.3 where before it only served a
+  standard GCS; and a Gremsy VIO's camera component set to 100, not its default 101, because
+  ArduPilot instance 0 searches for 100 and `AP_Q30` hardcodes instance 0.
 - **Point-down does not test the 5.1.2 pitch relocation.** On a Gremsy
   `pitch_target_is_reversed()` returned false from the base class even *before* the relocation,
   so Mission Planner was always correct here. **The relocation's real test is Viewpro + Mission

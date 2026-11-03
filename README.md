@@ -79,7 +79,7 @@ AP_PNU_CAN  (100 Hz thread, owns the interface and the one send_frame())
 | 2b | Simulated CAN devices for SITL | **DONE** - fake PMU 2026-10-29, fake SAR and fake gimbal 2026-10-30, one runner 2026-11-03 |
 | 2c | Engine-start interlock guards | **DONE in 5.1.18**, measured in SITL with the original defect reproduced |
 | 3 | SAR backend | see the SAR plan below |
-| 4 | Bus documentation, bitrate note, README and `version.h` | this document; `version.h` is `GCS-001` |
+| 4 | Bus documentation, bitrate note, README and `version.h` | **DONE** - this document, and the version defines corrected 2026-11-03 |
 
 ### SAR Integration Plan
 
@@ -129,10 +129,6 @@ no message to say why. Wrong since 5.1.13. See `CHANGELOG.md`.
 | Gimbal | Mount backend, lifecycle state machine, Appendix 1 homing, per-axis direction parameters. **SITL only - no motor has ever turned** |
 | SAR | Connection layer, both MAVLink messages, the command layer with the Start interlock, and the 10 Hz navigation bundle with automatic termination. **SITL only - no SAR hardware** |
 | Camera | Viewpro via the KGCS TC2/TM2 interface; Gremsy VIO via standard MAVLink with four functions GCS-direct. **Bench-verified on both** |
-
-**Known version discrepancy:** `THISFIRMWARE` reads V5.1.23 but `FIRMWARE_VERSION` and
-`OFP_VER_REV` still read **16**, so MAVLink and TM13 tell the ground station 5.1.16. See
-`GCS-001`.
 
 ---
 
@@ -232,7 +228,6 @@ Full detail in `ISSUES.md`.
 | `GIMBAL-002` | Homing parameters are provisional; `PNU_HOME` stays 0 | step 3f, first flight with the gimbal |
 | `GIMBAL-004` | Seven things the CubeMars manual does not specify | the bench session |
 | `SAR-001` | `0x404` carries no measured attitude | step 3f, and Lumir's integration |
-| `GCS-001` | The firmware version has not been bumped since 5.1.16 | what KGCS is told |
 | `GCS-002` | KGCS must send TC50 from a permitted system id | SAR commanding from the GCS |
 | `CAM-001` | The Viewpro tracking freeze can strand the operator | - |
 | `CAM-002` | Viewpro zoom maxima are hard-coded and unverified | - |

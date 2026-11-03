@@ -389,41 +389,6 @@ needs no firmware change; Mission Planner or pymavlink can send it.
 6. List the VIO's `PARAM_EXT` parameters and look for a zoom-level entry. **If one exists, KGCS
    can read it directly** over the routing path it already uses.
 
-## GCS-001 - the firmware version has not been bumped since 5.1.16
-
-| | |
-|---|---|
-| **Status** | OPEN. Found while reorganising this documentation, 2026-11-03 |
-| **Component** | `ArduCopter/version.h`, `libraries/GCS_MAVLink/GCS.h`, `libraries/AP_PMUCAN/AP_PMUCAN.cpp` |
-| **Related** | `D4`, which this is a residual of |
-
-**Description.** `THISFIRMWARE` reads `"PNU_OFP V5.1.23"`, but:
-
-```
-ArduCopter/version.h   #define FIRMWARE_VERSION 5,1,16,FIRMWARE_VERSION_TYPE_DEV
-                       #define FW_PATCH 16
-GCS_MAVLink/GCS.h      #define OFP_VER_REV 16
-```
-
-**Impact.** `OFP_VER_MAIN/SUB/REV` are what `AP_PMUCAN.cpp:94-96` put into
-`PMU_Status.Version_FLCC_*`, which TM13 reports to KGCS, and `FW_*` is what MAVLink
-`AUTOPILOT_VERSION` reports. **Both tell the ground station the aircraft is running 5.1.16 while
-the firmware string says 5.1.23** - seven development versions of drift.
-
-**Root cause.** D4 added `static_assert`s tying `OFP_VER_*` to `FW_*`, and those two do agree.
-**Nothing checks either of them against `THISFIRMWARE`**, which is the string every version entry
-in `CHANGELOG.md` is named after.
-
-**Proposed solution.** Decide which number is authoritative, then either bump `FIRMWARE_VERSION`,
-`FW_PATCH` and `OFP_VER_REV` to 23 with every future version bump, or state explicitly that the
-ICD version fields track something else. A `static_assert` cannot parse `THISFIRMWARE`, so the
-enforcement would have to be a build-time check or a documented step in the release procedure.
-
-**Required verification.** Confirm with PNU what KGCS expects in TM13's FLMJ/FLMN/FLREV, since
-changing it changes what the ground station displays.
-
-**No code was changed for this.** It is reported, not fixed.
-
 ## GCS-002 - KGCS must send TC50 from a permitted system id
 
 | | |
@@ -1234,6 +1199,36 @@ puts the three bytes in the uint32's low three and the explicit `uint32_temp = 0
 top byte; and TX `pmucan_cmd()`, which packs a `uint32` straight into the frame. ArduPilot has no
 big-endian targets. **Commented at all three sites so nobody "fixes" it with `be16toh`/`be32toh` -
 the pre-zero in particular looks removable and is not.**
+
+## GCS-001 - the firmware version had not been bumped since 5.1.16
+
+| | |
+|---|---|
+| **Status** | RESOLVED 2026-11-03 |
+| **Component** | `ArduCopter/version.h`, `libraries/GCS_MAVLink/GCS.h` |
+| **Related** | `D4`, which this was a residual of |
+
+**Original.** `THISFIRMWARE` read `"PNU_OFP V5.1.23"`, but `FIRMWARE_VERSION`, `FW_PATCH` and
+`OFP_VER_REV` all still read **16**.
+
+**Impact.** `OFP_VER_MAIN/SUB/REV` are what `AP_PMUCAN.cpp:94-96` put into
+`PMU_Status.Version_FLCC_*`, which TM13 reports to KGCS, and `FW_*` is what MAVLink
+`AUTOPILOT_VERSION` reports. **Both told the ground station the aircraft was running 5.1.16 while
+the firmware string said 5.1.23** - seven development versions of drift.
+
+**Root cause.** D4 added `static_assert`s tying `OFP_VER_*` to `FW_*`, and those two always
+agreed. **Nothing checked either of them against `THISFIRMWARE`**, which is the string every
+version entry in `CHANGELOG.md` is named after, so the drift was invisible to the build.
+
+**Fixed.** `FIRMWARE_VERSION`, `FW_PATCH` and `OFP_VER_REV` set to 23. Verified at runtime
+against a live SITL: `AUTOPILOT_VERSION.flight_sw_version` now reads **5.1.23, type DEV**.
+
+**Remaining limitation - the drift can recur.** A `static_assert` cannot parse `THISFIRMWARE`, so
+there is still no build-time check that the three numeric defines agree with the version string.
+**Bumping `THISFIRMWARE` must now be accompanied by `FIRMWARE_VERSION`, `FW_PATCH` and
+`OFP_VER_REV`**, and that is a procedural rule, not an enforced one. Making it enforced would
+need a build-time check or a release-procedure step. **TM13's FLMJ/FLMN/FLREV now report 5/1/23
+to KGCS**, where they previously reported 5/1/16.
 
 ## GIMBAL-003 - yaw looked broken on the first bench log and is not
 
