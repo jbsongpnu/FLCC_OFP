@@ -34,7 +34,7 @@
 - For 5.1.21 version : **SAR Integration Plan step 3d: the SAR's observation command layer.** `0x501`/`0x502` go out, `0x521`/`0x522` come back, `SAR_STATUS` reaches 2, 3 and 4, and TC50 is no longer recorded-and-ignored. **Measured in SITL against the fake SAR**; no SAR hardware and no KGCS  
    - **`SAR_STATUS` is now COMPUTED, not assigned.** ICD section 8 states a priority - disconnected or recovery-pending (0) outranks the current attempt's timeout (4), which outranks the last confirmed state (1/2/3) - and with five states and two latches, last-writer-wins would quietly break it. One `publish_state()` decides, so **"a heartbeat must not overwrite 2/3/4 with Ready" is true by construction** rather than by remembering it  
    - **The FC opens a 2 s window and NEVER retries** (ICD 14.5 prohibits it - an FC retry loop would exceed the GCS's two-attempt limit). A window opens only for a command **actually transmitted**, so a refused send does not become state 4; a new command clears the previous latch and republishes `LAST_CONFIRMED_STATE` while it waits; an expired response is never counted retroactively. **A failed Start leaves navigation OFF, a failed Stop RETAINS it**, because stopping is unconfirmed  
-   - **New `CAN_Dn_PNU_SCHK`**, the Start interlock as a bitmask - RTK Fixed, GPS fix age, gimbal attitude age, navigation health. **Default 11 is the ICD's set less the attitude age**, which is off because `0x404` is hard-coded zeros until 3f and **a constant has no age**; setting that bit refuses every Start, which is the honest behaviour. It exists because a bench or an integration test has no RTK fix and could otherwise never send one Start. **Relaxing it is announced** once per boot and again on every Start under it, and it is read live - no reboot  
+   - **New `CAN_Dn_PNU_SCHK`**, the Start interlock as a bitmask - RTK Fixed, GPS fix age, gimbal attitude age, navigation health. **Default 11 is the ICD's set less the attitude age**, which is off because `0x404` has no real attitude source until 3f and **a constant has no age** - hard-coded zeros when 3d was written, **sentinels since 5.1.22**; setting that bit refuses every Start, which is the honest behaviour. It exists because a bench or an integration test has no RTK fix and could otherwise never send one Start. **Relaxing it is announced** once per boot and again on every Start under it, and it is read live - no reboot  
    - **Stop is never gated** (ICD 14.4.2, in bold there): stopping a payload producing contaminated data must not depend on the quality of that data  
    - **Four frames, one payload byte `0x01`.** The ICD says in its own words not to encode Stop as `0x02` merely because it is Stop, so one constant serves commands and responses alike. A response carrying anything else is refused and the window left to expire - measured with `0xFF`  
    - **A TC50 that can reach no device now says so** (`SAR: no backend, check PNU_OPTS`). Without it the GCS's own 3 s window would report the SAR as not responding, blaming the payload for a configuration fault on this aircraft - PNU-ISSUE(D6)  
@@ -3203,9 +3203,10 @@ next power cycle. In 3a the state stayed Disconnected only because nothing wrote
 GPS age, ATT age and navigation health before it may transmit `0x501`. A strict build can
 therefore never send a Start on a bench, which is exactly where the Lumir integration test
 happens. The bitmask names each check; **the default 11 is the ICD's set less the attitude
-age**, because `0x404` carries hard-coded zeros until step 3f and a constant has no age -
-ICD 16.4 forbids presenting a substitute as valid, so the bit is off and **setting it
-refuses every Start**. Relaxation is never silent: once per boot, and again on every Start
+age**, because `0x404` carries no measured attitude until step 3f and a constant has no
+age - hard-coded zeros when this was written, **sentinels since 3e** - and ICD 16.4
+forbids presenting a substitute as valid, so the bit is off and **setting it refuses
+every Start**. Relaxation is never silent: once per boot, and again on every Start
 that goes out under it. It is read live, so a bench operator does not reboot between tries.
 
 Measured in SITL, fake SAR and fake PMU on one `vcan0`, `CAN_D1_PNU_OPTS = 5`:
@@ -3367,19 +3368,31 @@ publish a partial bundle, which the receiver must discard. Count that, never pap
 
 ### The one real risk
 
-**Hard-coded zero attitude in `0x404` is what ICD section 16.4 forbids** - "do not
-substitute zero/segment_heading setpoints and mark them valid". The hazard is not to the
-FC. It is that **Lumir may validate their processing against attitude that is always
-level, and not discover it until the gimbal is fitted.**
+**`0x404` carries no measured attitude until step 3f**, and ICD section 16.4 forbids
+substituting setpoints and marking them valid - "do not substitute zero/segment_heading
+setpoints and mark them valid". The hazard is not to the FC. It is that **Lumir may
+validate their processing against attitude that never varies, and not discover it until
+the gimbal is fitted.**
 
-Three mitigations, and the third is the one that matters:
+**What shipped in 3e changes the shape of this risk without removing it.** `0x404` carries
+sentinels - `INT16_MIN`, `INT16_MIN`, `0xFFFF`, `ATT_Flags` empty - so a receiver that
+reads values before flags sees obviously invalid numbers rather than a level,
+north-facing payload. That is what 16.4 asks for. What it cannot do is guarantee that
+Lumir's receiver handles sentinels at all: an implementation that clamps or casts them
+produces something worse than zeros would have been.
 
-1. A parameter rather than a literal, so the placeholder can be switched off without a
-   firmware build, and so its existence is visible in a parameter dump.
-2. A boot-time `GCS_SEND_TEXT` warning whenever the placeholder is active, on the pattern
-   of the `PNU_HOME=0` warning, so no flight starts without somebody being told.
-3. **Lumir is told in writing that `0x404` is a placeholder for this phase.** That is a
-   project action, not a code change, and no amount of firmware care substitutes for it.
+Three mitigations, and the third is still the one that matters:
+
+1. **Sentinels rather than zeros**, decided when 3e was written. The planned alternative -
+   a parameter holding a placeholder attitude, switchable without a firmware build - was
+   dropped and **never implemented**: there is nothing to parameterise once the frame
+   itself says "unavailable".
+2. **A boot-time `GCS_SEND_TEXT` warning while there is no attitude source** -
+   `SAR: ATT age check off, no source` - on the pattern of the `PNU_HOME=0` warning, so no
+   flight starts without somebody being told.
+3. **Lumir is told in writing that `0x404` is unpopulated for this phase, and what the
+   sentinel values are.** That is a project action, not a code change, and no amount of
+   firmware care substitutes for it. **Still outstanding.**
 
 ---
 
