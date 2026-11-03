@@ -109,8 +109,9 @@ void AP_PNUSAR::report_schk_once(void)
 
     if ((checks & AP_PNUSAR_SCHK_ATT_AGE) == 0) {
         // The default, and it will stay the default until step 3f.  0x404 ATTITUDE carries
-        // hard-coded zeros (PNU's decision, 2026-10-30), so there is no attitude source
-        // whose age could be measured - and ICD 16.4 forbids presenting a substitute as
+        // ICD 16.4's unavailable sentinels rather than a measured attitude (PNU's decision
+        // 2026-10-30, refined from zeros to sentinels in 5.1.22), so there is no attitude
+        // source whose age could be measured - and 16.4 forbids presenting a substitute as
         // valid.  Enforcing a 40 ms freshness rule against a constant would be claiming a
         // guarantee we do not have, which is worse than saying this out loud every boot.
         GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "SAR: ATT age check off, no source");
