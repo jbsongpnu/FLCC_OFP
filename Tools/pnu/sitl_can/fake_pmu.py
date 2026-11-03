@@ -269,6 +269,10 @@ def is_vehicle_heartbeat(msg):
     return msg.type != MAV_TYPE_GCS and msg.autopilot != MAV_AUTOPILOT_INVALID
 
 
+class LinkDown(Exception):
+    '''the MAVLink socket closed under us; see TakeoffWatcher.trap_eof'''
+
+
 class TakeoffWatcher(threading.Thread):
     '''Takeoff is FC state and never appears on CAN, so it is read from SITL's MAVLink
        output instead.  Optional - the console can force it by hand.'''
@@ -397,6 +401,22 @@ class TakeoffWatcher(threading.Thread):
                 time.sleep(2.0)
         return None
 
+    def trap_eof(self, conn):
+        '''make a dead socket raise once instead of being retried forever
+
+           pymavlink's mavtcp prints "EOF on TCP socket" and calls reconnect() on every
+           zero-length read, and a blocking recv_match keeps reading for its whole
+           timeout - so one second of a closed link is thousands of reconnect attempts
+           and thousands of log lines.  Stopping SITL under a running fake PMU produced
+           7,455 of them in a second, and the fake would have burned a core until it was
+           killed.  Raising instead lets the loop above decide, which is to back off and
+           reconnect at a human rate.'''
+        def gone():
+            raise LinkDown()
+        for name in ('handle_eof', 'handle_disconnect'):
+            if hasattr(conn, name):
+                setattr(conn, name, gone)
+
     def run(self):
         try:
             from pymavlink import mavutil
@@ -417,9 +437,24 @@ class TakeoffWatcher(threading.Thread):
         if conn is None:
             return
         self.pmu.log('MAVLink: connected to %s' % self.url)
+        self.trap_eof(conn)
         while self.pmu.running:
-            msg = conn.recv_match(type=['HEARTBEAT', 'GLOBAL_POSITION_INT', 'EXTENDED_SYS_STATE'],
-                                  blocking=True, timeout=1.0)
+            try:
+                msg = conn.recv_match(type=['HEARTBEAT', 'GLOBAL_POSITION_INT', 'EXTENDED_SYS_STATE'],
+                                      blocking=True, timeout=1.0)
+            except LinkDown:
+                self.pmu.log('MAVLink: %s went away - reconnecting' % self.url)
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+                time.sleep(1.0)
+                conn = self.connect(mavutil)
+                if conn is None:
+                    return
+                self.pmu.log('MAVLink: reconnected to %s' % self.url)
+                self.trap_eof(conn)
+                continue
             if msg is None:
                 continue
             target = self.request_target(msg)
