@@ -21,6 +21,97 @@ A feature exercised only in SITL is **not** hardware-verified. Entries say so ex
 
 ---
 
+## V5.1.24 - the SAR navigation bundle becomes observable
+
+**Changes**
+
+- **New dataflash record `SARN`, one per snapshot at 10 Hz while an observation runs**:
+  `TimeUS, TX, Drop, Ovr, Stale, TxF, Seq, AFlg, TxErr`. Until now the navigation bundle
+  was **not logged at all** - `SARS` and `SARC` are written from `GCS_PNU.cpp` and cover the
+  MAVLink side only - so a session that worked perfectly said nothing on the FC side, and
+  silence was indistinguishable from "it never started". When Lumir says "we did not receive
+  it", this is what says whether the FC sent it.
+- **`Seq` is the `ATT_Seq` byte actually packed into `0x404` B6**, so a gap between the log
+  and the receiver's stream identifies the lost bundle rather than merely proving loss
+  happened.
+- **`AFlg` is `0x404` B7 as transmitted**, not an internal opinion of validity. It carries
+  `ROLL_VALID`, `PITCH_VALID`, `YAW_VALID` and `ATT_FRESH` as four separate bits, so it
+  becomes the per-axis record of attitude validity the moment step 3f fills it; until then
+  it reads `0x00` and that is the honest value.
+- **The single drop counter is split by cause** - `Ovr` (the vehicle thread overwrote an
+  unsent snapshot), `Stale` (the CAN thread reached it after
+  `AP_PNUSAR_SNAPSHOT_MAX_AGE_MS`) and `TxF` (the interface refused a frame) - behind one
+  `note_bundle_drop()` that accounts for all three. Three call sites previously incremented
+  the total and called the reporter by hand, which is how a cause ends up counted in one
+  place and not another. `Drop` remains their sum so a single row reads without arithmetic.
+- **`AP_PNU_CAN::get_last_tx_error()`** exposes the `CANIface::send()` result of the most
+  recent failure - **0 is a full TX queue and negative is an interface error**, and the
+  difference between congestion and a sick bus is exactly what a diagnostic wants.
+  `send_frame()` still returns `bool`, so the PMU and gimbal backends are untouched.
+- **That accessor is bus-wide, so the SAR captures its own error at the failure site.** All
+  three backends share one `send_frame()`, and the PMU polls at 10 Hz while the gimbal
+  commands at 100 Hz - logging the accessor from the vehicle thread would have recorded
+  whichever backend failed most recently, which at `OPTS = 7` is the least likely to be the
+  SAR. Every backend runs sequentially on the one driver thread, so the value read
+  immediately after the SAR's own `send_frame()` returned false is necessarily the SAR's.
+- **`TxErr` reads 1 until a SAR frame is actually refused.** `CANIface::send()` returns 1 for
+  success, so 1 can never appear as a failure result. **0 would have been wrong twice over**:
+  it is the legitimate "TX queue full" result *and* the driver member's own initial value, so
+  a reader could not tell "no failure" from "queue full".
+- **A session summary statustext wherever navigation goes off**, so a confirmed Stop and an
+  automatic termination both produce one, after the confirmation rather than before it:
+
+  ```text
+  SAR: 200 bundles, 0 drop, AFlg 0x00
+  SAR: drops ovr 0 stale 0 tx 0          (only when something was dropped)
+  SAR: session sent NO bundles           (WARNING, when nothing was ever packed)
+  ```
+
+  Counters stay cumulative since boot because `SARN` logs them absolutely; the summary
+  reports the session delta against a baseline taken at Start.
+
+**Design decisions recorded with the change**
+
+| Decision | Why |
+|---|---|
+| `SARN` is written from the **vehicle thread**, in `nav_snapshot()` | It follows the thread split the bundle already uses, and `AP_PMUCAN` has never logged from a driver thread, so there is no precedent here to lean on. The consequence is in the log: `TX`, `Drop` and `TxErr` describe the state *before* this snapshot was sent, so they lag `Seq` by one bundle |
+| the record is **not** gated behind a parameter | It only writes while an observation is running, which is bounded, and the first integration with Lumir is exactly when nobody will think to switch it on |
+| **no new MAVLink message** | A diagnostic TM would need an id in `pnu_kal.xml`, CRC_EXTRA agreement and PNU-GCS work - and **KGCS whitelists message ids, so it would discard it**. The statustext reaches every ground station as id 253 and the dataflash carries the detail |
+| the whole `AP_GPS`-style logging call is wrapped in `#if HAL_LOGGING_ENABLED` | The 5.1.17 lesson, and the step-7 defect list before it: an unguarded `AP::logger().Write()` is how a feature comes to depend on a compile-time option |
+| `TxErr` is captured per backend, not read from the driver | The driver's copy is written by whichever backend failed last. See above - this was a defect in the first cut of this change, caught in review before it shipped |
+
+**Verification**
+
+- **SITL**, fake SAR on `vcan0`, `CAN_D1_PNU_OPTS = 5`, a 20 s observation:
+
+  | | |
+  |---|---|
+  | `SARN` records | **200**, at **10.00 Hz** over 19.9 s |
+  | `Seq` | 1 to 200, **zero discontinuities** |
+  | `TX` against `Seq` | lags by exactly 1 in every row, as designed |
+  | `AFlg` | `0x00` throughout - sentinels, no valid bits, correct before 3f |
+  | statustext | `SAR Stop confirmed, state 2` then `SAR: 200 bundles, 0 drop, AFlg 0x00` |
+
+- **Build**: SITL. Costs **+768 B** over 5.1.23.
+
+**Known Limitations**
+
+- **The drop paths are not exercised, and a TX failure cannot be forced in SITL.** Two
+  attempts were made during an active observation, inside the `--no-root` namespace where the
+  bus can be manipulated: `ip link set vcan0 down` and then `ip link del vcan0`. **Neither
+  produced a single send failure** - SocketCAN accepted the writes in both cases, so
+  `CANIface::send()` never returned anything but 1. In both runs `TxF` stayed 0 and `TxErr`
+  stayed at its sentinel, which at least confirms the sentinel. `Ovr`, `Stale`, `TxF` and
+  `TxErr` therefore remain build-and-review verified only. The underlying drop detection was
+  measured during 5.1.22, which is how the staleness window came to be widened; the per-cause
+  accounting and the error code on top of it have not been. **The honest place to exercise
+  them is the bench**, where a disconnected transceiver, a bus-off condition or a congested
+  1 Mbit/s wire produces them naturally.
+- `AFlg` cannot read anything but `0x00` until step 3f - `SAR-001`.
+- No SAR hardware and no KGCS.
+
+---
+
 ## V5.1.23 - the gimbal driver never brought the motors up
 
 **Changes**

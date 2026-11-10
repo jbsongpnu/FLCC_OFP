@@ -635,6 +635,12 @@ bool AP_PNUSAR::handle_response(const AP_HAL::CANFrame &frame, PNUSAR_Pending ex
         // ICD 15.1 : the session is the acquisition unit after a valid Start response,
         // and it has to begin in RTK_FIXED.  nav_snapshot() checks the first bundle.
         _session_first_bundle = true;
+
+        // The baseline the closing summary is measured against.  The counters themselves
+        // stay cumulative since boot, because SARN logs them absolutely and a delta is
+        // what the statustext needs rather than what the log does.
+        _session_tx_base = _bundle_tx_cnt;
+        _session_drop_base = _bundle_drop_cnt;
     } else {
         _bundle.ready = false;          // 7.4 : discard unsent bundles on a normal Stop
     }
@@ -646,6 +652,13 @@ bool AP_PNUSAR::handle_response(const AP_HAL::CANFrame &frame, PNUSAR_Pending ex
     GCS_SEND_TEXT(MAV_SEVERITY_INFO, "SAR %s confirmed, state %u",
                   (confirmed == PNUSAR_State::STARTED) ? "Start" : "Stop",
                   (unsigned)_state);
+
+    // After the confirmation, not before it: the summary is about the session that just
+    // ended, and an operator reading the two lines in the other order has to work out
+    // which Stop they belong to.
+    if (!_nav_tx_enabled) {
+        session_summary();
+    }
     return true;
 }
 

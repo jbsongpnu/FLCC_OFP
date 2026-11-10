@@ -619,6 +619,7 @@ void AP_PNU_CAN::report_short_frame(uint32_t frame_id, uint8_t dlc)
 void AP_PNU_CAN::report_tx_error(uint32_t can_id, int result)
 {
     _tx_err_cnt++;
+    _last_tx_err_res = int16_t(result);
 
     const uint32_t now_ms = AP_HAL::millis();
     if ((_tx_err_cnt > 1) &&

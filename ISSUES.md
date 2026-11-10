@@ -1230,6 +1230,45 @@ there is still no build-time check that the three numeric defines agree with the
 need a build-time check or a release-procedure step. **TM13's FLMJ/FLMN/FLREV now report 5/1/23
 to KGCS**, where they previously reported 5/1/16.
 
+## SAR-002 - the navigation bundle was not observable from the FC
+
+| | |
+|---|---|
+| **Status** | RESOLVED in 5.1.24. **Residual: the drop paths are unexercised** |
+| **Component** | `libraries/AP_PNUSAR/AP_PNUSAR_Nav.cpp`, `libraries/AP_PNU_CAN/AP_PNU_CAN.{h,cpp}` |
+| **Related** | `SAR-001`; found while planning the Lumir connection test, 2026-11-03 |
+
+**Original.** `AP_PNUSAR` wrote nothing to the dataflash - `SARS` and `SARC` are both written
+from `GCS_PNU.cpp` and cover the MAVLink side only. `_bundle_tx_cnt` and `_bundle_drop_cnt`
+were read in exactly one place, inside `report_bundle_drop()`, which speaks only when
+something is wrong.
+
+**Impact.** A session in which every bundle flowed produced **no FC-side evidence at all**.
+Silence meant either "all of them went out" or "it never started", and the only way to tell
+them apart was `TM50` reaching state 3 - which says the observation was *started*, not that
+nine frames left the bus ten times a second. For a first integration with Lumir that failed
+twice over: nothing to answer "we are not receiving" with, and nothing to compare against
+their log afterwards. **This is PNU-ISSUE(D6)'s silence pointing the other way** - not a
+failure nobody sees, but a success nobody can prove.
+
+**Fixed** by the `SARN` record, the per-cause drop counters, `get_last_tx_error()` and the
+session summary statustext. See `CHANGELOG.md` V5.1.24.
+
+**Remaining limitation - and SITL cannot close it.** The run that verified the record dropped
+nothing, 0 of 200. Two deliberate attempts were then made to force a TX failure during an
+active observation, inside the `--no-root` namespace where the bus can be manipulated:
+`ip link set vcan0 down`, and then `ip link del vcan0`. **Neither produced a single send
+failure** - SocketCAN accepted the writes in both cases, so `CANIface::send()` never returned
+anything but success and `TxF` stayed 0. So `Ovr`, `Stale`, `TxF` and `TxErr` have never been
+observed carrying a non-zero value.
+
+The drop *detection* was measured in 5.1.22, when a 50 ms staleness window was losing 6% of
+bundles; what has not been exercised is the per-cause accounting built on top of it. **Confirm
+it on the bench**, where a disconnected transceiver, a bus-off condition or a congested
+1 Mbit/s wire produces `TxF` and a negative `TxErr` naturally. Both attempts did confirm one
+thing: `TxErr` held its sentinel of 1 throughout, which is what distinguishes "no SAR frame has
+ever been refused" from the legitimate `0` meaning "TX queue full".
+
 ## GIMBAL-003 - yaw looked broken on the first bench log and is not
 
 | | |

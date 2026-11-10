@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Current version** | `PNU_OFP V5.1.23` (DEV) |
+| **Current version** | `PNU_OFP V5.1.24` (DEV) |
 | **Baseline** | ArduPilot Copter **4.7.1** |
 | **Last official release** | `PNU-KAL-FLCC-5.1.0` (same code as 5.1.0 dev) |
 | **Vehicle** | **ArduCopter only.** Plane, Rover and Sub do not link - by construction |
@@ -117,7 +117,12 @@ recorded in `ISSUES.md`.
 
 ## 3. Current Development Version
 
-**V5.1.23** carries one `AP_PNUGimbal` fix, found by the fake gimbal on its first run: the driver
+**V5.1.24** makes the SAR navigation bundle observable: a `SARN` dataflash record per snapshot,
+drop counters split by cause, the last CAN TX error code, and a session summary statustext on
+every Stop. Until it, a session that worked perfectly said nothing on the FC side - see
+`SAR-002`.
+
+**V5.1.23** carried one `AP_PNUGimbal` fix, found by the fake gimbal on its first run: the driver
 **never brought the motors up at all**, and would have stopped the gimbal dead on the bench with
 no message to say why. Wrong since 5.1.13. See `CHANGELOG.md`.
 
@@ -127,7 +132,7 @@ no message to say why. Wrong since 5.1.13. See `CHANGELOG.md`.
 |---|---|
 | PMU | Full telemetry, commands, prearm, in-flight failsafe, engine-start interlock with two guards. **Bench-verified** except the shared bus and Stop-command timing |
 | Gimbal | Mount backend, lifecycle state machine, Appendix 1 homing, per-axis direction parameters. **SITL only - no motor has ever turned** |
-| SAR | Connection layer, both MAVLink messages, the command layer with the Start interlock, and the 10 Hz navigation bundle with automatic termination. **SITL only - no SAR hardware** |
+| SAR | Connection layer, both MAVLink messages, the command layer with the Start interlock, the 10 Hz navigation bundle with automatic termination, and `SARN` bundle accounting. **SITL only - no SAR hardware** |
 | Camera | Viewpro via the KGCS TC2/TM2 interface; Gremsy VIO via standard MAVLink with four functions GCS-direct. **Bench-verified on both** |
 
 ---

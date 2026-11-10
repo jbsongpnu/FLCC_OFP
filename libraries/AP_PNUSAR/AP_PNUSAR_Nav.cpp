@@ -29,6 +29,8 @@
 
 #include "AP_PNUSAR.h"
 
+#include <AP_Logger/AP_Logger.h>
+
 #if AP_PNUSAR_ENABLED
 
 #include <AP_HAL/AP_HAL.h>
@@ -206,8 +208,7 @@ void AP_PNUSAR::nav_snapshot(bool nav_failsafe)
     // ATT_Seq at the far end, which is precisely the silent failure PNU-ISSUE(D6) exists
     // to remove.
     if (_bundle.ready) {
-        _bundle_drop_cnt++;
-        report_bundle_drop("overrun");
+        note_bundle_drop(AP_PNUSAR_DROP_OVERRUN, "overrun");
     }
 
     memset(_bundle.data, 0, sizeof(_bundle.data));
@@ -285,7 +286,11 @@ void AP_PNUSAR::nav_snapshot(bool nav_failsafe)
     put_le_i16(&f[4][2], int16_t(AP_PNUSAR_INVALID_I16));
     put_le16(&f[4][4], AP_PNUSAR_INVALID_U16);
     f[4][6] = _att_seq++;
-    f[4][7] = 0;
+    // ATT_Flags stays empty until step 3f: no ROLL/PITCH/YAW_VALID and no ATT_FRESH.
+    // SARN records the byte AS TRANSMITTED rather than an intent, because it is what the
+    // receiver sees and what a disagreement with Lumir's log would have to be settled on.
+    _att_flags = 0;
+    f[4][7] = _att_flags;
 
     // 0x405 GPS_TIME_STATUS : GMS u32, GWk u16, Status u8, NSats u8.
     const uint16_t gwk = gps.time_week(inst);
@@ -364,6 +369,8 @@ void AP_PNUSAR::nav_snapshot(bool nav_failsafe)
     _bundle.time_us = snapshot_us;
     _bundle.ready = true;
 
+    log_nav();
+
     // ICD 15.1 : a session must START in RTK_FIXED, and post-processing discards the
     // whole session if the first transmitted snapshot is not Status 6.  The FC cannot
     // enforce that - the Start interlock already passed - but flying an entire sortie
@@ -395,6 +402,7 @@ void AP_PNUSAR::auto_terminate(const char *reason)
 {
     _nav_tx_enabled = false;
     _bundle.ready = false;
+    session_summary();
     _auto_stop_cnt++;
 
     // 14.7 and 14.8 : the current indication for this is recovery-pending, which is
@@ -430,8 +438,7 @@ void AP_PNUSAR::send_bundle(void)
     // has no way to notice.
     if ((AP_HAL::micros64() - _bundle.time_us) >
         (uint64_t)AP_PNUSAR_SNAPSHOT_MAX_AGE_MS * 1000ULL) {
-        _bundle_drop_cnt++;
-        report_bundle_drop("stale");
+        note_bundle_drop(AP_PNUSAR_DROP_STALE, "stale");
         return;
     }
 
@@ -441,12 +448,117 @@ void AP_PNUSAR::send_bundle(void)
             // remaining frames are abandoned rather than put on a congested bus to be
             // thrown away at the other end.  The driver has already counted and reported
             // the send failure itself.
-            _bundle_drop_cnt++;
-            report_bundle_drop("TX");
+            // Read the driver's code HERE, not in log_nav().  get_last_tx_error() is
+            // bus-wide - the PMU polls at 10 Hz and the gimbal commands at 100 Hz, and
+            // either can overwrite it - but every backend runs sequentially on this one
+            // driver thread, so the value immediately after OUR send_frame() returned
+            // false is necessarily ours.  Logging the accessor from the vehicle thread
+            // instead would have recorded whichever backend failed most recently.
+            _last_tx_err = _frontend.get_last_tx_error();
+            note_bundle_drop(AP_PNUSAR_DROP_TX, "TX");
             return;
         }
     }
     _bundle_tx_cnt++;
+}
+
+
+// -------------------------------------------------------------------------
+// note_bundle_drop : the one place a lost bundle is accounted for
+// -------------------------------------------------------------------------
+void AP_PNUSAR::note_bundle_drop(uint8_t reason, const char *why)
+{
+    _bundle_drop_cnt++;
+    _last_drop_reason = reason;
+
+    switch (reason) {
+    case AP_PNUSAR_DROP_OVERRUN:
+        _bundle_ovr_cnt++;
+        break;
+    case AP_PNUSAR_DROP_STALE:
+        _bundle_stale_cnt++;
+        break;
+    case AP_PNUSAR_DROP_TX:
+        _bundle_txfail_cnt++;
+        break;
+    default:
+        break;
+    }
+
+    report_bundle_drop(why);
+}
+
+
+// -------------------------------------------------------------------------
+// log_nav : SARN, one record per snapshot
+// -------------------------------------------------------------------------
+// WRITTEN FROM THE VEHICLE THREAD, from nav_snapshot(), not from the CAN thread that
+// sends.  It follows the thread split the bundle itself already uses, and AP_PMUCAN has
+// never logged from a driver thread so there is no precedent here to lean on.
+//
+// The consequence is worth knowing when reading a log: TX, Drop and TxErr describe the
+// state BEFORE this snapshot was sent, so they lag Seq by one bundle.  Seq does not lag,
+// which is the column that matters - it is the ATT_Seq actually packed into 0x404 B6, so
+// a gap between consecutive rows and the receiver's stream is a bundle that never
+// reached the bus.  That is the question this record exists to answer: when Lumir says
+// "we did not receive it", this says whether the FC sent it.
+//
+// TxErr is THIS backend's last refused frame, captured where the refusal happened - not
+// the driver's bus-wide value, which the PMU and the gimbal also write.  It reads 1
+// (AP_PNUSAR_TX_ERR_NONE) until a SAR frame is actually refused, and TxF in the same row
+// says whether to believe it at all.
+// -------------------------------------------------------------------------
+void AP_PNUSAR::log_nav(void)
+{
+#if HAL_LOGGING_ENABLED
+    // Guarded because a logging-free build must still fly - PNU-ISSUE(D6) and the
+    // 5.1.17 lesson about a safety path that quietly depended on HAL_LOGGING_ENABLED.
+    AP::logger().Write("SARN", "TimeUS,TX,Drop,Ovr,Stale,TxF,Seq,AFlg,TxErr",
+                       "QIIIIIBBh",
+                       AP_HAL::micros64(),
+                       (uint32_t)_bundle_tx_cnt,
+                       (uint32_t)_bundle_drop_cnt,
+                       (uint32_t)_bundle_ovr_cnt,
+                       (uint32_t)_bundle_stale_cnt,
+                       (uint32_t)_bundle_txfail_cnt,
+                       (uint8_t)_att_seq,
+                       (uint8_t)_att_flags,
+                       (int16_t)_last_tx_err);
+#endif
+}
+
+
+// -------------------------------------------------------------------------
+// session_summary : what the session actually managed to transmit
+// -------------------------------------------------------------------------
+// Emitted wherever navigation goes off, so a confirmed Stop and an automatic termination
+// both produce one.  Until now a session that worked perfectly said NOTHING on the FC
+// side - report_bundle_drop() only speaks when something is wrong, so silence meant
+// either "all 2803 bundles went out" or "it never started", and the operator could not
+// tell which.  That is the same silence PNU-ISSUE(D6) exists to remove, pointing the
+// other way.
+// -------------------------------------------------------------------------
+void AP_PNUSAR::session_summary(void)
+{
+    const uint32_t tx = _bundle_tx_cnt - _session_tx_base;
+    const uint32_t drop = _bundle_drop_cnt - _session_drop_base;
+
+    if ((tx == 0) && (drop == 0)) {
+        // Nothing was ever packed for this session - a Stop that followed a Start the
+        // snapshot task never acted on.  Saying "0 bundles" is the useful thing here.
+        GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "SAR: session sent NO bundles");
+        return;
+    }
+
+    GCS_SEND_TEXT(MAV_SEVERITY_INFO, "SAR: %lu bundles, %lu drop, AFlg 0x%02x",
+                  (unsigned long)tx, (unsigned long)drop, (unsigned)_att_flags);
+
+    if (drop != 0) {
+        GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "SAR: drops ovr %lu stale %lu tx %lu",
+                      (unsigned long)_bundle_ovr_cnt,
+                      (unsigned long)_bundle_stale_cnt,
+                      (unsigned long)_bundle_txfail_cnt);
+    }
 }
 
 

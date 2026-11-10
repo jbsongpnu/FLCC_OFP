@@ -116,6 +116,23 @@ public:
     // already counted and reported here, so a backend only decides whether to retry.
     bool send_frame(uint32_t can_id, const uint8_t *data, uint8_t dlc);
 
+    // The result of the most recent FAILED send, as CANIface::send() reported it:
+    // 0 is a full TX queue and negative is an interface error, and the difference
+    // matters - one is congestion, the other is a sick bus.  send_frame() deliberately
+    // still returns bool, because that is all a backend needs in order to decide what
+    // to do; this is for diagnostics that want to say WHY afterwards.
+    //
+    // IT IS BUS-WIDE, NOT PER BACKEND.  All three backends share this one send path, so
+    // a failed PMU RTR poll or gimbal command sets it just as a failed SAR frame does.
+    // A backend that wants ITS OWN last error must read this IMMEDIATELY after its own
+    // send_frame() returned false: every backend runs sequentially on the one driver
+    // thread, so nothing can interleave between the two calls.  Reading it later, or
+    // from another thread, gets whichever backend failed most recently.
+    //
+    // Before any failure it reads 0, which is also a real result ("TX queue full"), so
+    // it means nothing on its own - pair it with a failure count.
+    int16_t get_last_tx_error(void) const { return _last_tx_err_res; }
+
     // Report a frame rejected for a short DLC, rate limited, first always reported.
     void report_short_frame(uint32_t frame_id, uint8_t dlc);
 
@@ -205,6 +222,7 @@ private:
     uint32_t _short_frame_cnt = 0;
     uint32_t _last_short_frame_warn_ms = 0;
     uint32_t _tx_err_cnt = 0;
+    int16_t  _last_tx_err_res = 0;      // CANIface::send() result of the last failure
     uint32_t _last_tx_err_warn_ms = 0;
     uint32_t _unclaimed_cnt = 0;
     uint32_t _last_unclaimed_warn_ms = 0;

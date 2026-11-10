@@ -144,6 +144,20 @@ void PNU_SAR_nav_snapshot(bool nav_failsafe);
 // hearing about while it is still happening.
 #define AP_PNUSAR_BUNDLE_WARN_MS    (10000U)
 
+// SARN's Reason column.  The cause of the MOST RECENT dropped bundle, which is not the
+// same question as how many of each there have been - the per-cause counters answer that.
+#define AP_PNUSAR_DROP_NONE         (0U)
+#define AP_PNUSAR_DROP_OVERRUN      (1U)    // the vehicle thread overwrote an unsent one
+#define AP_PNUSAR_DROP_STALE        (2U)    // the CAN thread reached it too late
+#define AP_PNUSAR_DROP_TX           (3U)    // the interface refused a frame
+
+// SARN's TxErr column when no SAR frame has ever been refused.  CANIface::send() returns
+// 1 for success, so 1 can never appear as a FAILURE result - which makes it the one value
+// that cannot be confused with a real error.  0 would have been wrong twice over: it is
+// the legitimate "TX queue full" result, and it is also the driver member's own initial
+// value, so a reader could not tell "no failure" from "queue full".
+#define AP_PNUSAR_TX_ERR_NONE       (1)
+
 // Sentinels, SAR_ICD_PNU.md 2.3.  "Do not use an otherwise valid value of zero to
 // represent invalid data", which is the whole reason these exist as named constants.
 #define AP_PNUSAR_INVALID_U16       (0xFFFFU)
@@ -267,6 +281,19 @@ private:
     void auto_terminate(const char *reason);
     void report_bundle_drop(const char *why);
 
+    // One place that accounts for a lost bundle: the total, the per-cause counter, the
+    // reason SARN records, and the rate-limited warning.  Three call sites used to do
+    // the first and the last by hand, which is how a cause ends up counted in one place
+    // and not another.
+    void note_bundle_drop(uint8_t reason, const char *why);
+
+    // SARN, written from the VEHICLE thread once per snapshot - see log_nav().
+    void log_nav(void);
+
+    // The session's bundle accounting, as one statustext.  Emitted wherever navigation
+    // goes off, so a confirmed Stop and an automatic termination both produce it.
+    void session_summary(void);
+
     bool handle_heartbeat(const AP_HAL::CANFrame &frame);
     bool handle_response(const AP_HAL::CANFrame &frame, PNUSAR_Pending expect,
                          PNUSAR_State confirmed);
@@ -315,8 +342,16 @@ private:
 
     PNUSAR_Bundle _bundle = {};         // the vehicle thread fills it, the CAN thread drains it
     uint8_t  _att_seq = 0;              // 0x404 B6, wraps 0-255
+    uint8_t  _att_flags = 0;            // 0x404 B7 AS TRANSMITTED, not as intended
     uint32_t _bundle_tx_cnt = 0;        // bundles actually written to the bus
-    uint32_t _bundle_drop_cnt = 0;      // packed but too old, or a frame refused
+    uint32_t _bundle_drop_cnt = 0;      // the sum of the three below
+    uint32_t _bundle_ovr_cnt = 0;       // snapshot overwritten before the CAN thread ran
+    uint32_t _bundle_stale_cnt = 0;     // older than AP_PNUSAR_SNAPSHOT_MAX_AGE_MS
+    uint32_t _bundle_txfail_cnt = 0;    // a frame the interface refused
+    uint8_t  _last_drop_reason = AP_PNUSAR_DROP_NONE;
+    int16_t  _last_tx_err = AP_PNUSAR_TX_ERR_NONE;  // OUR last refused frame, not the bus's
+    uint32_t _session_tx_base = 0;      // _bundle_tx_cnt when this session started
+    uint32_t _session_drop_base = 0;    // _bundle_drop_cnt when this session started
     uint32_t _last_bundle_warn_ms = 0;
     bool     _session_first_bundle = false;     // ICD 15.1, the Status 6 session rule
 
