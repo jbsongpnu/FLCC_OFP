@@ -28,6 +28,7 @@ PNU_SAR_Status SAR_Status;
 
 #include <AP_PNU_CAN/AP_PNU_CAN.h>
 #include <AP_GPS/AP_GPS.h>
+#include <AP_Logger/AP_Logger.h>
 #include <AP_AHRS/AP_AHRS.h>
 
 extern const AP_HAL::HAL &hal;
@@ -87,7 +88,50 @@ void AP_PNUSAR::update(uint32_t tick)
     if ((tick % AP_PNUSAR_HEALTH_CHECK_TICKS) == 0) {
         check_health();
     }
+
+#if HAL_LOGGING_ENABLED
+    // After check_health(), so a status this tick decided is the one logged.
+    log_status();
+#endif
 }
+
+
+#if HAL_LOGGING_ENABLED
+// -------------------------------------------------------------------------
+// log_status : SARS, periodically and on every status change
+// -------------------------------------------------------------------------
+// SARS used to be written by GCS_PNU.cpp's TM50 sender, so the flight log was a side
+// effect of telemetry: duplicated once per attached ground station - 440 of 662 records
+// in one SITL run were duplicates under 5 ms apart - and absent entirely with none
+// attached, which is how an aircraft flying on a dead link kept no SAR history.
+//
+// The change test is made HERE rather than in publish_state() on purpose.  publish_state()
+// is reached from both the driver thread and the vehicle thread, so logging from it would
+// need its own locking; polling the published value from the driver's own tick cannot
+// race, and costs at most one tick of latency.
+//
+// Record name, field names and format are unchanged.
+// -------------------------------------------------------------------------
+void AP_PNUSAR::log_status(void)
+{
+    const uint32_t now_ms = AP_HAL::millis();
+    const bool changed = (SAR_Status.status != _last_sars_status);
+
+    if (!changed && ((int32_t)(now_ms - _next_sars_ms) < 0)) {
+        return;
+    }
+
+    // A change resets the periodic slot too, so a transition is never followed a
+    // millisecond later by the record that was already due.
+    _next_sars_ms = now_ms + AP_PNUSAR_LOG_INTERVAL_MS;
+    _last_sars_status = SAR_Status.status;
+
+    AP::logger().Write("SARS", "TimeUS,STAT,LIVE", "QBI",
+                       AP_HAL::micros64(),
+                       SAR_Status.status,
+                       SAR_Status.live_counter);
+}
+#endif  // HAL_LOGGING_ENABLED
 
 
 // -------------------------------------------------------------------------

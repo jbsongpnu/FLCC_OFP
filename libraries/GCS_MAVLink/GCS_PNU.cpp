@@ -343,12 +343,9 @@ void GCS_MAVLINK::send_message_flcc_gcs_sar_status() const
             SAR_Status.status,
             SAR_Status.live_counter);
 
-#if HAL_LOGGING_ENABLED
-    AP::logger().Write("SARS", "TimeUS,STAT,LIVE", "QBI",
-                       AP_HAL::micros64(),
-                       SAR_Status.status,
-                       SAR_Status.live_counter);
-#endif
+    // The SARS dataflash record is written by AP_PNUSAR::log_status(), on the driver
+    // thread, 1 Hz and on every status change.  Writing it here duplicated it once per
+    // attached GCS and omitted it entirely when none was.
 }
 
 

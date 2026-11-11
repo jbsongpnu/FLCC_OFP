@@ -185,6 +185,16 @@ void PNU_SAR_nav_snapshot(bool nav_failsafe);
 // the shared bus are judged on the same clock.
 #define AP_PNUSAR_HEALTH_CHECK_TICKS (2U)       // 50 Hz at AP_PNU_CAN_LOOP_HZ
 
+// SARS logging.  The record used to ride the TM50 send at 5 Hz, which logged a value
+// that changes at the 1 Hz heartbeat five times over and logged nothing at all when no
+// GCS was attached.  1 Hz matches Live_Counter's real rate; a status change is written
+// as soon as the driver next ticks, so no transition waits for the periodic slot.
+//
+// Paced on millis() rather than on the tick count, for the reason given at
+// PMUCAN_LOG_INTERVAL_MS: a driver tick is longer than 1/AP_PNU_CAN_LOOP_HZ.
+#define AP_PNUSAR_LOG_INTERVAL_MS   (1000U)
+#define AP_PNUSAR_LOG_NO_STATUS     (0xFFU)     // no status logged yet this boot
+
 // Rate limit for the repeated-cause reports below.  One limiter per cause - sharing one
 // lets a permanent condition crowd out a genuine fault.
 #define AP_PNUSAR_WARN_INTERVAL_MS  (60000U)
@@ -237,6 +247,10 @@ private:
     void check_ctrl(void);
     void check_pending(void);
     void report_schk_once(void);
+
+#if HAL_LOGGING_ENABLED
+    void log_status(void);              // SARS, 1 Hz and on every status change
+#endif
 
     // ONE place computes SAR_STATUS, because the ICD states a priority between the
     // sources rather than a last-writer-wins rule - see the definition.
@@ -322,6 +336,9 @@ private:
     uint32_t _pending_sent_ms = 0;      // when the pending command actually went out
     bool     _not_responding = false;   // the state-4 latch for the CURRENT attempt
     bool     _nav_tx_enabled = false;   // NAV_TX_ENABLED, ICD 14.1.  Gates step 3e
+
+    uint32_t _next_sars_ms = 0;         // deadline for the periodic SARS record
+    uint8_t  _last_sars_status = AP_PNUSAR_LOG_NO_STATUS;
 
     bool     _schk_reported = false;    // the once-per-boot CAN_Dn_PNU_SCHK notice
 
