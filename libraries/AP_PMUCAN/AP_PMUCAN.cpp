@@ -52,6 +52,7 @@ AP_PMUCAN::AP_PMUCAN(AP_PNU_CAN &frontend) :
     _short_frame_cnt            = 0;
     _last_short_frame_warn_ms   = 0;
     _next_log_ms                = 0;
+    _next_counter_log_ms        = 0;
 
 
     _engineonoffmode        = 0;                            // OFF
@@ -149,6 +150,7 @@ void AP_PMUCAN::update(uint32_t tick)
 
 #if HAL_LOGGING_ENABLED
     log_status();                                       // self-paced, 10 Hz on millis()
+    log_counters();                                     // self-paced, 1 Hz on millis()
 #endif
 }
 
@@ -226,6 +228,49 @@ void AP_PMUCAN::log_status(void)
                        PMU_Ctrl_Echo.Engine_Throttle_CMD_Echo,
                        PMU_Ctrl_Echo.Engine_CHK_CMD_Echo,
                        PMU_Ctrl_Echo.PMUCAN_Fail);
+}
+
+
+// -------------------------------------------------------------------------
+// log_counters : PMU-003 - the communication counters, once a second
+// -------------------------------------------------------------------------
+// Five of these were incremented and never read anywhere in the tree, which is what
+// PMU-003 asked to resolve: surface them or delete them.  They are surfaced, because the
+// two error counters are exactly what you want when chasing an intermittent PMU link and
+// the PNU-ISSUE(D7) send-result fix already depends on _cmd_tx_err for diagnosis.
+// _short_frame_cnt joins them: it had a reader from the start - a rate-limited statustext
+// - but a statustext nobody is attached to receive is not a record, which is the same
+// lesson V5.1.25 learned about TM11-TM13.
+//
+// CUMULATIVE, deliberately.  A per-interval count would hide anything that happened
+// while the log was not open and would make a dropped record into a lost event; a running
+// total survives both, and the quantity anyone actually wants is a difference between two
+// of them.
+//
+// THESE ARE THE PMU BACKEND'S COUNTERS ONLY.  AP_PNU_CAN keeps its own driver-wide set -
+// short frames from any backend, send failures with the last interface result, unclaimed
+// frames - and those belong to the shared bus, not to the PMU.  Mixing the two would
+// produce a record that cannot be read without knowing which layer each column came from.
+// -------------------------------------------------------------------------
+void AP_PMUCAN::log_counters(void)
+{
+    const uint32_t now_ms = AP_HAL::millis();
+    if ((int32_t)(now_ms - _next_counter_log_ms) < 0) {
+        return;
+    }
+    _next_counter_log_ms += PMUCAN_COUNTER_LOG_MS;
+    if ((int32_t)(now_ms - _next_counter_log_ms) >= 0) {
+        _next_counter_log_ms = now_ms + PMUCAN_COUNTER_LOG_MS;
+    }
+
+    AP::logger().Write("PMUC", "TimeUS,RxSts,RtrTx,RtrErr,CmdTx,CmdErr,Short", "QIIIIII",
+                       AP_HAL::micros64(),
+                       _handleFrame_cnt,
+                       _rtr_tx_cnt,
+                       _rtr_tx_err,
+                       _cmd_tx_cnt,
+                       _cmd_tx_err,
+                       _short_frame_cnt);
 }
 #endif  // HAL_LOGGING_ENABLED
 

@@ -74,6 +74,14 @@ extern mavlink_sys_icd_gcs_flcc_pmu_ctrl_echo_t         PMU_Ctrl_Echo;      // P
 // was 13.1 - 13.5 ms in SITL, so a tick count of 10 gave ~7.5 Hz.)
 #define PMUCAN_LOG_RATE_HZ          (10U)
 #define PMUCAN_LOG_INTERVAL_MS      (1000U / PMUCAN_LOG_RATE_HZ)
+
+// PMUC : the communication counters, on their own and much slower deadline.  They are
+// CUMULATIVE totals, so the useful reading is a difference between two records and the
+// rate only decides how finely a loss can be placed in time.  1 Hz puts it within a
+// second, which is finer than any of the conditions it describes - the PMU health
+// leaky bucket needs 100 ms of net failure and PMUCAN_FRAME_TIMEOUT_MS is 40 ms, but
+// both of those are already visible in TM3's FAIL field at 10 Hz.
+#define PMUCAN_COUNTER_LOG_MS       (1000U)
 #define PMUCAN_ONRUNNING_INTERVAL   (100U)      // 1Hz  state report
 
 // How long without a recognised PMU STATUS frame counts as one lost sample.  Checked at
@@ -190,6 +198,7 @@ public:
 
 #if HAL_LOGGING_ENABLED
     void log_status(void);                      // the TM11/TM12/TM13/TM3 dataflash set
+    void log_counters(void);                    // PMUC, the communication counters
 #endif
 
     // PNU-ISSUE(D7) / step 2c
@@ -297,6 +306,7 @@ private:
     uint8_t  PMU_Ctrl_Seq;
 
     uint32_t _next_log_ms;                      // deadline for the next log_status()
+    uint32_t _next_counter_log_ms;              // deadline for the next log_counters()
 
 };
 
