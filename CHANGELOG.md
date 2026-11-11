@@ -21,6 +21,122 @@ A feature exercised only in SITL is **not** hardware-verified. Entries say so ex
 
 ---
 
+## V5.1.26 - the CAN driver loop keeps time
+
+Two defects, both found while preparing the `PMU-004` impact analysis, both reproduced in
+SITL before being touched.
+
+### 1. `AP_PNU_CAN::loop()` was a fixed delay, not a fixed rate - `PMU-004`
+
+The loop slept for a whole period and *then* did its work, so one tick cost the period
+**plus** the body. Every rate in the driver is derived from the tick count, so every one of
+them was slow by the same factor - including rates the source files describe as
+ICD requirements.
+
+**Measured in SITL before the change**, at `CAN_D1_PNU_OPTS` 1, 3 and 7, 45 s per run, from
+a temporary per-tick log record that was removed before commit:
+
+| | Nominal | Measured before |
+|---|---|---|
+| driver tick, mean | 10.00 ms (100 Hz) | **13.09 - 13.53 ms (73.9 - 76.4 Hz)** |
+| driver tick, minimum ever seen | - | 10.83 ms. The loop could be late, never early |
+| PMU RTR and command, per id | 10 Hz (ICD) | **7.32 - 7.58 Hz** |
+| gimbal command, per axis | 100 Hz | **69.4 - 71.8 Hz** |
+| `PMUCAN_HEALTH_CHECK_TICKS` | 50 Hz | ~37 - 38 Hz |
+
+**The step 2c consequence is the one that mattered.** `PNU-ISSUE(D7)`'s engine Start
+interlock counts ten `ENGONOFF` rotations, which the source says is 1.0 s. Measured with
+`Tools/pnu/sitl_can/tc1_inject.py`, which sends the KGCS burst and watches `vcan0` for the
+resulting command on one clock:
+
+| | Start interlock | Stop interlock |
+|---|---|---|
+| before, n=4 and n=3 | **1.462 - 1.677 s** | 1.625 - 1.688 s |
+| after, n=4 and n=3 | **1.161 - 1.347 s** | 1.273 - 1.300 s |
+
+The KGCS Start burst is 14 messages at 10 Hz and therefore ends at about 1.4 s, so the
+interlock was completing **after the burst had already finished** - which is exactly the
+race the `D7` comment rejects a threshold of 14 for causing. The threshold of 10 was chosen
+to fire around message 10 of 14 with roughly 0.4 s of margin, and it had lost that margin.
+This change restores it; it does not invent it.
+
+**The fix** computes the next deadline and sleeps to it, so the body's own execution time
+comes out of the next sleep. **No constant is changed** - `PMUCAN_MSG_RATE_HZ`,
+`PMUCAN_SLOT_PERIOD_TICKS`, `PMUCAN_HEALTH_CHECK_TICKS`, `AP_PNUSAR_HEALTH_CHECK_TICKS` and
+`AP_PNUGIMBAL_CUBEMARS_CMD_DIVISOR` simply become true. A tick that overruns its period runs
+immediately and re-bases the deadline on *now*, so lateness is forgotten rather than
+accumulated. That is deliberately **not** a catch-up loop: repaying a stall with a burst of
+ticks would repay it with a burst of PMU commands at the moment the thread has shown it is
+already behind. Measured: the longest run of consecutive short ticks is **1, never 2**.
+
+**Measured in SITL after the change:**
+
+| | Before | After |
+|---|---|---|
+| driver tick, mean | 13.09 - 13.53 ms | **10.41 - 10.46 ms (95.6 - 96.1 Hz)** |
+| PMU RTR per id | 7.32 - 7.58 Hz | **9.49 - 9.54 Hz** |
+| gimbal command per axis | 69.4 - 71.8 Hz | **90.0 - 90.2 Hz** |
+| ticks over 20 ms | 4.2 - 5.2 % | **1.9 - 2.7 %** |
+| ticks over 50 ms, per 45 s run | 15 - 19 | **7 - 13** |
+
+**The residual 0.4 ms is SITL, not the algorithm.** `delay_microseconds()` on a non-main
+SITL thread spins on `usleep(1000)` until the *simulated* clock passes the target
+(`AP_HAL_SITL/SITL_State.cpp:118`), so it is quantised to the 0.833 ms FDM step and
+overshoots every request. Measured directly by logging the requested sleep beside the
+achieved one: the median overshoot is **+1.2 to +5.3 ms** across every request size, and the
+shortest sleep obtainable is 1.67 ms however little is asked for. ChibiOS has no such floor.
+This is why the numbers above are 95.8 Hz rather than 100 Hz, and it is also why they cannot
+be read as a prediction of the target.
+
+### 2. The `AP_Q30` scheduler task was out of priority order
+
+`AP_Scheduler::check_task_table()` requires the vehicle task table to be sorted by ascending
+priority. V5.1.25 inserted `AP_Q30` at priority 169 directly before `AP_Button` at 168, so
+every boot reported `Internal Errors 0x100000` and `PreArm: Internal errors 0x100000 l:161
+flow_of_ctrl` - **the aircraft could not arm**. Present in all three V5.1.25 camera-path
+SITL runs and absent from the two before them, which dates it to the `AP_Q30` commit
+exactly. Only the position of the two table entries changes; both keep their own priority,
+rate and budget.
+
+### Deliberately not changed
+
+- Every step 2c constant. `PMUCAN_TC1_STALE_MS` and `PMUCAN_STOP_WINDOW_MS` are `millis()`
+  based and were never affected.
+- `AP_PNUGimbal_Backend::advance_commanded()`, which divides the slew rate by
+  `AP_PNU_CAN_LOOP_HZ` rather than by the measured interval. The fix makes it accidentally
+  correct; it does not make it right. Tracked as `PNUCAN-001`.
+- `AP_PNUSAR_SNAPSHOT_MAX_AGE_MS`, widened from 50 ms to 100 ms in an earlier version to
+  absorb this loop's irregularity. The mean component is gone but the tail is not, and the
+  tail is SITL thread scheduling. Tracked as `PNUSAR-003`.
+- Every SAR and gimbal timeout, all of which are `millis()` based.
+
+### Verification
+
+SITL only, against the three fake CAN devices, at `CAN_D1_PNU_OPTS` 1, 3 and 7.
+
+| Area | Result |
+|---|---|
+| loop rate and jitter | mean 10.41 - 10.46 ms at all three `PNU_OPTS`; p99 29 - 33 ms; no catch-up burst longer than one tick |
+| PMU message rate | RTR and command per id 9.49 - 9.54 Hz, up from 7.32 - 7.58 |
+| PMU health | `Connected` at 1.10 s, `Communication Error` 1.06 s after the device went silent, `Connected` 1.14 s after it resumed - against 1.27 / 1.21 / 0.99 s on V5.1.25 |
+| step 2c, all five cases | `start-only` refused, `stop-start` starts, `stop` stops, `cut-start` does not start, `late-start` refused with `Stop 14s ago (max 10s)`. Identical verdicts to V5.1.25, only faster |
+| gimbal homing | roll 60.6 deg, pitch 60.6, yaw 40.5, each midpoint -0.1, `HOMING -> ALIGN -> RUN` at 39.9 s. Unchanged from V5.1.23 and V5.1.25 to the tenth of a degree |
+| gimbal feedback timeout | no spurious `feedback lost`; `--fb-mode periodic --fb-rate 50` reaches RUN as before |
+| SAR | `Stop -> 2`, `Start -> 3`, `Stop -> 2` with **100 bundles, 0 drop** (V5.1.25: 99 bundles, 0 drop); heartbeat loss to `Disconnected`; resume to `reconnected, inspection pending` |
+| DataFlash | `TM11` / `TM12` / `TM13` / `TM3` 9.98 - 10.00 Hz, `SARS` 0.99 - 1.02 Hz, `SARN` 10.00 Hz, `TC_R` 10.00 Hz, zero duplicates, with and without a GCS attached |
+| MAVLink | TM2 375 frames at 9.98 Hz with the same payload as V5.1.25; with `MNT1_TYPE 0`, zero TM2 frames and no `TC_R` |
+| Build | default SITL and `--disable-Camera`; `Tools/scripts/run_astyle.py --dry-run` clean |
+
+**Not verified: no hardware.** No pre-change measurement of the real tick period exists and
+none was taken - the FC and PMU are on a completed CAN harness and fitting an analyser would
+mean cutting into it. The SITL figures above must not be read as predictions of the target:
+the `select()` semantics differ between `AP_HAL_SITL` and `AP_HAL_ChibiOS`, which is
+precisely the mechanism that sets the loop rate on the aircraft. `PMU-004` stays **open**,
+reclassified as implemented and awaiting bench verification, with its remaining items listed
+there.
+
+---
+
 ## V5.1.25 - the flight log stops depending on who is watching
 
 **The defect.** Every PNU telemetry record - `TM11`, `TM12`, `TM13`, `SARS`, `TC_R` - was

@@ -117,6 +117,16 @@ recorded in `ISSUES.md`.
 
 ## 3. Current Development Version
 
+**V5.1.26** makes the CAN driver loop keep time. `AP_PNU_CAN::loop()` slept for a whole
+period and *then* did its work, so a tick cost the period plus the body - 13.1 to 13.5 ms in
+SITL against a nominal 10 ms. Every rate in the driver derives from that tick, so the PMU's
+ICD 10 Hz was really 7.5 Hz and the `D7` engine Start interlock, which the source says is
+1.0 s, measured 1.46 to 1.68 s - completing *after* the 1.4 s KGCS burst had ended. Sleeping
+to the next deadline fixes all of them at once without changing a single constant. It also
+fixes an `AP_Q30` scheduler entry left out of priority order in 5.1.25, which raised an
+internal error and **blocked arming** on every boot. See `CHANGELOG.md`. **`PMU-004` stays
+open**: the fix is SITL-verified and the target was never measured, before or after.
+
 **V5.1.25** stops the flight log depending on who is watching. Every PNU telemetry record -
 `TM11`, `TM12`, `TM13`, `SARS`, `TC_R` - used to be written inside the MAVLink send function
 that transmitted it, so with two ground stations attached every record was written **twice**,
@@ -218,6 +228,10 @@ evidence.**
 | **All three devices on one bus** at `PNU_OPTS = 7`, with the SAR observing and the gimbal homing | 2026-10-30, 2026-11-03 |
 | Every PNU log record at its stated rate with 0 duplicates, **both with a GCS attached and with none** - `TM11`/`TM12`/`TM13`/`TM3` at 9.95-10.00 Hz, `SARS` at 0.99-1.02 Hz plus every status transition, `TC_R` at 10.00 Hz | 2026-11-11 |
 | TM2 still transmitted at 9.98 Hz with a payload matching `TC_R`, and **not** transmitted with `MNT1_TYPE = 0` | 2026-11-11 |
+| Driver tick mean 10.41-10.46 ms at `PNU_OPTS` 1, 3 and 7, from 13.09-13.53 ms; no catch-up burst longer than one tick | 2026-11-11 |
+| PMU RTR and command 9.49-9.54 Hz per id, from 7.32-7.58; gimbal command 90.0-90.2 Hz per axis, from 69.4-71.8 | 2026-11-11 |
+| All five step 2c cases give the same verdicts as V5.1.25; Start interlock 1.161-1.347 s, from 1.462-1.677 s | 2026-11-11 |
+| Gimbal homing unchanged to the tenth of a degree (60.6 / 60.6 / 40.5, midpoints -0.1); SAR 100 bundles, 0 drops | 2026-11-11 |
 
 ### Verified by build and unit test only
 
@@ -245,7 +259,9 @@ Full detail in `ISSUES.md`.
 | `GIMBAL-004` | Seven things the CubeMars manual does not specify | the bench session |
 | `SAR-001` | `0x404` carries no measured attitude | step 3f, and Lumir's integration |
 | `GCS-002` | KGCS must send TC50 from a permitted system id | SAR commanding from the GCS |
-| `PMU-004` | The CAN driver tick runs long, so the PMU's ICD 10 Hz message rate is really ~7.5 Hz | nothing today - but it is an input to the step 2c timings |
+| `PMU-004` | The driver tick ran long. **Fixed in 5.1.26, SITL only** - the target was never measured | the bench session: CAN rates, step 2c timing, CPU, shared bus |
+| `PNUCAN-001` | The gimbal slew limiter divides by a nominal rate, not a measured one | nothing today - do it before the motors are first powered |
+| `PNUSAR-003` | `SNAPSHOT_MAX_AGE_MS` was widened to 100 ms to absorb `PMU-004` | nothing - re-measure on the bench |
 | `CAM-001` | The Viewpro tracking freeze can strand the operator | - |
 | `CAM-002` | Viewpro zoom maxima are hard-coded and unverified | - |
 | `D10`, `D11` | Camera routing and the MAVLink camera capability gap | KGCS work only; FC side complete |

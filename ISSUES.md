@@ -389,64 +389,120 @@ needs no firmware change; Mission Planner or pymavlink can send it.
 6. List the VIO's `PARAM_EXT` parameters and look for a zoom-level entry. **If one exists, KGCS
    can read it directly** over the routing path it already uses.
 
-## PMU-004 - the driver tick is slower than its nominal rate, so the PMU's ICD message rate is not 10 Hz
+## PMU-004 - the driver tick was slower than its nominal rate
 
 | | |
 |---|---|
-| **Status** | OPEN. Measured in SITL only; the bench number is unknown |
+| **Status** | **IMPLEMENTED IN V5.1.26, PENDING HARDWARE VERIFICATION.** The loop is fixed and verified in SITL. Nothing about the target is known |
 | **Component** | `libraries/AP_PNU_CAN/AP_PNU_CAN.cpp` `loop()`, and every tick-derived rate above it |
 | **Found** | 2026-11-11, while giving the V5.1.25 log records a 10 Hz interval |
-| **Blocks** | nothing today. It is a correctness question about an ICD rate, and an input to `PMU-002` and to the step 2c timings |
+| **Fixed** | 2026-11-11, V5.1.26, in SITL only |
+| **Related** | `PNUCAN-001`, `PNUSAR-003`, `PMU-001`, `PMU-002`, `PNU-ISSUE D7` |
 
-`AP_PNU_CAN::loop()` is
+**What it was.** `AP_PNU_CAN::loop()` slept for a whole period and *then* did its work, so
+one tick cost the period **plus** the body. Every rate in the CAN backends is derived from
+the tick count, so every one of them was slow by the same factor.
 
-```c
-const uint32_t period_us = 1000000UL / AP_PNU_CAN_LOOP_HZ;
-while (true) {
-    hal.scheduler->delay_microseconds(period_us);
-    ...
-}
-```
+**Measured in SITL before the fix**, `CAN_D1_PNU_OPTS` 1, 3 and 7, 45 s per run:
 
-That is a fixed **delay**, not a fixed **rate**: one tick lasts `period_us` *plus* however
-long the body took. Every rate in the CAN backends is derived from the tick count, so every
-one of them is correspondingly slow.
+| | Nominal | Before | After |
+|---|---|---|---|
+| driver tick, mean | 10.00 ms | 13.09 - 13.53 ms | 10.41 - 10.46 ms |
+| PMU RTR / command per id | 10 Hz (ICD) | 7.32 - 7.58 Hz | 9.49 - 9.54 Hz |
+| gimbal command per axis | 100 Hz | 69.4 - 71.8 Hz | 90.0 - 90.2 Hz |
+| D7 Start interlock | 1.0 s | 1.462 - 1.677 s | 1.161 - 1.347 s |
+| D7 Stop interlock | 1.0 s | 1.625 - 1.688 s | 1.273 - 1.300 s |
 
-**Measured in SITL:** a tick is about **12.3 ms**, not 10 ms. `PMUCAN_MSG_RATE_HZ` is
-documented as "the PMU's message rate is 10 Hz per message, and the ICD says so", and
-`PMUCAN_SLOT_PERIOD_TICKS` derives the slot rotation from it - but the observed rate is
-**about 7.5 Hz**. The fake PMU's own count agrees: 1700 RTRs answered across five ids in
-45.4 s is 7.5 Hz each. `PMUCAN_HEALTH_CHECK_TICKS`, documented as 50 Hz, is about 40 Hz.
+The step 2c effect is the one that mattered: the KGCS Start burst is 14 messages at 10 Hz
+and ends at about 1.4 s, so the interlock was completing **after the burst had already
+finished** - the race `D7` explicitly rejects a threshold of 14 for causing. The fix
+restores the intended margin rather than creating a new behaviour.
 
-The V5.1.25 log records avoid this by pacing on `millis()` instead of on the tick, which is
-why `PMUCAN_LOG_INTERVAL_MS` and `AP_PNUSAR_LOG_INTERVAL_MS` are times rather than counts.
-**Nothing else was changed.**
+**The fix.** Sleep to the next deadline, so the body's execution time comes out of the next
+sleep. **No tick constant was changed**; they became true. An overrun runs its tick
+immediately and re-bases the deadline on *now*, never accumulating and never repaying a
+stall with a burst - measured, the longest run of consecutive short ticks is 1.
 
-**Why it was not fixed here.** The engine interlock timings depend on this. `D7`'s counter
-reaches 10 at what the source says is 1.0 s and is really nearer 1.33 s. The bench measured
-the interlock at **~1 to 1.5 s against an expected ~1.2 s** (2026-10-19) - which is
-consistent with the hardware tick also running long, and means **the number PNU signed off
-on was measured with this effect present**. Correcting the loop to a true 100 Hz would
-shorten every one of those windows at once, including the Start interlock. That is a
-safety-relevant timing change and belongs to PNU, not to a logging commit.
+**Why SITL cannot close this.** Two reasons, and both are mechanism, not margin.
 
-**What to do.** On the bench, measure the real tick period on the target, then decide
-between three options, with PNU:
+1. `delay_microseconds()` on a non-main SITL thread spins on `usleep(1000)` until the
+   *simulated* clock passes the target (`AP_HAL_SITL/SITL_State.cpp:118`), so it is
+   quantised to the 0.833 ms FDM step and overshoots every request by 1.2 - 5.3 ms at the
+   median. The shortest sleep obtainable is 1.67 ms however little is asked for. That is the
+   whole of the residual 0.4 ms, and ChibiOS has no such floor.
+2. **`select()` behaves differently on the two HALs, and that is what sets the loop rate on
+   the aircraft.** `AP_HAL_SITL/CANSocketIface.cpp:262` always enters the semaphore wait and
+   always returns `true`. `AP_HAL_ChibiOS/CANFDIface.cpp:954` calls `checkAvailable()` first
+   and **returns immediately when a frame is already queued**, blocking only on an empty
+   FIFO and returning `false` on timeout. On the target the 2 ms
+   `AP_PNU_CAN_SELECT_TIMEOUT_US` is therefore paid only on ticks that find nothing waiting,
+   so the pre-fix loop rate was a function of **bus traffic**, which SITL cannot reproduce.
+   Whether the fix changes the target by 30 % or by 3 % depends entirely on that, and it is
+   unmeasured.
 
-1. Accept it and **restate the constants as what they actually produce**, so `PMUCAN_MSG_RATE_HZ`
-   stops claiming an ICD rate the firmware does not deliver.
-2. Make the loop a true fixed rate (compute the next deadline before the body, delay to it)
-   and **re-derive every tick-based constant**, including the two step 2c windows.
-3. Move the rates that matter onto `millis()` deadlines individually, as the log records
-   now are.
+**No pre-fix hardware measurement exists, and none was taken.** It was considered and
+declined on 2026-11-11: the FC and PMU are on a completed CAN harness and fitting an
+analyser would mean modifying the physical wiring. The decision to proceed on the structural
+argument alone was explicit. **Do not infer target timing from any figure above.**
 
-Option 1 is honest and changes no behaviour. Option 2 is correct and changes PMU command
-timing, engine interlock timing and health-check timing simultaneously - it must not be done
-without PNU re-measuring the interlock.
+**Required on the bench, before this is closed.**
 
-**Also check whether the PMU minds.** The ICD states 10 Hz; the device has been running
-against ~7.5 Hz throughout every bench session so far without complaint, which is evidence
-that it tolerates the slower rate but not that the rate is correct.
+1. **Actual CAN message rates.** `0x10000100` RTR frames per second, at `PNU_OPTS` 1, 3 and
+   7. `tick_rate = RTR_rate_per_id x 10`. The acceptance criterion is that the rate no
+   longer varies with `PNU_OPTS` - that was the real defect - not the absolute number.
+2. **Step 2c engine Start and Stop timing**, on the real PMU, with PNU present. This is the
+   sign-off item. PNU's 2026-10-19 figure (~1 to 1.5 s against an expected ~1.2 s) was
+   measured with the defect present, so it does not carry over.
+3. **CPU utilisation and stack headroom** for the `pnu_can` thread at the corrected rate.
+   `SCHED_DEBUG` plus thread stack high-water. Estimated under 3 % of a core from reading
+   the code; unmeasured.
+4. **Shared-bus operation at `PNU_OPTS` 7**, which has never been exercised on hardware at
+   all. Bus utilisation is estimated to rise from roughly 8.5 % to 10.7 % at 1 Mbit/s.
+5. **Whether the real PMU minds 10 Hz.** The ICD specifies it, but the device has run
+   against 7.5 - 9.5 Hz in every session so far, so compliance has never actually been
+   exercised.
+
+## PNUCAN-001 - `advance_commanded()` divides by a nominal rate, not a measured one
+
+| | |
+|---|---|
+| **Status** | OPEN. Harmless today, silently wrong again the moment the loop rate moves |
+| **Component** | `libraries/AP_PNUGimbal/AP_PNUGimbal_Backend.cpp`, `advance_commanded()` |
+| **Related** | `PMU-004`, `GIMBAL-002`, `RISK - no gimbal hardware has ever been connected` |
+
+The slew limiter computes its per-tick step as `_slew_rate_rads / float(AP_PNU_CAN_LOOP_HZ)`
+- a constant, not the elapsed interval. It is correct only if the loop actually runs at that
+rate. Before V5.1.26 it did not, so the realised limit was 0.70 - 0.72 of
+`CAN_Dn_PNU_SLEW` in SITL; `PMU-004` made it accidentally correct, and it did not make it
+right. Any future change to `AP_PNU_CAN_LOOP_HZ`, or any period of missed ticks, breaks it
+again with no symptom beyond a payload moving at the wrong speed.
+
+**Deliberately not fixed in V5.1.26**, which changed the loop and nothing else. The robust
+form measures the interval between calls.
+
+**Why it is worth doing before the motors are first powered.** The slew limit exists to stop
+a step target - the first mount target may be 25 degrees away - arriving at full stiffness
+on a bulky payload. No gimbal hardware has ever been connected, so there is no tuning to
+invalidate yet, and that will stop being true after the first bench session.
+
+## PNUSAR-003 - `AP_PNUSAR_SNAPSHOT_MAX_AGE_MS` was widened to work around `PMU-004`
+
+| | |
+|---|---|
+| **Status** | OPEN. Re-measure now that the loop is fixed; do not simply revert it |
+| **Component** | `libraries/AP_PNUSAR/AP_PNUSAR.h`, `AP_PNUSAR_Nav.cpp` `send_bundle()` |
+| **Related** | `PMU-004`, `SAR_ICD_PNU.md` 7.2 |
+
+The ICD-aligned value was 50 ms - one bundle interval. It was raised to 100 ms because SITL
+dropped 6 % of bundles at 50 ms, and the recorded reason was that "the driver thread's 10 ms
+loop is not that regular". That was `PMU-004`.
+
+The fix removes the **mean** component of the irregularity but not the **tail**: ticks over
+50 ms fell from 15 - 19 per 45 s run to 7 - 13, and the worst single tick is still over
+100 ms in SITL. Since that tail is SITL thread scheduling rather than the algorithm, the
+question cannot be settled here either - it needs the same bench session as `PMU-004`
+item 1. Measured at 100 ms after the fix: **100 bundles, 0 drops** over a 10 s observation,
+against 99 bundles and 0 drops on V5.1.25.
 
 ## GCS-002 - KGCS must send TC50 from a permitted system id
 
