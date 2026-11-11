@@ -272,38 +272,9 @@ void GCS_MAVLINK::send_message_gcs_flcc_pmu_status() const
             PMU_Status.Version_FLCC_REV_Number,
             PMU_Status.Version_REV_Number);
 
-#if HAL_LOGGING_ENABLED
-    AP::logger().Write("TM11", "TimeUS,HOURCNT,DATE,IBAT,TEMP,BSTS,RPM,TEMP1,TEMP2,GCMD", "QIIhhHHhhh",
-                       AP_HAL::micros64(),
-                       PMU_Status.Engine_Hour_Count,
-                       PMU_Status.Date,
-                       PMU_Status.Battery_Current,
-                       PMU_Status.Battery_Temp,
-                       PMU_Status.Battery_Status,
-                       PMU_Status.Engine_RPM,
-                       PMU_Status.Engine_Head1_Temp,
-                       PMU_Status.Engine_Head2_Temp,
-                       PMU_Status.Battery_Quantity_Command);
-
-    AP::logger().Write("TM12", "TimeUS,VBUS,ILD,ICMD,PTEMP,PSTS,PCL,GAS,MN,MJ", "QhhhhHbbbb",
-                       AP_HAL::micros64(),
-                       PMU_Status.System_Voltage,
-                       PMU_Status.Load_Current,
-                       PMU_Status.Current_Control_Command,
-                       PMU_Status.PMU_Temp,
-                       PMU_Status.PMU_Status,
-                       PMU_Status.Throttle_Position_Report,
-                       PMU_Status.Fuel_Quantity,
-                       PMU_Status.Version_Sub_Number,
-                       PMU_Status.Version_Main_Number);
-
-    AP::logger().Write("TM13", "TimeUS,FLMJ,FLMN,FLRV,PMRV", "Qbbbb",
-                       AP_HAL::micros64(),
-                       PMU_Status.Version_FLCC_Main_Number,
-                       PMU_Status.Version_FLCC_Sub_Number,
-                       PMU_Status.Version_FLCC_REV_Number,
-                       PMU_Status.Version_REV_Number);
-#endif
+    // The TM11/TM12/TM13 dataflash records are written by AP_PMUCAN::log_status(), on the
+    // driver thread at its own rate.  Writing them here made the log a side effect of
+    // telemetry: duplicated once per attached GCS, and absent entirely with none.
 }
 
 
@@ -322,6 +293,8 @@ void GCS_MAVLINK::send_message_gcs_flcc_pmu_ctrl_echo() const
             PMU_Ctrl_Echo.Componet_ID,
             PMU_Ctrl_Echo.PMUCAN_Fail,
             PMU_Ctrl_Echo.Reserved);
+
+    // The TM3 dataflash record is written by AP_PMUCAN::log_status(), beside TM11-TM13.
 }
 
 

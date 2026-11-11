@@ -59,6 +59,20 @@ extern mavlink_sys_icd_gcs_flcc_pmu_ctrl_echo_t         PMU_Ctrl_Echo;      // P
 #define PMUCAN_MSG_RATE_HZ          (10U)       // ICD, per message
 #define PMUCAN_SLOT_PERIOD_TICKS    (AP_PNU_CAN_LOOP_HZ / PMUCAN_MSG_RATE_HZ)
 #define PMUCAN_MAVLINK_INTERVAL     (10U)       // 10Hz GCS telemetry
+
+// PNU : the dataflash set has its OWN interval, deliberately NOT PMUCAN_MAVLINK_INTERVAL.
+// Until 5.1.25 the TM11/TM12/TM13/TM3 records were written inside the GCS send path, so
+// the flight log was a side effect of telemetry - two ground stations wrote every record
+// twice, none wrote nothing at all, and the rate followed the MAVLink scheduler rather
+// than the PMU.  Keeping the two intervals separate means a later change to the GCS rate
+// cannot silently change what the flight log contains.
+// It is paced on millis(), NOT on the tick counter the rest of this file uses.  The
+// driver loop delays a fixed period and then does its work, so a tick is longer than
+// 1/AP_PNU_CAN_LOOP_HZ by however long that work took - about 12.3 ms in SITL, giving
+// ~7.5 Hz where a tick count says 10.  See PMU-004.  A time deadline makes the log rate
+// mean what it says regardless of what the loop is doing.
+#define PMUCAN_LOG_RATE_HZ          (10U)
+#define PMUCAN_LOG_INTERVAL_MS      (1000U / PMUCAN_LOG_RATE_HZ)
 #define PMUCAN_ONRUNNING_INTERVAL   (100U)      // 1Hz  state report
 
 // How long without a recognised PMU STATUS frame counts as one lost sample.  Checked at
@@ -149,6 +163,10 @@ public:
     void engineonmode(void);
     void engineoffmode(void);
     void report_short_frame(uint32_t frame_id, uint8_t dlc);    // PNU-ISSUE(D6)
+
+#if HAL_LOGGING_ENABLED
+    void log_status(void);                      // the TM11/TM12/TM13/TM3 dataflash set
+#endif
 
     // PNU-ISSUE(D7) / step 2c
     void note_new_tc1(void);                    // timestamp a NEW TC1 and arm the Stop window
@@ -248,6 +266,8 @@ private:
     uint16_t PMUCAN_RcvrCnt;
 
     uint8_t  PMU_Ctrl_Seq;
+
+    uint32_t _next_log_ms;                      // deadline for the next log_status()
 
 };
 

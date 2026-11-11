@@ -24,6 +24,7 @@
 #include <AP_Scheduler/AP_Scheduler.h>
 #include <GCS_MAVLink/GCS.h>
 #include <AP_CANManager/AP_CANManager.h>
+#include <AP_Logger/AP_Logger.h>
 #include <AP_Math/AP_Math.h>
 #include <stdio.h>
 
@@ -50,6 +51,7 @@ AP_PMUCAN::AP_PMUCAN(AP_PNU_CAN &frontend) :
     _cmd_tx_err             = 0;
     _short_frame_cnt            = 0;
     _last_short_frame_warn_ms   = 0;
+    _next_log_ms                = 0;
 
 
     _engineonoffmode        = 0;                            // OFF
@@ -123,6 +125,11 @@ void AP_PMUCAN::update(uint32_t tick)
         check_health();
     }
 
+    // PNU : the echo's health field is PRODUCED here rather than inside send2gcs(), so
+    // that log_status() and the GCS can never report different values of it.  They run
+    // on separate intervals now and either can be reached first within a tick.
+    PMU_Ctrl_Echo.PMUCAN_Fail = PMUCAN_Fail_Status;
+
     // one of the five command/RTR slots per stride, so each message goes out at exactly
     // PMUCAN_MSG_RATE_HZ
     const uint32_t stride = PMUCAN_SLOT_PERIOD_TICKS / CMD_ID::CMD_ID_NUM;
@@ -138,7 +145,88 @@ void AP_PMUCAN::update(uint32_t tick)
     if ((tick % PMUCAN_ONRUNNING_INTERVAL) == 0) {      // nominal 1 Hz
         sendchanges();
     }
+
+#if HAL_LOGGING_ENABLED
+    log_status();                                       // self-paced, 10 Hz on millis()
+#endif
 }
+
+
+#if HAL_LOGGING_ENABLED
+// -------------------------------------------------------------------------
+// log_status : the PMU dataflash set, written from the driver thread
+// -------------------------------------------------------------------------
+// These four records used to be written inside GCS_PNU.cpp's TM1 and TM3 senders, which
+// made the flight log a side effect of telemetry.  Measured in SITL before the move: with
+// two ground stations attached TM3 arrived at 24 Hz against a 10 Hz driver, half of it
+// duplicate records under 5 ms apart; with none attached NOT ONE record was written,
+// although the logger was up and recording 64,629 other messages.  An aircraft that flew
+// with its link down kept no PMU history at all.
+//
+// Record names, field names, formats and field order are UNCHANGED from the GCS_PNU.cpp
+// versions - existing log analysis and KGCS tooling read them by name.
+// -------------------------------------------------------------------------
+void AP_PMUCAN::log_status(void)
+{
+    // Paced on the clock rather than on the tick, so the record rate is what the define
+    // says even when the driver loop runs long - see PMUCAN_LOG_INTERVAL_MS.  Advancing
+    // the deadline by a whole interval keeps the AVERAGE rate exact; resynchronising when
+    // we are already past the next one stops a stall being chased with a burst.
+    const uint32_t now_ms = AP_HAL::millis();
+    if ((int32_t)(now_ms - _next_log_ms) < 0) {
+        return;
+    }
+    _next_log_ms += PMUCAN_LOG_INTERVAL_MS;
+    if ((int32_t)(now_ms - _next_log_ms) >= 0) {
+        _next_log_ms = now_ms + PMUCAN_LOG_INTERVAL_MS;
+    }
+
+    const uint64_t now_us = AP_HAL::micros64();
+
+    AP::logger().Write("TM11", "TimeUS,HOURCNT,DATE,IBAT,TEMP,BSTS,RPM,TEMP1,TEMP2,GCMD", "QIIhhHHhhh",
+                       now_us,
+                       PMU_Status.Engine_Hour_Count,
+                       PMU_Status.Date,
+                       PMU_Status.Battery_Current,
+                       PMU_Status.Battery_Temp,
+                       PMU_Status.Battery_Status,
+                       PMU_Status.Engine_RPM,
+                       PMU_Status.Engine_Head1_Temp,
+                       PMU_Status.Engine_Head2_Temp,
+                       PMU_Status.Battery_Quantity_Command);
+
+    AP::logger().Write("TM12", "TimeUS,VBUS,ILD,ICMD,PTEMP,PSTS,PCL,GAS,MN,MJ", "QhhhhHbbbb",
+                       now_us,
+                       PMU_Status.System_Voltage,
+                       PMU_Status.Load_Current,
+                       PMU_Status.Current_Control_Command,
+                       PMU_Status.PMU_Temp,
+                       PMU_Status.PMU_Status,
+                       PMU_Status.Throttle_Position_Report,
+                       PMU_Status.Fuel_Quantity,
+                       PMU_Status.Version_Sub_Number,
+                       PMU_Status.Version_Main_Number);
+
+    AP::logger().Write("TM13", "TimeUS,FLMJ,FLMN,FLRV,PMRV", "Qbbbb",
+                       now_us,
+                       PMU_Status.Version_FLCC_Main_Number,
+                       PMU_Status.Version_FLCC_Sub_Number,
+                       PMU_Status.Version_FLCC_REV_Number,
+                       PMU_Status.Version_REV_Number);
+
+    // Componet_ID and Reserved are omitted: nothing in the tree writes either, so both
+    // would log a constant zero.  The five command fields keep TC1's names so commanded
+    // and echoed values line up column for column.
+    AP::logger().Write("TM3", "TimeUS,EGOF,BCTC,EGM,ETRC,ECHK,FAIL", "QBBBBBB",
+                       now_us,
+                       PMU_Ctrl_Echo.Engine_OnOff_Echo,
+                       PMU_Ctrl_Echo.Battery_Control_CMD_Echo,
+                       PMU_Ctrl_Echo.Engine_Manual_Echo,
+                       PMU_Ctrl_Echo.Engine_Throttle_CMD_Echo,
+                       PMU_Ctrl_Echo.Engine_CHK_CMD_Echo,
+                       PMU_Ctrl_Echo.PMUCAN_Fail);
+}
+#endif  // HAL_LOGGING_ENABLED
 
 
 // -------------------------------------------------------------------------
@@ -193,8 +281,7 @@ bool AP_PMUCAN::healthy(void) const
 // -------------------------------------------------------------------------
 void AP_PMUCAN::send2gcs()
 {
-    // Update PMU Failsafe Status
-    PMU_Ctrl_Echo.PMUCAN_Fail = PMUCAN_Fail_Status;
+    // PMU_Ctrl_Echo.PMUCAN_Fail is set by update(), before either consumer runs.
 
     // Send Message
     gcs().send_message(MSG_PMU_STATUS);         // Send PMU Status to GCS with Mavlink Message
