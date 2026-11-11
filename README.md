@@ -117,6 +117,14 @@ recorded in `ISSUES.md`.
 
 ## 3. Current Development Version
 
+**V5.1.25** stops the flight log depending on who is watching. Every PNU telemetry record -
+`TM11`, `TM12`, `TM13`, `SARS`, `TC_R` - used to be written inside the MAVLink send function
+that transmitted it, so with two ground stations attached every record was written **twice**,
+and with none attached **nothing was written at all**: an aircraft flying with its link down
+kept no PMU and no SAR history. Each record now comes from the subsystem that produces the
+data, on its own clock. `TM3` is logged for the first time. See `CHANGELOG.md`, and `PMU-004`
+for the driver-tick finding that came out of it.
+
 **V5.1.24** makes the SAR navigation bundle observable: a `SARN` dataflash record per snapshot,
 drop counters split by cause, the last CAN TX error code, and a session summary statustext on
 every Stop. Until it, a session that worked perfectly said nothing on the FC side - see
@@ -133,7 +141,8 @@ no message to say why. Wrong since 5.1.13. See `CHANGELOG.md`.
 | PMU | Full telemetry, commands, prearm, in-flight failsafe, engine-start interlock with two guards. **Bench-verified** except the shared bus and Stop-command timing |
 | Gimbal | Mount backend, lifecycle state machine, Appendix 1 homing, per-axis direction parameters. **SITL only - no motor has ever turned** |
 | SAR | Connection layer, both MAVLink messages, the command layer with the Start interlock, the 10 Hz navigation bundle with automatic termination, and `SARN` bundle accounting. **SITL only - no SAR hardware** |
-| Camera | Viewpro via the KGCS TC2/TM2 interface; Gremsy VIO via standard MAVLink with four functions GCS-direct. **Bench-verified on both** |
+| Camera | Viewpro via the KGCS TC2/TM2 interface; Gremsy VIO via standard MAVLink with four functions GCS-direct. **Bench-verified on both**, though the TM2 producer moved to `AP_Q30::update()` in 5.1.25 and that move is SITL-verified only |
+| Logging | Every PNU telemetry record is written by the subsystem that produces it, at a rate independent of how many ground stations are attached. **SITL only** |
 
 ---
 
@@ -207,6 +216,8 @@ evidence.**
 | The 10 Hz navigation bundle at **9.99 Hz** with `ATT_Seq` 1:1 and no gaps; three automatic terminations | 2026-10-30 |
 | The Appendix 1 homing sequence end to end | 2026-10-30 |
 | **All three devices on one bus** at `PNU_OPTS = 7`, with the SAR observing and the gimbal homing | 2026-10-30, 2026-11-03 |
+| Every PNU log record at its stated rate with 0 duplicates, **both with a GCS attached and with none** - `TM11`/`TM12`/`TM13`/`TM3` at 9.95-10.00 Hz, `SARS` at 0.99-1.02 Hz plus every status transition, `TC_R` at 10.00 Hz | 2026-11-11 |
+| TM2 still transmitted at 9.98 Hz with a payload matching `TC_R`, and **not** transmitted with `MNT1_TYPE = 0` | 2026-11-11 |
 
 ### Verified by build and unit test only
 
@@ -234,6 +245,7 @@ Full detail in `ISSUES.md`.
 | `GIMBAL-004` | Seven things the CubeMars manual does not specify | the bench session |
 | `SAR-001` | `0x404` carries no measured attitude | step 3f, and Lumir's integration |
 | `GCS-002` | KGCS must send TC50 from a permitted system id | SAR commanding from the GCS |
+| `PMU-004` | The CAN driver tick runs long, so the PMU's ICD 10 Hz message rate is really ~7.5 Hz | nothing today - but it is an input to the step 2c timings |
 | `CAM-001` | The Viewpro tracking freeze can strand the operator | - |
 | `CAM-002` | Viewpro zoom maxima are hard-coded and unverified | - |
 | `D10`, `D11` | Camera routing and the MAVLink camera capability gap | KGCS work only; FC side complete |

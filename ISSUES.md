@@ -389,6 +389,65 @@ needs no firmware change; Mission Planner or pymavlink can send it.
 6. List the VIO's `PARAM_EXT` parameters and look for a zoom-level entry. **If one exists, KGCS
    can read it directly** over the routing path it already uses.
 
+## PMU-004 - the driver tick is slower than its nominal rate, so the PMU's ICD message rate is not 10 Hz
+
+| | |
+|---|---|
+| **Status** | OPEN. Measured in SITL only; the bench number is unknown |
+| **Component** | `libraries/AP_PNU_CAN/AP_PNU_CAN.cpp` `loop()`, and every tick-derived rate above it |
+| **Found** | 2026-11-11, while giving the V5.1.25 log records a 10 Hz interval |
+| **Blocks** | nothing today. It is a correctness question about an ICD rate, and an input to `PMU-002` and to the step 2c timings |
+
+`AP_PNU_CAN::loop()` is
+
+```c
+const uint32_t period_us = 1000000UL / AP_PNU_CAN_LOOP_HZ;
+while (true) {
+    hal.scheduler->delay_microseconds(period_us);
+    ...
+}
+```
+
+That is a fixed **delay**, not a fixed **rate**: one tick lasts `period_us` *plus* however
+long the body took. Every rate in the CAN backends is derived from the tick count, so every
+one of them is correspondingly slow.
+
+**Measured in SITL:** a tick is about **12.3 ms**, not 10 ms. `PMUCAN_MSG_RATE_HZ` is
+documented as "the PMU's message rate is 10 Hz per message, and the ICD says so", and
+`PMUCAN_SLOT_PERIOD_TICKS` derives the slot rotation from it - but the observed rate is
+**about 7.5 Hz**. The fake PMU's own count agrees: 1700 RTRs answered across five ids in
+45.4 s is 7.5 Hz each. `PMUCAN_HEALTH_CHECK_TICKS`, documented as 50 Hz, is about 40 Hz.
+
+The V5.1.25 log records avoid this by pacing on `millis()` instead of on the tick, which is
+why `PMUCAN_LOG_INTERVAL_MS` and `AP_PNUSAR_LOG_INTERVAL_MS` are times rather than counts.
+**Nothing else was changed.**
+
+**Why it was not fixed here.** The engine interlock timings depend on this. `D7`'s counter
+reaches 10 at what the source says is 1.0 s and is really nearer 1.33 s. The bench measured
+the interlock at **~1 to 1.5 s against an expected ~1.2 s** (2026-10-19) - which is
+consistent with the hardware tick also running long, and means **the number PNU signed off
+on was measured with this effect present**. Correcting the loop to a true 100 Hz would
+shorten every one of those windows at once, including the Start interlock. That is a
+safety-relevant timing change and belongs to PNU, not to a logging commit.
+
+**What to do.** On the bench, measure the real tick period on the target, then decide
+between three options, with PNU:
+
+1. Accept it and **restate the constants as what they actually produce**, so `PMUCAN_MSG_RATE_HZ`
+   stops claiming an ICD rate the firmware does not deliver.
+2. Make the loop a true fixed rate (compute the next deadline before the body, delay to it)
+   and **re-derive every tick-based constant**, including the two step 2c windows.
+3. Move the rates that matter onto `millis()` deadlines individually, as the log records
+   now are.
+
+Option 1 is honest and changes no behaviour. Option 2 is correct and changes PMU command
+timing, engine interlock timing and health-check timing simultaneously - it must not be done
+without PNU re-measuring the interlock.
+
+**Also check whether the PMU minds.** The ICD states 10 Hz; the device has been running
+against ~7.5 Hz throughout every bench session so far without complaint, which is evidence
+that it tolerates the slower rate but not that the rate is correct.
+
 ## GCS-002 - KGCS must send TC50 from a permitted system id
 
 | | |
@@ -471,7 +530,9 @@ D6's own `_short_frame_cnt` was deliberately not added in that style: it is repo
 because a rejection nobody sees is the same silence D6 set out to remove.
 
 Either surface the existing five - a `PMUC` log message alongside the `TM1x` ones would be the
-natural place, since `AP_PMUCAN` does no logging at all today - or delete them. **`_rtr_tx_err`
+natural place, and **V5.1.25 made that easy: `AP_PMUCAN::log_status()` already writes
+`TM11`, `TM12`, `TM13` and `TM3` from the driver thread on a `millis()` interval, so a fifth
+record is a few lines in a function that exists** - or delete them. **`_rtr_tx_err`
 and `_cmd_tx_err` are the two with real diagnostic value**: they count CAN send failures, which
 is exactly what you would want when chasing an intermittent PMU link, and the D7 send-result fix
 now depends on `_cmd_tx_err` for diagnosis.

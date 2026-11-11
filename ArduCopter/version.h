@@ -7,7 +7,7 @@
 #include "ap_version.h"
 
 // PNU : This is a custom code modified by PNU Drone
-#define THISFIRMWARE "PNU_OFP V5.1.24"
+#define THISFIRMWARE "PNU_OFP V5.1.25"
 
 // RELEASE NOTES LIVE IN CHANGELOG.md, in the repository root, newest first.  They are
 // deliberately NOT duplicated here: two copies of the same history drifted once already -
@@ -31,11 +31,11 @@
 // must stay in step with the three defines below (static_assert in Copter.cpp, D4).
 
 // the following line is parsed by the autotest scripts
-#define FIRMWARE_VERSION 5,1,24,FIRMWARE_VERSION_TYPE_DEV
+#define FIRMWARE_VERSION 5,1,25,FIRMWARE_VERSION_TYPE_DEV
 
 #define FW_MAJOR 5
 #define FW_MINOR 1
-#define FW_PATCH 24
+#define FW_PATCH 25
 #define FW_TYPE FIRMWARE_VERSION_TYPE_DEV
 
 #include <AP_Common/AP_FWVersionDefine.h>

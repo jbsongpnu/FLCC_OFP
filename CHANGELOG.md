@@ -21,6 +21,108 @@ A feature exercised only in SITL is **not** hardware-verified. Entries say so ex
 
 ---
 
+## V5.1.25 - the flight log stops depending on who is watching
+
+**The defect.** Every PNU telemetry record - `TM11`, `TM12`, `TM13`, `SARS`, `TC_R` - was
+written inside the MAVLink *send* function that transmitted the corresponding message. The
+dataflash was therefore a side effect of telemetry, with three consequences, all measured
+in SITL on the V5.1.24 code:
+
+| Configuration | What the log contained |
+|---|---|
+| Two ground stations attached | **Every record written twice.** `TM3` at 15 Hz against a 10 Hz driver, 327 of 653 inter-record gaps under 5 ms. `SARS` worse: 440 of 662 records were duplicates |
+| No ground station attached | **Nothing at all.** Not one `TM11`, `TM12`, `TM13` or `SARS` record, although the logger was up and holding 64,629 other messages in a 2.6 MB log |
+| One ground station attached | Rate set by the MAVLink scheduler, not by the data source |
+
+An aircraft flying with its telemetry link down kept **no PMU and no SAR history
+whatsoever**, and a lost link is when that history is most wanted.
+
+**The principle applied:** log where the data is produced, not where it is transmitted.
+
+**Changes**
+
+- **`AP_PMUCAN::log_status()`** writes `TM11`, `TM12`, `TM13` and `TM3` from the CAN driver
+  thread at 10 Hz, on its own interval rather than the telemetry one, so a later change to
+  the GCS rate cannot silently change what the flight log contains.
+- **`TM3` is logged for the first time.** `PMU_Ctrl_Echo` was sent to the GCS and never
+  recorded, so `PMUCAN_Fail` - the state gating `AP_Arming_Copter::pmucan_checks()` and the
+  in-flight failsafe - appeared in the log only as the single `LOGGER_WRITE_ERROR` edge it
+  eventually crossed. The leaky bucket behind it was invisible. Fields:
+  `TimeUS, EGOF, BCTC, EGM, ETRC, ECHK, FAIL`, the five command names taken from `TC1` so
+  commanded and echoed values line up column for column. `Componet_ID` and `Reserved` are
+  omitted - nothing in the tree writes either, so both would log a constant zero.
+- **`PMU_Ctrl_Echo.PMUCAN_Fail` moves from `send2gcs()` to `update()`**, so the log and the
+  GCS cannot report different values of it.
+- **`AP_PNUSAR::log_status()`** writes `SARS` from the SAR backend at **1 Hz, plus
+  immediately on any status change**. It previously rode the 5 Hz TM50 send while
+  `Live_Counter` advances at the 1 Hz heartbeat, so four records in five repeated the
+  previous one. The change test is made in `log_status()` polled from the driver tick, not
+  in `publish_state()`: that function is reached from both the driver thread and the
+  vehicle thread, so logging there would need its own locking, while polling the published
+  value from the driver's own tick cannot race and costs at most one tick of latency.
+- **`AP_Q30::update()`**, a new Copter scheduler task at 10 Hz, produces the TM2 payload
+  and writes `TC_R`. `GCS_MAVLINK::send_message_gcs_flcc_cam_status()` was declared `const`
+  but wrote all ten `CAM_ATTITUDE_STATUS` fields, wrote the zoom edge latch and could emit
+  a statustext - a producer with a send at the end. It ran once per attached ground
+  station, so the mount attitude and the camera zoom were queried twice per cycle with two
+  attached. The sender now only copies and sends.
+- `prev_zoom_unavailable` moves from `GCS` to `AP_Q30`, and `PNU_CAM_ZOOM_GRACE_MS` becomes
+  `AP_Q30_ZOOM_GRACE_MS`. The `D10` edge belongs to the camera, not to a MAVLink channel;
+  evaluating it per channel meant whichever channel ran first consumed the edge for the
+  others.
+
+**Logging is paced on `millis()`, not on the driver tick.** `AP_PNU_CAN::loop()` delays a
+fixed period and *then* does its work, so one tick is longer than `1/AP_PNU_CAN_LOOP_HZ` by
+however long that work took - about 12.3 ms in SITL. A tick-based interval of 10 produced
+**7.5 Hz, not 10**. The first attempt at this change used the tick count and measured
+7.46 Hz; a time deadline gives 9.95 to 10.00 Hz. The same effect applies to the PMU's own
+ICD message rate and is **not** addressed here - see `PMU-004`.
+
+**What is deliberately unchanged**
+
+- Record names, field names, formats, field order, units and data types - existing log
+  analysis and KGCS tooling read these by name.
+- All MAVLink TC and TM message formats and behaviour, including TM2's values and the
+  decision not to send it when no mount is configured.
+- The command-reception records `TC1`, `TC_C`, `CM_C` and `SARC`. These are **event**
+  records written in the receive handler, and the event *is* the message arrival - once,
+  on one channel. They have no rate coupling and no duplication, and were already correct.
+- `SARN`, untouched.
+
+**Verification - SITL**, three fake CAN devices on `vcan0` at `CAN_D1_PNU_OPTS = 7`:
+
+| Record | With a GCS | With no GCS | Duplicates |
+|---|---|---|---|
+| `TM11` `TM12` `TM13` `TM3` | 9.95 Hz, median gap 99.1 ms | 10.00 Hz, median gap 98.3 ms | 0 |
+| `SARS` | 1.02 Hz | 0.99 Hz | 0 |
+| `TC_R` | 10.00 Hz, median gap 100.0 ms | 10.00 Hz, median gap 100.0 ms | 0 |
+| `SARN` | 10.00 Hz, unchanged | - | 0 |
+
+- **`TM3` content.** `FAIL` 0 -> 1 at 12.21 s when the fake PMU stopped answering RTRs and
+  back to 0 at 26.12 s, both about a second ahead of the 1 Hz `[PMU]` statustext. Three
+  `TC1` commands echoed into `TM3` within 35 to 130 ms; the two-step settle is the command
+  slot rotation, not a defect.
+- **`SARS` transitions.** All five captured - Ready 1 at 2.83 s, Stopped 2 at 12.13 s,
+  Started 3 at 18.15 s, Stopped 2 at 28.15 s, Disconnected 0 at 36.81 s - each written 185
+  to 996 ms ahead of the periodic slot it would otherwise have waited for. After the
+  heartbeat resumed, `SARS` shows `Live_Counter` advancing 36 to 45 while `STAT` holds at
+  0, which is `_recovery_pending` behaving as designed.
+- **TM2 still transmits.** 375 frames on the wire at 9.98 Hz, payload `Pitch_REL_ANG` and
+  `Pitch_IMU_ANG` 349 to 350, matching `TC_R`'s `PRLA` and `PIMA` over the same run.
+- **Mount-absent behaviour preserved.** With `MNT1_TYPE = 0`: **0** TM2 frames on the wire
+  and **no** `TC_R` records, while the PMU records kept flowing at 10.00 Hz.
+
+**Verification - build.** Clean with the default SITL configuration and with
+`--disable-Camera`, which clears `AP_Q30_ENABLED` and removes the new scheduler entry.
+`astyle` reports nothing.
+
+**Not verified.** No hardware. The rates above are SITL, where the CAN driver loop is
+slower than on the target, so **the absolute `Hz` figures should be re-measured on the
+bench** - what the bench must confirm is that the record rates are now independent of how
+many ground stations are attached, which is the property this version adds.
+
+---
+
 ## V5.1.24 - the SAR navigation bundle becomes observable
 
 **Changes**
