@@ -219,6 +219,11 @@ void AP_PNUGimbal_Backend::set_state(State state, const char *reason)
         break;
 
     case State::RUN:
+        // The slew limiter measures the interval between its own calls and only runs in
+        // RUN, so on entry there is no previous call to measure from.  Saying so here
+        // costs one step at the nominal rate instead of one step sized by however long
+        // the mount spent in HOMING.  See advance_commanded().
+        _slew_last_valid = false;
         break;
     }
 }
@@ -428,9 +433,34 @@ bool AP_PNUGimbal_Backend::get_feedback(uint8_t axis, AP_PNUGimbal_Feedback &fee
 // payload to move.  One mechanism, and cheaper than ramping stiffness.
 void AP_PNUGimbal_Backend::advance_commanded(void)
 {
-    const float max_step_rad = (_slew_rate_rads > 0.0f)
-                               ? _slew_rate_rads / float(AP_PNU_CAN_LOOP_HZ)
-                               : 0.0f;
+    // THE INTERVAL IS MEASURED, NOT ASSUMED.  Until 5.1.27 the step was
+    // _slew_rate_rads / AP_PNU_CAN_LOOP_HZ, which is the step CAN_Dn_PNU_SLEW means only
+    // if the driver thread really achieves that rate.  Before 5.1.26 it did not, and the
+    // realised limit was 0.70 - 0.72 of the parameter; fixing the loop made this
+    // arithmetic accidentally right rather than right, and any future change to the loop
+    // rate - or any run of missed ticks - would break it again with no symptom beyond a
+    // payload moving at the wrong speed.  PNUCAN-001.
+    const uint32_t now_us = AP_HAL::micros();
+
+    // Unsigned throughout, so micros() wrapping at 71 minutes still yields the true
+    // interval.  See AP_PNUGIMBAL_SLEW_DT_* for why there is a floor case and a clamp.
+    uint32_t dt_us = AP_PNUGIMBAL_SLEW_DT_NOM_US;
+    if (_slew_last_valid) {
+        dt_us = MIN(now_us - _slew_last_us, (uint32_t)AP_PNUGIMBAL_SLEW_DT_MAX_US);
+    }
+    _slew_last_us = now_us;
+    _slew_last_valid = true;
+
+    // ZERO SLEW RATE AND ZERO ELAPSED TIME BOTH GIVE A ZERO STEP, AND THEY MEAN OPPOSITE
+    // THINGS: the first is CAN_Dn_PNU_SLEW = 0, no limit at all; the second is that no
+    // time has passed, so nothing may move yet.  They are kept apart here because
+    // conflating them is not a rounding error - it lets the target through whole.  SITL
+    // hands out the same micros() twice when a tick overruns, and a build that tested
+    // only max_step_rad passed a 43 degree target in a single tick on five ticks of a
+    // 33 second run.  Measured 2026-11-11, before this guard existed.
+    const bool slew_limited = (_slew_rate_rads > 0.0f);
+    const float max_step_rad = slew_limited ? _slew_rate_rads * (float(dt_us) * 1.0e-6f)
+                                            : 0.0f;
 
     for (uint8_t axis = 0; axis < AP_PNUGIMBAL_NUM_AXES; axis++) {
         AxisState &state = _axis[axis];
@@ -443,7 +473,7 @@ void AP_PNUGimbal_Backend::advance_commanded(void)
         const float held_angle = state.commanded.position_rad;
         state.commanded = state.target;
 
-        if (max_step_rad > 0.0f) {
+        if (slew_limited) {
             const float err = state.target.position_rad - held_angle;
             state.commanded.position_rad = held_angle + constrain_float(err, -max_step_rad,
                                                                         max_step_rad);

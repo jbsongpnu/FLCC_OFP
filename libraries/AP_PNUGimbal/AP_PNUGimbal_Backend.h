@@ -35,6 +35,24 @@
 // How long INIT waits for every axis to come up enabled before giving up.
 #define AP_PNUGIMBAL_INIT_TIMEOUT_MS (5000U)
 
+// SLEW LIMITER TIMING.  advance_commanded() measures the interval between its own calls
+// rather than assuming AP_PNU_CAN_LOOP_HZ, so that CAN_Dn_PNU_SLEW means degrees per
+// second whatever the driver thread is actually doing - PNUCAN-001.  Two bounds are
+// needed around that measurement:
+//
+//   - the FIRST call after entering RUN has no previous call to measure an interval
+//     from, so it uses the NOMINAL period.  That is what every call used before 5.1.27,
+//     so it cannot be larger than an ordinary step;
+//   - a measured interval is CLAMPED.  A thread that has been held off for a second must
+//     not be allowed to repay the whole second in one command step: this limit exists to
+//     bound how fast anything can tell a bulky payload to move, and a late loop is not a
+//     reason to move it faster.  Clamping makes the mount LAG its target after a stall,
+//     which is the safe direction to be wrong in.  Five nominal periods - longer than all
+//     but a handful of the ticks seen in a SITL run, short enough that the largest step a
+//     stall can produce is still only five ordinary ones.
+#define AP_PNUGIMBAL_SLEW_DT_NOM_US  (1000000UL / AP_PNU_CAN_LOOP_HZ)
+#define AP_PNUGIMBAL_SLEW_DT_MAX_US  (5UL * AP_PNUGIMBAL_SLEW_DT_NOM_US)
+
 // HOMING: how far an axis backs off between the first approach to an endpoint and the
 // reconfirm approach, as a fraction of that axis' nominal travel.  Derived rather than a
 // parameter so it scales with the axis - 2% is 1.2 degrees on a 60 degree axis and 0.8 on
@@ -274,6 +292,8 @@ private:
     float _homing_reconfirm_tol_rad = 0.0f;
 
     float _slew_rate_rads = 0.0f;        // 0 means no limit
+    uint32_t _slew_last_us = 0;          // advance_commanded()'s previous call
+    bool _slew_last_valid = false;       // false until there is an interval to measure
 
     uint32_t _rejected_target_cnt = 0;
     uint32_t _last_rejected_target_warn_ms = 0;
