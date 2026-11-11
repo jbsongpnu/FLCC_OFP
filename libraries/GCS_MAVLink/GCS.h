@@ -1269,7 +1269,6 @@ public:
     uint32_t SAR_Ctrl_reject_ms;                                                            // PNU : rate limit for the TC50 wrong-source warning
     uint8_t prev_Ctrl_OA_Mode = 4;
     bool prev_prx_failed;                                                                   // PNU : latches the proximity healthy/failed edge for the TM5 warning (D12)
-    bool prev_zoom_unavailable = false;                                                     // PNU : latches the TM2 zoom available/unavailable edge (D10).  false at boot, so the first unavailable report past the grace period is an edge and is announced
 
     void update_send();
     void update_receive();

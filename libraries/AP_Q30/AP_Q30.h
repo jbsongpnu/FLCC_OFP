@@ -20,6 +20,17 @@
 
 #if AP_Q30_ENABLED
 
+// PNU : rate for AP_Q30::update(), which produces TM2's payload and logs TC_R.  10 Hz is
+// the rate KGCS streams TM2 at, so the payload is no staler than it was when the sender
+// built it.
+#define AP_Q30_UPDATE_RATE_HZ   (10)
+
+// PNU-ISSUE(D10) : a working Viewpro reports zoom only once the gimbal's first telemetry
+// frame arrives, so evaluating the unavailable edge from boot would warn on every startup
+// and immediately recover.  Past this, still-unavailable means the mount genuinely does
+// not report zoom.
+#define AP_Q30_ZOOM_GRACE_MS    (10000U)
+
 // PNU-ISSUE(D14) : these live in AP_Q30.cpp and are read by GCS_PNU.cpp.  Declared
 // here, and included by the defining .cpp, so the compiler checks declaration against
 // definition - a hand-written extern elsewhere would not be checked, and a type change
@@ -70,6 +81,13 @@ public:
     // Removed : void send_cmd_shutter(uint8_t shutter);                                             // Send "set shutter" Command to CAM (KAL)
     void send_cmd_hold_angle(void);                                                     // Send "Hold angle" Command to CAM (KAL)
 
+    // PNU : produce CAM_ATTITUDE_STATUS and write the TC_R dataflash record.  Scheduled
+    // by the vehicle at AP_Q30_UPDATE_RATE_HZ.  Until 5.1.25 this work lived inside
+    // GCS_MAVLINK::send_message_gcs_flcc_cam_status(), which meant the TM2 payload was
+    // recomputed once per attached ground station and TC_R was written once per attached
+    // ground station - and neither happened at all when none was attached.
+    void update(void);
+
     // Removed : void get_cmd_angle() const;                                                         // Send "get_angle" Command to CAM (KAL)
     // Removed : void get_cmd_zoom() const;                                                          // Send "get_zoom" Command to CAM (KAL)
 
@@ -115,6 +133,12 @@ private:
     // because KGCS streams TC2 at ~10 Hz, so an unsupported command fails on every tick -
     // the first failure is always reported, as for the D6 PMU short-frame message.
     void report_cam_unsupported(const char *what);
+
+    // PNU-ISSUE(D10) : latches the TM2 zoom available/unavailable edge.  It moved here
+    // from GCS when update() took over producing the payload: the edge belongs to the
+    // camera, not to a MAVLink channel, and evaluating it per channel meant whichever
+    // channel ran first consumed the edge for the others.
+    bool _prev_zoom_unavailable;
 
     // PNU-ISSUE(D10) : wraps AP_Camera::set_camera_source(), which only exists when
     // AP_CAMERA_SET_CAMERA_SOURCE_ENABLED is set - and that resolves to

@@ -289,6 +289,13 @@ const AP_Scheduler::Task Copter::scheduler_tasks[] = {
     // AP_GPS::update(), so one bundle is built from one consistent GPS sample - see
     // AP_PNUSAR.h.  The CAN driver thread only transmits what this leaves ready.
     SCHED_TASK(sar_nav_snapshot,      10,    300, 167),
+#if AP_Q30_ENABLED
+    // PNU : produces TM2's payload and logs TC_R.  It used to happen inside the TM2
+    // sender, so the mount and the camera were queried once per attached ground station
+    // and TC_R was written once per attached one - and never with none attached.  10 Hz
+    // is the rate KGCS streams TM2 at, so the payload is no staler than before.
+    SCHED_TASK_CLASS(AP_Q30,               &copter.q30,                 update,          AP_Q30_UPDATE_RATE_HZ, 75, 169),
+#endif
 #if HAL_BUTTON_ENABLED
     SCHED_TASK_CLASS(AP_Button,            &copter.button,              update,           5, 100, 168),
 #endif

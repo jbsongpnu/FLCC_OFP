@@ -3,6 +3,8 @@
 #if AP_Q30_ENABLED
 #include <AP_Mount/AP_Mount.h>
 #include <AP_Camera/AP_Camera.h>
+#include <AP_Logger/AP_Logger.h>
+#include <GCS_MAVLink/GCS.h>
 
 //  ==================================================================================
 //  PNU-KAL OFP Firmware version
@@ -36,6 +38,91 @@ AP_Q30::AP_Q30()
         return;
     }
     _singleton = this;
+    _prev_zoom_unavailable = false;     // so the first unavailable report is an edge
+}
+
+
+// -------------------------------------------------------------------------
+// update : produce CAM_ATTITUDE_STATUS and log TC_R
+// -------------------------------------------------------------------------
+// This is the producer half of what GCS_MAVLINK::send_message_gcs_flcc_cam_status() used
+// to do.  That function was declared const but wrote all ten CAM_ATTITUDE_STATUS fields,
+// wrote the zoom edge latch and could emit a statustext, and it ran once per attached
+// ground station - so the mount attitude and the zoom were queried twice per cycle with
+// two stations, and the TC_R dataflash record was written twice.  With no station
+// attached neither happened at all.
+//
+// The sender now only copies and sends.  TM2's wire format, its values, and the decision
+// not to send it with no mount configured are all unchanged.
+// -------------------------------------------------------------------------
+void AP_Q30::update(void)
+{
+    AP_Mount *mount = AP::mount();
+    if (mount == nullptr) {
+        return;
+    }
+
+    // PNU-ISSUE(D10) : with no gimbal configured every field below is zero, so TM2 would
+    // stream a perfectly level, 0x-zoom camera to every connected GCS - the same
+    // "nothing fitted looks like nothing wrong" shape as TM5 in D12.  The sender tests
+    // this too, because it is a decision about what TM2 means; producing nothing here
+    // keeps the two halves agreeing, and keeps TC_R's mount-absent behaviour as it was.
+    if (mount->get_mount_type(0) == AP_Mount::Type::None) {
+        return;
+    }
+
+    float roll = 0, pitch = 0, yaw = 0;
+    if (mount->get_attitude_euler(0, roll, pitch, yaw)) {
+        CAM_ATTITUDE_STATUS.Roll_REL_ANG = CAM_ATTITUDE_STATUS.Roll_IMU_ANG = roll * 10;
+        // reverse the pitch angle to match the KGCS image convention, as
+        // AP_Q30::send_cmd_angle() and send_cmd_speed() do for the command direction
+        CAM_ATTITUDE_STATUS.Pitch_REL_ANG = CAM_ATTITUDE_STATUS.Pitch_IMU_ANG = -pitch * 10;
+        CAM_ATTITUDE_STATUS.Yaw_REL_ANG = CAM_ATTITUDE_STATUS.Yaw_IMU_ANG = yaw * 10;
+    } else {
+        CAM_ATTITUDE_STATUS.Roll_REL_ANG = CAM_ATTITUDE_STATUS.Roll_IMU_ANG = 0;
+        CAM_ATTITUDE_STATUS.Pitch_REL_ANG = CAM_ATTITUDE_STATUS.Pitch_IMU_ANG = 0;
+        CAM_ATTITUDE_STATUS.Yaw_REL_ANG = CAM_ATTITUDE_STATUS.Yaw_IMU_ANG = 0;
+    }
+
+    // PNU-ISSUE(D10) : the wire format is deliberately unchanged.  Zoom_POS_FB has no
+    // "unknown" encoding, so a mount that cannot report zoom still sends 0 - adding one
+    // is an ICD change needing KGCS work, the same decision taken for TM5 in D12.  What
+    // changes is that 0 is now sent because the value is unknown, not because a
+    // fabricated 0.0f was mistaken for a reading, and the operator is told once on the
+    // edge rather than left to infer it from a camera that appears stuck at 0x.
+    // PNU-ISSUE(D10) Stage 3 : this decides where the value comes from and what its
+    // units mean - the mount on a Viewpro, CAMERA_SETTINGS on a MAVLink camera.
+    float zoom_times = 0;
+    const bool zoom_known = get_tm2_zoom_times(zoom_times);
+    CAM_ATTITUDE_STATUS.Zoom_POS_FB = zoom_known ? (int8_t)zoom_times : 0;
+
+    const bool zoom_unavailable = !zoom_known && (AP_HAL::millis() > AP_Q30_ZOOM_GRACE_MS);
+    if (zoom_unavailable != _prev_zoom_unavailable) {
+        _prev_zoom_unavailable = zoom_unavailable;
+        if (zoom_unavailable) {
+            GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "CAM: zoom not reported, TM2 sends 0");
+        } else {
+            GCS_SEND_TEXT(MAV_SEVERITY_INFO, "CAM: zoom reporting active");
+        }
+    }
+
+#if HAL_LOGGING_ENABLED
+    // Record name, field names, format and field order are unchanged from the version
+    // that lived in GCS_PNU.cpp.  The three RC_Target fields are never written anywhere
+    // in the tree and so log zero, as they always have.
+    AP::logger().Write("TC_R", "TimeUS,RRLA,PRLA,YRLA,RIMA,RRCA,PIMA,PRCA,YIMA,YRCA,ZPOS", "Qiiihhhhhhb",
+                       AP_HAL::micros64(),
+                       CAM_ATTITUDE_STATUS.Roll_REL_ANG,
+                       CAM_ATTITUDE_STATUS.Pitch_REL_ANG,
+                       CAM_ATTITUDE_STATUS.Yaw_REL_ANG,
+                       CAM_ATTITUDE_STATUS.Roll_IMU_ANG,
+                       CAM_ATTITUDE_STATUS.Roll_RC_Target_ANG,
+                       CAM_ATTITUDE_STATUS.Pitch_IMU_ANG,
+                       CAM_ATTITUDE_STATUS.Pitch_RC_Target_ANG,
+                       CAM_ATTITUDE_STATUS.Yaw_IMU_ANG,
+                       CAM_ATTITUDE_STATUS.Yaw_RC_Target_ANG,
+                       CAM_ATTITUDE_STATUS.Zoom_POS_FB);
+#endif
 }
 
 
