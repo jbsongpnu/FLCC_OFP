@@ -117,6 +117,19 @@ recorded in `ISSUES.md`.
 
 ## 3. Current Development Version
 
+**V5.1.28** makes the PMU say what it decided and what it sent. Two dataflash records,
+no behaviour change. `PMUE` is event driven and records the step 2c interlock's own
+decisions - how far a Start attempt got, which of the two `D7` guards refused it, how old
+the preceding Stop was, and whether the `ENGONOFF` actually went out. All of that used to
+live only in a statustext that was rate limited, clamped to fit MAVLink, and lost entirely
+with no ground station attached; the whole five-scenario step 2c suite now produces seven
+records, one of them the cut-short Start burst that step 2c exists to refuse. `PMUC` is the
+cumulative PMU communication counters at 1 Hz, which closes `PMU-003` by surfacing the five
+write-only counters rather than deleting them, plus the short-frame count. See
+`CHANGELOG.md`. Two of `PMUC`'s six columns and two of `PMUE`'s seven event codes
+**cannot occur in SITL at all** - `AP_HAL_SITL` never fails a CAN send - and were exercised
+by forcing a failure in a temporary build.
+
 **V5.1.27** makes the gimbal slew limiter measure its own interval. The per-tick step
 was `CAN_Dn_PNU_SLEW` divided by the *nominal* loop rate, which is the right step only if
 the driver thread achieves that rate; measured per tick, the realised limit ranged from
@@ -245,6 +258,10 @@ evidence.**
 | Slew limiter holds **45.00 deg/s** on every limited tick, 0 of 3238 steps over the limit, from 25.7-180.1 deg/s | 2026-11-11 |
 | A 1.3 s interval yields one 2.2500 deg step and no catch-up; a zero-length interval yields 0.000000 deg | 2026-11-11 |
 | Homing, fault latching and feedback loss at 0.51 s unchanged across the slew-limiter change | 2026-11-11 |
+| `PMUE` correct in all five step 2c scenarios - 7 records for the whole suite, including the cut-short burst | 2026-11-11 |
+| `PMUE` bounded: 199 consecutive failing `ENGONOFF` ticks give **19** records, and `Mode` stays 0 throughout | 2026-11-11 |
+| `PMUC` at 1.000 Hz with and without a GCS; `CmdTx`/`RtrTx` exactly 0.800; 8 injected short frames give `Short` 8 | 2026-11-11 |
+| Scheduler unchanged by the two new records: 20 long loops, 3332 us max, identical to V5.1.27 | 2026-11-11 |
 
 ### Verified by build and unit test only
 
@@ -279,8 +296,8 @@ Full detail in `ISSUES.md`.
 | `CAM-002` | Viewpro zoom maxima are hard-coded and unverified | - |
 | `D10`, `D11` | Camera routing and the MAVLink camera capability gap | KGCS work only; FC side complete |
 
-**Pending decisions** needing PNU: the two step 2c deviations (`PMU-001`); whether to surface or
-delete five write-only counters (`PMU-003`); whether the IR prelude is needed at all (D1); the
+**Pending decisions** needing PNU: the two step 2c deviations (`PMU-001`); whether the IR
+prelude is needed at all (D1); the
 10 m / 15 m avoidance thresholds (D12); whether KGCS should time out TM2; and whether any serial
 port uses NMEA output.
 

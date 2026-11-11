@@ -21,6 +21,152 @@ A feature exercised only in SITL is **not** hardware-verified. Entries say so ex
 
 ---
 
+## V5.1.28 - the PMU says what it decided and what it sent
+
+Two dataflash records, both written from the driver thread, neither changing any
+behaviour. Between them they answer the two questions a bench session asks that the log
+could not previously answer: *why did the engine not start*, and *is the CAN link to the
+PMU actually working*.
+
+### 1. `PMUE` - what the step 2c interlock decided
+
+`TC1` already logs every command as it arrives and `TM3` logs the state the FC committed
+to. Neither shows the reasoning in between: how far a Start attempt got before it was
+abandoned, which of the two `PNU-ISSUE(D7)` guards refused it, how old the preceding Stop
+was when guard 2 measured it, or whether the `ENGONOFF` that was supposed to carry the
+decision actually went out. Until now that lived only in a statustext - rate limited to
+one per 3 s and clamped to 999 s to fit MAVLink - so with no ground station attached it
+lived nowhere at all.
+
+| Field | Meaning |
+|---|---|
+| `TimeUS` | microseconds since boot |
+| `Mode` | the engine state the FC holds **after** this event: 0 OFF, 1 ON |
+| `OnCnt` | `_engineoncnt` as it stood **before** the event reset it |
+| `OffCnt` | `_engineoffcnt`, likewise |
+| `Armed` | 1 once a valid Stop pair has ever been seen this boot |
+| `StopAge` | ms between the last valid Stop pair and the instant **this attempt began** - the quantity guard 2 tests - or -1 when `Armed` is 0 or the event is not a Start decision |
+| `Evt` | the event code below |
+
+| `Evt` | Name | Meaning |
+|---|---|---|
+| 1 | `START_CMD` | OFF to ON committed; `ENGONOFF(1)` reached the bus |
+| 2 | `STOP_CMD` | ON to OFF committed; `ENGONOFF(0)` reached the bus |
+| 3 | `START_NO_STOP` | Start refused by guard 2: no Stop has ever been seen |
+| 4 | `START_STALE_STOP` | Start refused by guard 2: the last Stop is older than `PMUCAN_STOP_WINDOW_MS` |
+| 5 | `TC1_STALE` | guard 1: TC1 went stale and abandoned an attempt in progress |
+| 6 | `START_TX_FAIL` | `ENGONOFF(1)` could not be sent; still OFF, retrying |
+| 7 | `STOP_TX_FAIL` | `ENGONOFF(0)` could not be sent; still ON, retrying |
+
+Codes are **append-only**: they are written into flight logs, so none is ever renumbered
+or reused.
+
+**Event driven, and every event is bounded.** `TC1_STALE` is written only when a counter
+was non-zero - staleness is true on every tick from the end of a burst until the next TC1,
+so the unconditional form would write at 10 Hz for the rest of the flight, and after the
+first reset there is nothing left to report. The two refusals are self-limiting, because
+each costs ten ticks of counting beforehand; measured at 0.9 Hz over a deliberately
+prolonged refusal. They are logged **outside** the existing statustext rate limiter on
+purpose: that limiter protects the link, and the flight log should not be thinned by it.
+Only the two transmit failures can repeat per tick, since a failed send deliberately
+leaves the counter at its threshold to retry, and they get a 1 Hz limiter of their own.
+
+**Measured across all five step 2c scenarios: 7 records for the whole suite.**
+
+| `t` | `Mode` | `OnCnt` | `Armed` | `StopAge` | `Evt` | scenario |
+|---|---|---|---|---|---|---|
+| 11.5 | 0 | 10 | 0 | -1 | `START_NO_STOP` | `start-only` refused |
+| 12.2 | 0 | 6 | 0 | -1 | `TC1_STALE` | its burst then ended |
+| 27.7 | 1 | 10 | 1 | 6276 | `START_CMD` | `stop-start` - the Stop was 6.3 s earlier |
+| 36.1 | 0 | 0 | 1 | -1 | `STOP_CMD` | `stop` |
+| 51.7 | 0 | 5 | 1 | -1 | `TC1_STALE` | **`cut-start` - the defect step 2c exists to refuse, in a log for the first time** |
+| 75.1 | 0 | 10 | 1 | 14241 | `START_STALE_STOP` | `late-start`, exact rather than clamped |
+| 75.8 | 0 | 6 | 1 | -1 | `TC1_STALE` | its burst then ended |
+
+### 2. `PMUC` - the communication counters, closing `PMU-003`
+
+`_handleFrame_cnt`, `_rtr_tx_cnt`, `_cmd_tx_cnt`, `_rtr_tx_err` and `_cmd_tx_err` were
+incremented and never read anywhere in the tree. `PMU-003` asked for one of two answers,
+surface them or delete them; this is the first.
+
+| Field | Counter | Meaning |
+|---|---|---|
+| `RxSts` | `_handleFrame_cnt` | PMU status frames parsed, one of the five ids |
+| `RtrTx` | `_rtr_tx_cnt` | RTR polls that reached the interface |
+| `RtrErr` | `_rtr_tx_err` | RTR polls that did not |
+| `CmdTx` | `_cmd_tx_cnt` | command frames that reached the interface |
+| `CmdErr` | `_cmd_tx_err` | command frames that did not |
+| `Short` | `_short_frame_cnt` | PMU status frames dropped for a DLC below the ICD's 8 |
+
+`Short` was deliberately left out of `PMU-003` because it already had a reader - a
+rate-limited statustext - but a statustext nobody is attached to receive is not a record,
+which is the same lesson V5.1.25 learned about `TM11`-`TM13`.
+
+Cumulative totals at 1 Hz. Cumulative because a per-interval count would hide whatever
+happened while the log was not open and would turn a dropped record into a lost event;
+the quantity anyone wants is a difference between two records, and the rate only decides
+how finely a loss can be placed in time.
+
+**These are the PMU backend's counters alone.** `AP_PNU_CAN` keeps its own driver-wide set
+- short frames from any backend, send failures with the last interface result, unclaimed
+frames - and those describe the shared bus, not the PMU. A record mixing the two could not
+be read without knowing which layer each column came from.
+
+Measured over 34 s at `PNU_OPTS` 7:
+
+| | Measured | Expected |
+|---|---|---|
+| record rate | **1.000 Hz** | 1 Hz |
+| `RxSts`, `RtrTx` | 48.75 /s each | one status frame parsed per RTR sent, 5 ids at ~9.75 Hz |
+| `CmdTx` / `RtrTx` | **0.800** | four of five slots carry a command; `ENGONOFF` only on a transition |
+| `Short` after 8 injected short frames | **8** | 8, against 2 statustexts |
+| totals vs the fake PMU's own counts | within 0.6 s of traffic | the gap between its last status line and teardown |
+
+### Verification
+
+| What | How |
+|---|---|
+| All five step 2c scenarios give the same verdicts; Start interlock 1.358 s, Stop 1.151 s | SITL |
+| `PMUE` codes, timestamps, counters and refusal reasons correct in every scenario | SITL |
+| 199 consecutive failing `ENGONOFF` ticks produce **19** `PMUE` records and `Mode` stays 0 | SITL |
+| `PMUC` `CmdErr` catches all **190** failed sends while `PMUE` logs 19 - the two records' division of labour | SITL |
+| Eight injected malformed PMU status frames give `Short` 0 to 5 to 8 | SITL |
+| `PMUC` written at 1.000 Hz with **no GCS attached**; `PMUE` writes nothing, correctly, since no TC1 can arrive | SITL |
+| `TM11`/`TM12`/`TM13`/`TM3` 9.97-10.00 Hz, `SARS` 0.99, `TC_R` 10.00, 0 duplicates at `PNU_OPTS` 1, 3 and 7 | SITL |
+| Scheduler unchanged: 20 long loops and 3332 us max, identical to V5.1.27; no internal errors; every run ran to its full duration | SITL |
+| PMU RTR 9.56-9.61 Hz per id, gimbal 90.8 Hz per axis, against 9.69-9.73 and 91.7 on V5.1.27 | SITL |
+| Gimbal homing 60.6 / 60.6 / 40.5, midpoints -0.1; fault latching and feedback loss unchanged | SITL |
+| SAR Start, 165 bundles 0 drop, heartbeat loss and resume, Stop; `TM50` 1 to 3 to 0 | SITL |
+| 10 CubeMars gtests and five Python device suites pass | Unit test |
+| Default SITL build, `--disable-Camera`, `AP_PMUCAN.cpp` with `HAL_LOGGING_ENABLED` forced to 0, `run_astyle.py --dry-run` | Build |
+
+### Locking, because this writes from inside the CAN semaphore
+
+Both records are written from `update()`, which `tx_spin()` calls while holding
+`AP_PNU_CAN::_sem` - where `log_status()` has written `TM11`-`TM13` and `TM3` since
+V5.1.25. That is safe and stays safe only because `AP_Logger::Write()` is non-critical and
+therefore **drops rather than waits** when the buffer is low
+(`AP_Logger_File::_WritePrioritisedBlock`), and because the two locks it takes on the way -
+`log_write_fmts_sem` and the backend's buffer semaphore - are short and are held by nothing
+that then wants the CAN driver's semaphore. Nothing added here may be allowed to wait: the
+vehicle thread blocks on that semaphore, and in SITL the vehicle thread is also what
+advances the clock a wait would be waiting for.
+
+### Not verified: no hardware, and two paths SITL cannot reach
+
+`RtrErr`, `CmdErr` and the two `PMUE` transmit-failure codes **cannot occur in SITL at
+all**: `AP_HAL_SITL`'s `CANIface::send()` returns the base class's unconditional `1`
+(`AP_HAL/CANIface.cpp:103`). They were exercised by forcing `ENGONOFF` to fail in a
+temporary build that was removed before commit. On ChibiOS `send()` returns 0 for a full
+queue and negative for an interface error, so both are reachable on the target - and
+neither has ever been seen move on real hardware.
+
+`PMUE` helps diagnose the engine interlock. It does **not** measure the driver loop
+interval and it does not observe the bus, so `PMU-004`'s hardware verification is untouched
+by it and still requires direct timing measurement.
+
+---
+
 ## V5.1.27 - the gimbal slew limiter measures its own interval
 
 `AP_PNUGimbal_Backend::advance_commanded()` computed its per-tick step as

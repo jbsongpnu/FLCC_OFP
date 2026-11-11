@@ -462,6 +462,14 @@ argument alone was explicit. **Do not infer target timing from any figure above.
    against 7.5 - 9.5 Hz in every session so far, so compliance has never actually been
    exercised.
 
+**What V5.1.28 does and does not contribute.** `PMUE` records the step 2c interlock's own
+decisions and `PMUC` records the PMU message counts, both from the flight log rather than
+from a statustext, so item 2 becomes diagnosable after the fact and item 1 gains a
+cross-check: `PMUC`'s `RtrTx` delta divided by 5 is the per-id rate the FC believes it
+achieved. **Neither replaces the measurement.** `RtrTx` counts frames handed to the
+interface, not frames on the wire, and nothing in either record measures the driver loop
+interval directly. Items 1 and 3 still need a CAN analyser and `SCHED_DEBUG` respectively.
+
 ## PNUCAN-001 - the gimbal slew limiter divided by a nominal rate
 
 | | |
@@ -598,21 +606,32 @@ Both are deliberate deviations recorded at the time, not oversights. See `CHANGE
 
 ## PMU-003 - five write-only counters: surface or delete
 
+| | |
+|---|---|
+| **Status** | **CLOSED IN V5.1.28.** Surfaced as `PMUC`, not deleted |
+
 D6 residual. `_handleFrame_cnt`, `_rtr_tx_cnt`, `_cmd_tx_cnt`, `_rtr_tx_err` and `_cmd_tx_err`
-are incremented but **never read anywhere in the tree** - they cost RAM and tell nobody anything.
-D6's own `_short_frame_cnt` was deliberately not added in that style: it is reported to the GCS,
-because a rejection nobody sees is the same silence D6 set out to remove.
+were incremented but **never read anywhere in the tree** - they cost RAM and told nobody
+anything. The choice was to surface them or delete them, and they are surfaced: `_rtr_tx_err`
+and `_cmd_tx_err` are what you want when chasing an intermittent PMU link, and the D7
+send-result fix already depends on `_cmd_tx_err` for diagnosis.
 
-Either surface the existing five - a `PMUC` log message alongside the `TM1x` ones would be the
-natural place, and **V5.1.25 made that easy: `AP_PMUCAN::log_status()` already writes
-`TM11`, `TM12`, `TM13` and `TM3` from the driver thread on a `millis()` interval, so a fifth
-record is a few lines in a function that exists** - or delete them. **`_rtr_tx_err`
-and `_cmd_tx_err` are the two with real diagnostic value**: they count CAN send failures, which
-is exactly what you would want when chasing an intermittent PMU link, and the D7 send-result fix
-now depends on `_cmd_tx_err` for diagnosis.
+V5.1.28 writes all five, plus `_short_frame_cnt`, as a cumulative `PMUC` record at 1 Hz from
+`AP_PMUCAN::log_counters()`, beside the `log_status()` that V5.1.25 created.
+`_short_frame_cnt` had been left out of this issue because it already had a reader - a
+rate-limited statustext - but a statustext nobody is attached to receive is not a record.
 
-The same keep-or-delete question applies to `_current_zoom_EO` / `_current_zoom_IR` in `AP_Q30`,
-added by D10 Stage 1. If they are ever read, note they are `uint8_t` holding a `float` zoom.
+**Two of the six columns have never been seen move.** `RtrErr` and `CmdErr` count CAN send
+failures, and `AP_HAL_SITL`'s `CANIface::send()` returns the base class's unconditional `1`
+(`AP_HAL/CANIface.cpp:103`), so **no send can fail in SITL**. They were exercised by forcing
+`ENGONOFF` to fail in a temporary build. On ChibiOS `send()` returns 0 for a full queue and
+negative for an interface error, so both are reachable on the target; the bench session is
+the first chance to see either one non-zero, and a non-zero `RtrErr` there would be the
+first real evidence of a bus problem rather than a PMU problem.
+
+The same keep-or-delete question still applies to `_current_zoom_EO` / `_current_zoom_IR` in
+`AP_Q30`, added by D10 Stage 1. If they are ever read, note they are `uint8_t` holding a
+`float` zoom.
 
 ## PNU-ISSUE D1 residual - is the IR prelude needed at all?
 
