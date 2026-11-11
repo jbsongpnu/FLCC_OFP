@@ -65,6 +65,7 @@ AP_PMUCAN::AP_PMUCAN(AP_PNU_CAN &frontend) :
     _start_pair_first_ms    = 0;
     _stop_window_armed      = false;
     _last_start_refused_ms  = 0;
+    _last_event_txfail_ms   = 0;
 
     _pmu_frames_seen        = 0;
     _last_pmu_frame_ms      = 0;
@@ -677,6 +678,14 @@ void AP_PMUCAN::engineonoffstate(void)
     // counting instead.  Returning here sends nothing: ENGONOFF only goes out on a
     // transition, and a stale link cannot have a counter anywhere near the threshold.
     if (tc1_is_stale(now_ms)) {
+        // PMUE : only when there was progress to destroy.  tc1_is_stale() is true on
+        // every tick from the end of a burst until the next TC1 arrives, so logging it
+        // unconditionally would write at 10 Hz for the rest of the flight.  After the
+        // first reset both counters are zero and there is nothing left to report, which
+        // is the edge this needs - and it needs no extra state to find it.
+        if ((_engineoncnt != 0U) || (_engineoffcnt != 0U)) {
+            log_engine_event(PMUE_EVT_TC1_STALE, _engineoncnt, _engineoffcnt, -1);
+        }
         _engineoncnt  = 0U;
         _engineoffcnt = 0U;
         return;
@@ -686,6 +695,13 @@ void AP_PMUCAN::engineonoffstate(void)
     {
         if(_engineoncnt>=10)        // transition to ON STATE
         {
+            // PMUE : captured before anything below can move them.  start_permitted()
+            // zeroes the start counter on refusal and a commit zeroes it too, so the
+            // record would otherwise always show zero at the one instant that matters.
+            const uint32_t on_cnt_was  = _engineoncnt;
+            const uint32_t off_cnt_was = _engineoffcnt;
+            const int32_t  stop_age    = stop_age_ms(now_ms);
+
             // PNU-ISSUE(D7) / step 2c, GUARD 2 of 2 : STOP BEFORE START.
             // Covers the link dying BETWEEN Stop and Start, where a queued Start arrives
             // after reconnect.  The counter is cleared so that a later Stop cannot find
@@ -706,12 +722,17 @@ void AP_PMUCAN::engineonoffstate(void)
                 _engineoncnt        = 0U;
                 PMU_Ctrl_Echo.Engine_OnOff_Echo = 1;
                 engineonmode();
+                log_engine_event(PMUE_EVT_START_CMD, on_cnt_was, off_cnt_was, stop_age);
             }
             else
             {
                 // send failed: stay OFF and leave the counter where it is, so
                 // the next tick retries while the command pair is still valid.
                 // pmucan_cmd() has already counted the failure in _cmd_tx_err.
+                if (event_txfail_due(now_ms)) {
+                    log_engine_event(PMUE_EVT_START_TX_FAIL, on_cnt_was, off_cnt_was,
+                                     stop_age);
+                }
                 engineoffmode();
             }
         }
@@ -724,6 +745,11 @@ void AP_PMUCAN::engineonoffstate(void)
     {
         if(_engineoffcnt>=10)       //transition to OFF STATE
         {
+            // PMUE : as in the OFF branch, captured before the commit clears them.  A
+            // Stop is not measured against the stop-before-start window, so no age.
+            const uint32_t on_cnt_was  = _engineoncnt;
+            const uint32_t off_cnt_was = _engineoffcnt;
+
             // PNU-ISSUE(D7) : as above - a failed stop must not read as stopped
             if(pmucan_cmd(_cmd_id[CMD_ID::CMD_ID_ENGONOFF], 0U)>0)  // OFF(0)
             {
@@ -731,10 +757,14 @@ void AP_PMUCAN::engineonoffstate(void)
                 _engineoffcnt       = 0U;
                 PMU_Ctrl_Echo.Engine_OnOff_Echo = 0;
                 engineoffmode();
+                log_engine_event(PMUE_EVT_STOP_CMD, on_cnt_was, off_cnt_was, -1);
             }
             else
             {
                 // send failed: stay ON and retry next tick
+                if (event_txfail_due(now_ms)) {
+                    log_engine_event(PMUE_EVT_STOP_TX_FAIL, on_cnt_was, off_cnt_was, -1);
+                }
                 engineonmode();
             }
         }
@@ -815,6 +845,15 @@ bool AP_PMUCAN::start_permitted(uint32_t now_ms)
         return true;
     }
 
+    // PMUE : LOGGED OUTSIDE THE STATUSTEXT RATE LIMITER BELOW.  That limiter exists so a
+    // held button cannot flood the link; the flight log is the record of what the
+    // interlock decided and must not be thinned by a link-protection rule.  It does not
+    // need a limiter of its own: the caller zeroes the counter on every refusal, so a
+    // second one costs another ten ticks and cannot arrive faster than about 1 Hz.
+    log_engine_event(_stop_window_armed ? PMUE_EVT_START_STALE_STOP
+                                        : PMUE_EVT_START_NO_STOP,
+                     _engineoncnt, _engineoffcnt, stop_age_ms(now_ms));
+
     if ((_last_start_refused_ms == 0U) ||
         ((now_ms - _last_start_refused_ms) >= PMUCAN_START_REFUSED_WARN_MS)) {
         _last_start_refused_ms = now_ms;
@@ -850,6 +889,82 @@ void AP_PMUCAN::count_start_pair(void)
         _start_pair_first_ms = AP_HAL::millis();
     }
     _engineoncnt++;
+}
+
+
+// -------------------------------------------------------------------------
+// stop_age_ms : PMUE - how old the last Stop pair was when this attempt began
+// -------------------------------------------------------------------------
+// The quantity start_permitted() tests, for the log.  It MIRRORS that test rather than
+// replacing it: the decision there stays unsigned on purpose, so a clock that went
+// backwards fails the comparison instead of passing it, and that arithmetic is not
+// something a logging change should touch.
+//
+// -1 means "not applicable" - no Stop has been seen this boot, so there is no age and the
+// log must not show a plausible-looking number that was never evaluated.  The record
+// carries Armed beside it, so a reader never has to infer which case it is looking at.
+// -------------------------------------------------------------------------
+int32_t AP_PMUCAN::stop_age_ms(uint32_t now_ms) const
+{
+    if (!_stop_window_armed) {
+        return -1;
+    }
+    const uint32_t pressed_ms = (_start_pair_first_ms != 0U) ? _start_pair_first_ms : now_ms;
+    return (int32_t)(pressed_ms - _last_stop_pair_ms);
+}
+
+
+// -------------------------------------------------------------------------
+// event_txfail_due : PMUE - rate limiter for the transmit-failure event
+// -------------------------------------------------------------------------
+// The only PMUE event that can repeat on consecutive ticks.  A failed ENGONOFF leaves the
+// counter at its threshold deliberately, so that the next tick retries while the command
+// pair is still valid - which means a bus that is down produces one failure every tick
+// until it comes back.  The first failure always logs.
+// -------------------------------------------------------------------------
+bool AP_PMUCAN::event_txfail_due(uint32_t now_ms)
+{
+    if ((_last_event_txfail_ms != 0U) &&
+        ((now_ms - _last_event_txfail_ms) < PMUCAN_EVENT_TXFAIL_MS)) {
+        return false;
+    }
+    _last_event_txfail_ms = now_ms;
+    return true;
+}
+
+
+// -------------------------------------------------------------------------
+// log_engine_event : PMUE - one step 2c decision
+// -------------------------------------------------------------------------
+// Written from the driver thread, inside the semaphore tx_spin() holds across every
+// backend update() - the same context log_status() has written TM11-TM13 and TM3 from
+// since 5.1.25.  That is safe and stays safe only because AP_Logger::Write() is
+// NON-CRITICAL AND NON-BLOCKING: it drops the record when the buffer is low rather than
+// waiting (AP_Logger_File::_WritePrioritisedBlock), and the two locks it takes on the way
+// - log_write_fmts_sem and the backend's buffer semaphore - are short and are never held
+// by anything that then wants the CAN driver's semaphore.  Do not make this critical, and
+// do not add anything here that can wait: the vehicle thread blocks on that semaphore,
+// and in SITL the vehicle thread is also what advances the clock a wait would be waiting
+// for.
+//
+// @on_cnt and @off_cnt are the caller's SAVED values, not the live members, because every
+// path that logs is a path that is about to reset one of them.
+// -------------------------------------------------------------------------
+void AP_PMUCAN::log_engine_event(uint8_t evt, uint32_t on_cnt, uint32_t off_cnt,
+                                 int32_t stop_age)
+{
+#if HAL_LOGGING_ENABLED
+    AP::logger().Write("PMUE", "TimeUS,Mode,OnCnt,OffCnt,Armed,StopAge,Evt", "QBIIBiB",
+                       AP_HAL::micros64(),
+                       (uint8_t)_engineonoffmode,
+                       on_cnt,
+                       off_cnt,
+                       (uint8_t)(_stop_window_armed ? 1U : 0U),
+                       stop_age,
+                       evt);
+#else
+    (void)evt; (void)on_cnt; (void)off_cnt; (void)stop_age;
+#endif
 }
 
 

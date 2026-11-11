@@ -123,6 +123,29 @@ extern mavlink_sys_icd_gcs_flcc_pmu_ctrl_echo_t         PMU_Ctrl_Echo;      // P
 // rate limit for the "Start refused" warning, which would otherwise repeat at 10 Hz
 #define PMUCAN_START_REFUSED_WARN_MS (3000U)
 
+// PMUE : rate limit for the transmit-failure EVENT only.  A failed ENGONOFF deliberately
+// leaves the counter at its threshold so the next tick retries, so a bus that is down
+// produces one failure per tick; without this the log would fill at 10 Hz for as long as
+// it stayed down.  Every other PMUE event is self-limiting - see log_engine_event().
+#define PMUCAN_EVENT_TXFAIL_MS (1000U)
+
+// PMUE EVENT CODES.  These values are written into flight logs and read back by hand and
+// by tooling, so they are APPEND-ONLY: never renumber one, never reuse a retired one.
+//
+// The record says what the step 2c interlock DECIDED and why.  TC1 already logs every
+// command as it arrives and TM3 logs the state the FC committed to; what neither shows is
+// the reasoning in between - how far a start attempt got, which of the two guards refused
+// it, and whether the command that was supposed to carry it actually went out.
+enum PMUE_Event : uint8_t {
+    PMUE_EVT_START_CMD        = 1,  // OFF -> ON committed; ENGONOFF(1) reached the bus
+    PMUE_EVT_STOP_CMD         = 2,  // ON -> OFF committed; ENGONOFF(0) reached the bus
+    PMUE_EVT_START_NO_STOP    = 3,  // Start refused, guard 2: no Stop has ever been seen
+    PMUE_EVT_START_STALE_STOP = 4,  // Start refused, guard 2: the last Stop is too old
+    PMUE_EVT_TC1_STALE        = 5,  // guard 1: TC1 went stale and abandoned an attempt
+    PMUE_EVT_START_TX_FAIL    = 6,  // ENGONOFF(1) could not be sent; still OFF, retrying
+    PMUE_EVT_STOP_TX_FAIL     = 7,  // ENGONOFF(0) could not be sent; still ON, retrying
+};
+
 class PMU_CTRL_CMD
 {
 public:
@@ -174,6 +197,10 @@ public:
     bool tc1_is_stale(uint32_t now_ms) const;
     bool start_permitted(uint32_t now_ms);      // reports the refusal, rate limited
     void count_start_pair(void);                // _engineoncnt++, stamping the first one
+    int32_t stop_age_ms(uint32_t now_ms) const; // age of the last Stop pair, for the log
+    bool event_txfail_due(uint32_t now_ms);     // PMUE transmit-failure rate limiter
+    void log_engine_event(uint8_t evt, uint32_t on_cnt, uint32_t off_cnt,
+                          int32_t stop_age);    // one PMUE record
 
     int pmucan_cmd(uint32_t can_id, uint32_t data_cmd);
     int pmucan_rtr(uint32_t can_id);
@@ -240,6 +267,7 @@ private:
     uint32_t _start_pair_first_ms;              // first valid 2/3 Start alternation of this attempt
     bool     _stop_window_armed;                // false until a Stop pair has ever been seen
     uint32_t _last_start_refused_ms;            // rate limit for the refusal warning
+    uint32_t _last_event_txfail_ms;             // rate limit for the PMUE tx-failure event
 
     // PNU-ISSUE(D6)/5.1.15 : health is now keyed on PMU STATUS FRAMES, not on "a frame
     // arrived".  RXspin() used to treat ANY successful receive as proof the PMU was alive,
