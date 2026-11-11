@@ -462,28 +462,46 @@ argument alone was explicit. **Do not infer target timing from any figure above.
    against 7.5 - 9.5 Hz in every session so far, so compliance has never actually been
    exercised.
 
-## PNUCAN-001 - `advance_commanded()` divides by a nominal rate, not a measured one
+## PNUCAN-001 - the gimbal slew limiter divided by a nominal rate
 
 | | |
 |---|---|
-| **Status** | OPEN. Harmless today, silently wrong again the moment the loop rate moves |
+| **Status** | **IMPLEMENTED IN V5.1.27, SITL-VERIFIED, PENDING CUBEMARS HARDWARE** |
 | **Component** | `libraries/AP_PNUGimbal/AP_PNUGimbal_Backend.cpp`, `advance_commanded()` |
 | **Related** | `PMU-004`, `GIMBAL-002`, `RISK - no gimbal hardware has ever been connected` |
 
-The slew limiter computes its per-tick step as `_slew_rate_rads / float(AP_PNU_CAN_LOOP_HZ)`
-- a constant, not the elapsed interval. It is correct only if the loop actually runs at that
+The slew limiter computed its per-tick step as `_slew_rate_rads / float(AP_PNU_CAN_LOOP_HZ)`
+- a constant, not the elapsed interval. It was correct only if the loop actually ran at that
 rate. Before V5.1.26 it did not, so the realised limit was 0.70 - 0.72 of
 `CAN_Dn_PNU_SLEW` in SITL; `PMU-004` made it accidentally correct, and it did not make it
-right. Any future change to `AP_PNU_CAN_LOOP_HZ`, or any period of missed ticks, breaks it
-again with no symptom beyond a payload moving at the wrong speed.
+right.
 
-**Deliberately not fixed in V5.1.26**, which changed the loop and nothing else. The robust
-form measures the interval between calls.
+**V5.1.27 measures the interval between successive calls.** The first call after entering
+`RUN` has nothing to measure from and uses the nominal period; a measured interval is
+clamped to `AP_PNUGIMBAL_SLEW_DT_MAX_US`, five nominal periods, so a stalled thread cannot
+repay its lateness in one command step. Measured per tick in SITL: the realised rate on a
+slew-limited tick went from **25.7 - 180.1 deg/s** to **45.00 deg/s** against a 45 deg/s
+parameter, with 0 steps over the limit in 3238 ticks, and a synthetic 1.3 s interval
+producing one 2.2500 degree step and no catch-up. Nothing else changed - not the parameter,
+the mechanical limits, homing, the state machine, the protocols or the driver loop.
 
-**Why it is worth doing before the motors are first powered.** The slew limit exists to stop
-a step target - the first mount target may be 25 degrees away - arriving at full stiffness
-on a bulky payload. No gimbal hardware has ever been connected, so there is no tuning to
-invalidate yet, and that will stop being true after the first bench session.
+**A defect in the first version of the fix was caught by measuring it.** The guard
+`if (max_step_rad > 0.0f)` meant "the limit is enabled" while the step was a constant, but
+a measured interval of zero reaches the same branch and means the opposite. SITL hands out
+the same `micros()` twice when a tick overruns, and that build let up to **1038 deg/s**
+onto the bus. The two cases are now separate tests. Anyone restructuring this function must
+keep them separate.
+
+**What the bench session must still establish.** No CubeMars motor has ever been connected
+to this firmware, so every figure above is SITL against a fake whose joint is massless and
+whose feedback trigger is an assumption. The first bench session must:
+
+1. measure the realised slew rate at the motor and confirm it matches `CAN_Dn_PNU_SLEW`;
+2. decide whether 45 deg/s is a sane default for this payload - it is still a provisional
+   number, chosen with no measurement of the mount;
+3. check that a clamped step taken after a stall does not upset the drive;
+4. confirm that the loop interval seen on the target hardware keeps the step where SITL
+   says it is, which is the same bench dependency `PMU-004` carries.
 
 ## PNUSAR-003 - `AP_PNUSAR_SNAPSHOT_MAX_AGE_MS` was widened to work around `PMU-004`
 

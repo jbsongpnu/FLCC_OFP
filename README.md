@@ -117,6 +117,16 @@ recorded in `ISSUES.md`.
 
 ## 3. Current Development Version
 
+**V5.1.27** makes the gimbal slew limiter measure its own interval. The per-tick step
+was `CAN_Dn_PNU_SLEW` divided by the *nominal* loop rate, which is the right step only if
+the driver thread achieves that rate; measured per tick, the realised limit ranged from
+25.7 to 180.1 deg/s against a 45 deg/s parameter. It is now the rate multiplied by the
+interval that actually elapsed, clamped to five nominal periods so a stalled thread cannot
+repay its lateness in one command step - 45.00 deg/s on every limited tick, no step over
+the limit in 3238. Measuring it also caught a defect in the first version of the fix, which
+let a zero-length interval through the "no limit" branch and put 1038 deg/s on the bus. See
+`CHANGELOG.md`. **`PNUCAN-001` stays open**: no CubeMars motor has ever been connected.
+
 **V5.1.26** makes the CAN driver loop keep time. `AP_PNU_CAN::loop()` slept for a whole
 period and *then* did its work, so a tick cost the period plus the body - 13.1 to 13.5 ms in
 SITL against a nominal 10 ms. Every rate in the driver derives from that tick, so the PMU's
@@ -232,6 +242,9 @@ evidence.**
 | PMU RTR and command 9.49-9.54 Hz per id, from 7.32-7.58; gimbal command 90.0-90.2 Hz per axis, from 69.4-71.8 | 2026-11-11 |
 | All five step 2c cases give the same verdicts as V5.1.25; Start interlock 1.161-1.347 s, from 1.462-1.677 s | 2026-11-11 |
 | Gimbal homing unchanged to the tenth of a degree (60.6 / 60.6 / 40.5, midpoints -0.1); SAR 100 bundles, 0 drops | 2026-11-11 |
+| Slew limiter holds **45.00 deg/s** on every limited tick, 0 of 3238 steps over the limit, from 25.7-180.1 deg/s | 2026-11-11 |
+| A 1.3 s interval yields one 2.2500 deg step and no catch-up; a zero-length interval yields 0.000000 deg | 2026-11-11 |
+| Homing, fault latching and feedback loss at 0.51 s unchanged across the slew-limiter change | 2026-11-11 |
 
 ### Verified by build and unit test only
 
@@ -260,7 +273,7 @@ Full detail in `ISSUES.md`.
 | `SAR-001` | `0x404` carries no measured attitude | step 3f, and Lumir's integration |
 | `GCS-002` | KGCS must send TC50 from a permitted system id | SAR commanding from the GCS |
 | `PMU-004` | The driver tick ran long. **Fixed in 5.1.26, SITL only** - the target was never measured | the bench session: CAN rates, step 2c timing, CPU, shared bus |
-| `PNUCAN-001` | The gimbal slew limiter divides by a nominal rate, not a measured one | nothing today - do it before the motors are first powered |
+| `PNUCAN-001` | The gimbal slew limiter divided by a nominal rate. **Fixed in 5.1.27, SITL only** | the bench session: realised rate at the motor, and whether 45 deg/s suits the payload |
 | `PNUSAR-003` | `SNAPSHOT_MAX_AGE_MS` was widened to 100 ms to absorb `PMU-004` | nothing - re-measure on the bench |
 | `CAM-001` | The Viewpro tracking freeze can strand the operator | - |
 | `CAM-002` | Viewpro zoom maxima are hard-coded and unverified | - |

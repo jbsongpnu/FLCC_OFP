@@ -21,6 +21,109 @@ A feature exercised only in SITL is **not** hardware-verified. Entries say so ex
 
 ---
 
+## V5.1.27 - the gimbal slew limiter measures its own interval
+
+`AP_PNUGimbal_Backend::advance_commanded()` computed its per-tick step as
+`_slew_rate_rads / AP_PNU_CAN_LOOP_HZ` - a constant, not the interval that had actually
+elapsed. That is the step `CAN_Dn_PNU_SLEW` means only if the driver thread really
+achieves the nominal rate. Before 5.1.26 it did not, and the realised limit was 0.70 to
+0.72 of the parameter; 5.1.26 made the arithmetic accidentally right rather than right,
+and any later change to the loop rate - or any run of missed ticks - would have broken it
+again with no symptom beyond a payload moving at the wrong speed. `PNUCAN-001`.
+
+The step is now `_slew_rate_rads` multiplied by the interval measured between successive
+calls, with two bounds: the first call after entering `RUN` has nothing to measure from
+and uses the nominal period, and a measured interval is clamped to five nominal periods
+so a stalled thread cannot repay its lateness in one command step. Clamping makes the
+mount lag its target after a stall, which is the safe direction to be wrong in. No
+parameter, protocol, control mode, mechanical limit, homing rule or state transition
+changes.
+
+### Measured in SITL, `CAN_D1_PNU_OPTS` 7, `CAN_D1_PNU_SLEW` 45 deg/s
+
+Per tick, from a temporary log record written inside `advance_commanded()` and removed
+before commit, with the mount driven by scripted 50 degree traverses:
+
+| | V5.1.26 | V5.1.27 |
+|---|---|---|
+| step while slew limited | **0.4500 deg, always** | the rate times the measured interval |
+| realised rate on a limited tick | **25.7 to 180.1 deg/s** | **45.00 deg/s** (mean 44.84, median 45.00) |
+| steps above `CAN_Dn_PNU_SLEW` x interval | the interval is not used | **0 of 3238 ticks** |
+| longest interval, and its step | 115.8 ms -> 0.4500 deg | 1.316 s -> **2.2500 deg**, exactly the clamp |
+| zero-length interval, and its step | 12 to 16 per run, harmless - the step did not depend on it | 58 ticks -> **0.000000 deg** |
+
+The V5.1.26 column is the gimbal's own startup convergence, 81 to 83 slew-limited ticks
+in each of three runs; that build could not be driven further, for the reason in
+*Measurement artifact* below. 180.1 deg/s is four times the parameter, and it is simply
+what a fixed 0.45 degree step does when the tick it lands on was 2.5 ms long.
+
+Per traverse, from the CAN bus itself with no instrumentation in either build, measured
+over the middle 80 per cent of each 50 degree move so that neither the command instant
+nor the arrival settles into the number:
+
+| | roll | pitch | yaw |
+|---|---|---|---|
+| V5.1.26 | 96.6 % of `PNU_SLEW` | 96.3 % | 96.3 % |
+| V5.1.27 | 98.4 % | 100.2 % | 97.5 % |
+
+### A defect in the first version of this fix, found by measuring and fixed before commit
+
+The first attempt guarded the limiter with `if (max_step_rad > 0.0f)`, which was correct
+while the step came from a constant: the only way to reach zero was `CAN_Dn_PNU_SLEW = 0`,
+meaning no limit. Once the step came from a measured interval, **a zero-length interval
+reached the same branch and meant the opposite thing**, and the target went through
+unlimited. SITL hands out the same `micros()` twice when a tick overruns, so this was not
+theoretical: on the bus, that build commanded up to **1038 deg/s** on roll, 23 times the
+parameter, on 5 ticks of a 33 second run. The two cases are now distinct - `slew_limited`
+asks whether the limit exists, `max_step_rad` says how big it is - and the committed build
+shows 58 zero-length intervals producing a 0.000000 degree step.
+
+### Measurement artifact, for the next person who instruments this
+
+The measurement build of **V5.1.26** deadlocked SITL at the first `DO_MOUNT_CONTROL`,
+reproducibly, 4 runs out of 4; the measurement build of V5.1.27 did not, and neither clean
+build ever did. The cause was not found. `tx_spin()` holds `_sem` across every backend
+`update()`, and in SITL the vehicle thread both wants that semaphore and is what advances
+the simulated clock, so anything in a backend that waits for time while holding it will
+hang the simulator - a separate attempt to inject a real 1.3 s stall there hung SITL
+immediately and for exactly that reason. The long-interval figures above therefore come
+from moving the stored timestamp back by 1.3 s rather than from sleeping.
+
+### Deliberately not changed
+
+- the fixed-rate CAN driver loop from 5.1.26;
+- `CAN_Dn_PNU_SLEW` semantics, its default, and every other parameter;
+- the mechanical limits, the operating margin and the axis direction handling;
+- homing, in any respect, and every state-machine transition;
+- the CAN protocols, the motor control modes and the message formats.
+
+### Verification
+
+| What | How |
+|---|---|
+| Realised slew rate 45.00 deg/s on every limited tick, 0 steps over the limit in 3238 | SITL |
+| A 1.3 s interval produces one 2.2500 deg step and no catch-up, three times | SITL |
+| A zero-length interval produces a 0.000000 deg step, 58 times | SITL |
+| Intervals over 50 ms clamped, 11 times in one run - 8 natural, to 139 ms, and the 3 synthetic ones | SITL |
+| Homing identical: 60.6 / 60.6 / 40.5 deg, midpoints -0.1, `HOMING` -> `ALIGN` 39.887 s, `ALIGN` -> `RUN` 39.899 s | SITL |
+| Fault injection, fault latching, feedback loss at 0.51 s and resume, all unchanged | SITL |
+| PMU RTR 9.59 Hz per id and gimbal 89.33 Hz per axis, against 9.61 and 89.30 on V5.1.26 | SITL |
+| All five step 2c cases give the same verdicts; Start interlock 1.280 s, Stop 1.169 s | SITL |
+| `TM11`/`TM12`/`TM13`/`TM3` 10.00 Hz, `SARS` 0.99 Hz, `TC_R` 10.00 Hz, 0 duplicates, at `PNU_OPTS` 1, 3 and 7 | SITL |
+| 10 CubeMars codec gtests and 23 fake-gimbal tests pass | Unit test |
+| Default SITL build, `--disable-Camera` build, `run_astyle.py --dry-run` | Build |
+
+### Not verified: no hardware
+
+No CubeMars motor has ever been connected to this firmware. Everything above is SITL,
+against a fake whose joint is massless and whose feedback trigger is an assumption rather
+than a measurement. `PNUCAN-001` stays open as implemented and SITL-verified, pending the
+first bench session, which must measure the realised slew rate at the motor, confirm that
+45 deg/s is a sane default for this payload, and check that a clamped step after a stall
+does not upset the drive.
+
+---
+
 ## V5.1.26 - the CAN driver loop keeps time
 
 Two defects, both found while preparing the `PMU-004` impact analysis, both reproduced in
