@@ -191,7 +191,8 @@ void PNU_SAR_nav_snapshot(bool nav_failsafe);
 // as soon as the driver next ticks, so no transition waits for the periodic slot.
 //
 // Paced on millis() rather than on the tick count, for the reason given at
-// PMUCAN_LOG_INTERVAL_MS: a driver tick is longer than 1/AP_PNU_CAN_LOOP_HZ.
+// PMUCAN_LOG_INTERVAL_MS: the log rate should not depend on the driver thread meeting
+// its deadline, whatever PMU-004 did or did not leave behind.
 #define AP_PNUSAR_LOG_INTERVAL_MS   (1000U)
 #define AP_PNUSAR_LOG_NO_STATUS     (0xFFU)     // no status logged yet this boot
 

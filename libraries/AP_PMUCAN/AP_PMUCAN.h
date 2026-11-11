@@ -66,11 +66,12 @@ extern mavlink_sys_icd_gcs_flcc_pmu_ctrl_echo_t         PMU_Ctrl_Echo;      // P
 // twice, none wrote nothing at all, and the rate followed the MAVLink scheduler rather
 // than the PMU.  Keeping the two intervals separate means a later change to the GCS rate
 // cannot silently change what the flight log contains.
-// It is paced on millis(), NOT on the tick counter the rest of this file uses.  The
-// driver loop delays a fixed period and then does its work, so a tick is longer than
-// 1/AP_PNU_CAN_LOOP_HZ by however long that work took - about 12.3 ms in SITL, giving
-// ~7.5 Hz where a tick count says 10.  See PMU-004.  A time deadline makes the log rate
-// mean what it says regardless of what the loop is doing.
+// It is paced on millis(), NOT on the tick counter the rest of this file uses, and it
+// stays that way now that PMU-004 is fixed.  The tick is a true 100 Hz as of 5.1.26, so
+// a count would give the right answer today - but the log rate should not depend on the
+// driver thread meeting its deadline, which is exactly the property a stall takes away.
+// A time deadline means what it says whatever the loop is doing.  (Before 5.1.26 a tick
+// was 13.1 - 13.5 ms in SITL, so a tick count of 10 gave ~7.5 Hz.)
 #define PMUCAN_LOG_RATE_HZ          (10U)
 #define PMUCAN_LOG_INTERVAL_MS      (1000U / PMUCAN_LOG_RATE_HZ)
 #define PMUCAN_ONRUNNING_INTERVAL   (100U)      // 1Hz  state report

@@ -438,12 +438,50 @@ void AP_PNU_CAN::set_init_error(const char *fmt, ...)
 }
 
 // thread entry.  All CAN work happens here; nothing runs on the vehicle scheduler.
+//
+// PMU-004 : THIS IS A FIXED RATE, NOT A FIXED DELAY, AND THE DIFFERENCE IS THE WHOLE
+// POINT.  Until 5.1.26 the loop slept for a whole period and THEN did its work, so a
+// tick cost the period PLUS the body - measured at 13.5 ms mean in SITL against a
+// nominal 10 ms, and never once below 10.8 ms.  Every rate in this driver is derived
+// from the tick count, so every one of them was slow by the same factor: the PMU's
+// ICD-specified 10 Hz per message was really 7.5 Hz, and PNU-ISSUE(D7)'s engine
+// interlock, which the source says is 1.0 s, was really about 1.3 s.
+//
+// Sleeping to the next DEADLINE instead makes the tick mean 10 ms, which makes every
+// constant derived from it mean what it says.  No constant is changed here; they simply
+// become true.
 void AP_PNU_CAN::loop(void)
 {
     const uint32_t period_us = 1000000UL / AP_PNU_CAN_LOOP_HZ;
+    static_assert(period_us <= UINT16_MAX,
+                  "AP_PNU_CAN_LOOP_HZ period must fit delay_microseconds()");
+
+    uint64_t next_us = AP_HAL::micros64() + period_us;
 
     while (true) {
-        hal.scheduler->delay_microseconds(period_us);
+        // Signed difference, so a deadline that has already passed is negative rather
+        // than an enormous unsigned number.
+        const uint64_t now_us = AP_HAL::micros64();
+        const int64_t remaining_us = (int64_t)(next_us - now_us);
+
+        if (remaining_us > 0) {
+            // The sleep absorbs whatever the body took, so the PERIOD stays constant
+            // while the body varies.  Capped at one period: the deadline can never be
+            // more than that far ahead, and delay_microseconds() takes a uint16_t.
+            hal.scheduler->delay_microseconds((uint16_t)MIN((uint64_t)remaining_us,
+                                                            (uint64_t)period_us));
+            next_us += period_us;
+        } else {
+            // THE BODY OVERRAN ITS PERIOD.  Run this tick immediately - being late is
+            // better than dropping a PMU slot - and RE-BASE the deadline on now rather
+            // than advancing it, so the lateness is forgotten instead of accumulated.
+            //
+            // Deliberately NOT a catch-up loop.  Repaying a stall with a burst of ticks
+            // would repay it with a burst of PMU commands and gimbal frames, at exactly
+            // the moment the thread has shown it is already behind.  One short tick is
+            // the whole cost, and the next one sleeps a full period again.
+            next_us = AP_HAL::micros64() + period_us;
+        }
 
         if (!_initialized || (_can_iface == nullptr)) {
             continue;
