@@ -2,11 +2,11 @@
 
 | | |
 |---|---|
-| **Current version** | `PNU_OFP V5.1.24` (DEV) |
+| **Current version** | `PNU_OFP V5.1.28` (DEV) |
 | **Baseline** | ArduPilot Copter **4.7.1** |
 | **Last official release** | `PNU-KAL-FLCC-5.1.0` (same code as 5.1.0 dev) |
 | **Vehicle** | **ArduCopter only.** Plane, Rover and Sub do not link - by construction |
-| **Documents** | `CHANGELOG.md` - version history and verification. `ISSUES.md` - issues, risks and decisions |
+| **Documents** | `CHANGELOG.md` - version history and verification. `ISSUES.md` - issues, risks and decisions. `PMU CAN Comm Protocol.md` - the PMU/ECU CAN ICD, V2.0 **Draft**. `SAR_ICD_PNU.md` - the SAR ICD, Rev1.0 |
 
 ---
 
@@ -28,8 +28,9 @@ a driver with no interface fails *silently*. The full reasoning is in `ISSUES.md
 design questions".
 
 **The bitrate is forced by the gimbal, not chosen.** The CubeMars GLII is fixed at 1 Mbit/s, so
-`CAN_P1_BITRATE` stays at its default and **the PMU must be reconfigured from 500 k on the
-device**.
+`CAN_P1_BITRATE` stays at its default and **the PMU is configured on the device to match** -
+ours arrived at 500 k. The rate is a bus property on both PMU generations, never a way to tell
+them apart; `VERSTS` does that.
 
 ### CAN ID allocation
 
@@ -171,7 +172,7 @@ no message to say why. Wrong since 5.1.13. See `CHANGELOG.md`.
 
 | Area | State |
 |---|---|
-| PMU | Full telemetry, commands, prearm, in-flight failsafe, engine-start interlock with two guards. **Bench-verified** except the shared bus and Stop-command timing |
+| PMU | Full telemetry, commands, prearm, in-flight failsafe, engine-start interlock with two guards. **Bench-verified** except the shared bus and Stop-command timing. Legacy V1.05 message set only - the ECU V2.0 set is specified but **not implemented**, `PMU-005` |
 | Gimbal | Mount backend, lifecycle state machine, Appendix 1 homing, per-axis direction parameters. **SITL only - no motor has ever turned** |
 | SAR | Connection layer, both MAVLink messages, the command layer with the Start interlock, the 10 Hz navigation bundle with automatic termination, and `SARN` bundle accounting. **SITL only - no SAR hardware** |
 | Camera | Viewpro via the KGCS TC2/TM2 interface; Gremsy VIO via standard MAVLink with four functions GCS-direct. **Bench-verified on both**, though the TM2 producer moved to `AP_Q30::update()` in 5.1.25 and that move is SITL-verified only |
@@ -212,6 +213,9 @@ terminates every observation, because a constant has no age.
   `SAR-001`. This is the mitigation that actually matters and it is still outstanding.
 - **Bench the shared bus.** Every PMU bench run so far had `PNU_OPTS = 1`; the id-based health
   rewrite has only ever run in SITL.
+- **Put three questions to the ECU author** - `PMU-005`. A reliable completed-stop indication,
+  whether `GCMD` reports the requested or the clamped setpoint, and the undefined `MODESTS`
+  codes. None blocks anything today, because no ECU is implemented.
 - **KGCS/PNU-GCS side:** TC50 must be sent from a sysid `MAV_GCS_SYSID` covers (default 255), and
   both endpoints must use CRC_EXTRA **231** (TC50) and **7** (TM50) - `GCS-002`.
 

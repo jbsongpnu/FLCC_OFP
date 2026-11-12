@@ -21,6 +21,57 @@ A feature exercised only in SITL is **not** hardware-verified. Entries say so ex
 
 ---
 
+## Documents, 2026-11-12 - `PMU CAN Comm Protocol.md` V2.0, the ECU message set (no version bump)
+
+**No firmware change.** `AP_PMUCAN` still speaks the Version 1.05 message set only; nothing
+in the tree decodes `0x10000150`, `0x10000160` or sends `0x10000050`. This entry records a
+specification revision and the decisions taken while making it.
+
+**Changes**
+
+- The ICD now covers the **second-generation PMU (ECU), software 2.00+** alongside the
+  legacy PMU: three new messages - **ENERGYCFG `0x10000050`** (tank/fuel/battery/soc, DLC 8,
+  the first command that is not a UINT32 CMD), **MODESTS `0x10000150`** (operating modes,
+  RPM target, start gate) and **ENERGYSTS `0x10000160`** (tank, battery, endurance) - plus
+  ECU behaviour for the five existing commands and the existing status fields. Source:
+  `ECU_CAN_Protocol_r2.pdf`, draft for review dated 2026-11-12, **which is not stored in
+  this repository**.
+- **Two compatibility classes, keyed on `VERSTS`.** Below 2.0 gets the legacy messages and
+  legacy behaviour; 2.0 or higher enables the new set. An unanswered or undecodable `VERSTS`
+  counts as below 2.0. Backward compatibility is retained in every case.
+
+**Decisions recorded 2026-11-12**
+
+| Decision | What it means for the FC |
+|---|---|
+| `ENGONOFF` Start and Stop are each sent **once on change**; the draft's 500 ms Stop repeat is not adopted | **Nothing to do** - `engineonoffstate()` already sends only on a committed transition and retries only a failed send. V5.1.28's `PMUC` measured it: `CmdTx`/`RtrTx` = 0.800 exactly, four of five slots carrying a command |
+| `ENGCHK` `CMD = 0` opens, `CMD = 1` closes; the ECU's `choke_setpoint < 50%` rule behind `PSTS` bit 3 is descriptive | No Host setpoint calculation, no extra polarity validation |
+| `ENERGYSTS.endurance` is displayed as encoded, `0xFFFF` as **Unknown** | No Host pre-flight endurance estimate; a separate feature may be considered later |
+| `PSTS` bit 9 is a maintenance indication, checked pre-flight, cleared through the ECU's own UART service shell | No CAN clearing command, no counter reset from the FC |
+| The CAN bit rate is **configured per bus**, not tied to a protocol version | The 1 Mbps bus stays as it is; the generation is read from `VERSTS`, never inferred from the rate |
+| `AUX1STS.GCMD` follows its declared **0.1 %/count** scale - raw 100 is 10.0%, and it is **not** a numeric copy of the `BATCTRL` command | `CMD = 10` reads back as raw 100; convert, never compare |
+| `MODESTS` and `MODESTS.initial_fail` are **informational while under development** | The ECU enforces its own modes and start permissions; no new FC interlock is built on them |
+| `ENERGYCFG.fuel` is the **current total measured tank quantity**, encoded `round(litres * 100)` | The protocol has no incremental fuel addition; the earlier `GAS * tank / 100 + litres_added` rule, which mixed raw counts with litres, is gone |
+
+**Verification**
+
+- All seven ECU encoding examples re-checked arithmetically against the field tables -
+  `MODESTS` `53 06 00 03 00 00 CC 10` decodes to ENGINE_RUN/RUNNING, EMS, NONE, CHARGE, 0, 0,
+  4300 rpm; `ENERGYSTS` `20 03 DC 00 20 1C 00 00` to 8.00 L, 22.0 Ah, 7200 s; `BATSTS` GAGE
+  `0x0348` to 84.0%, which is what settles the `GCMD` scale question.
+- Document only: ASCII-only, table structure unchanged (248 rows), Version 2.0 / Draft /
+  2026-11-11 and the two-row revision history untouched, no firmware edit.
+
+**Known Limitations**
+
+- **No ECU hardware exists on this project**, and the source draft has not been verified
+  against a device by anyone. Nothing here is implemented or tested.
+- Three questions remain for the ECU author - a reliable completed-stop indication, whether
+  `GCMD` reports the requested or the clamped setpoint, and the undefined `MODESTS` codes -
+  and the `MODESTS` layout carries no version marker. See `PMU-005`.
+
+---
+
 ## V5.1.28 - the PMU says what it decided and what it sent
 
 Two dataflash records, both written from the driver thread, neither changing any

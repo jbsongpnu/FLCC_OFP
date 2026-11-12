@@ -470,6 +470,60 @@ achieved. **Neither replaces the measurement.** `RtrTx` counts frames handed to 
 interface, not frames on the wire, and nothing in either record measures the driver loop
 interval directly. Items 1 and 3 still need a CAN analyser and `SCHED_DEBUG` respectively.
 
+## PMU-005 - the ECU (2nd-generation PMU) protocol is specified, not implemented
+
+| | |
+|---|---|
+| **Status** | OPEN. Specification only - no firmware, nothing blocked |
+| **Component** | `PMU CAN Comm Protocol.md` V2.0 (Draft). No code; `AP_PMUCAN` speaks V1.05 only |
+| **Source** | `ECU_CAN_Protocol_r2.pdf`, draft for review 2026-11-12, **not stored in this repository** |
+| **Related** | `PMU-001`, `PMU-003`, `CHANGELOG.md` "Documents, 2026-11-12" |
+
+**What it is.** The second-generation PMU is an ECU whose software 2.00+ adds three messages -
+`ENERGYCFG 0x10000050`, `MODESTS 0x10000150`, `ENERGYSTS 0x10000160` - and defines ECU-specific
+behaviour for the five existing commands and the existing status fields. The ICD now covers both
+generations, in **two compatibility classes keyed on `VERSTS`**: below 2.0 is legacy messages and
+legacy behaviour, 2.0 or higher enables the new set, and a `VERSTS` that cannot be obtained or
+decoded counts as below 2.0.
+
+**Nothing in this tree decodes any of it.** `git grep` finds no `0x10000150`, `0x10000160` or
+`0x10000050`. The FC is unaffected until someone implements ECU support, and this issue exists so
+the decisions behind the ICD are not re-litigated from memory when they do.
+
+**The one thing worth knowing for the FC.** The ECU draft asked for `ENGONOFF` Stop to be repeated
+every 500 ms until confirmed; that was **not adopted** - Start and Stop are each sent once when the
+requested state changes. `engineonoffstate()` already behaves exactly that way, retrying only a
+failed CAN send, and V5.1.28's `PMUC` measured it at `CmdTx`/`RtrTx` = 0.800. So the decision costs
+no work, and a future ECU implementation must not add a retransmission loop.
+
+**Three questions for the ECU author**, none of them blocking today:
+
+1. **A reliable completed-stop indication.** With Stop sent once, the Host needs a status field
+   that distinguishes a stop that *completed* from one that *started*. The draft itself says
+   `PSTS` STOP_SEQUENCE may be too brief to catch and `operation_mode` STOP can pass between
+   100 ms polls. Until this is answered, confirming a stop is best-effort.
+2. **`AUX1STS.GCMD`, requested or effective.** The scale is settled - 0.1 % per raw count, raw
+   100 is 10.0%, confirmed against `BATSTS.GAGE`'s own example. What is open is whether `GCMD`
+   reports the setpoint as requested or as clamped into the EMS's internal 54-90% range. Until
+   answered, `GCMD` cannot be used to confirm that a `BATCTRL` value was accepted unchanged.
+3. **Undefined `MODESTS` codes** - `operation_mode` 2, a zero nibble in either half of byte 0,
+   `start_gate` 1-3 and 14, `initial_fail` bits `0x08`/`0x10`/`0x40`/`0x80` - and the fact that
+   the frame carries **no layout version**. `MODESTS` is still under development, so its field
+   order must be re-validated against a capture before any decoder is frozen.
+
+**Decided, and not to be reopened without a reason:** choke polarity is `0 = open, 1 = close` with
+the ECU's `choke_setpoint < 50%` rule informational only; `ENERGYSTS.endurance` is displayed as
+encoded with `0xFFFF` shown as Unknown and no Host-side estimate; `PSTS` bit 9 is a maintenance
+indication cleared through the ECU's own UART service shell, never over CAN; the bit rate is a bus
+property on both generations and never a version marker; `MODESTS` and `initial_fail` are
+informational while under development, with the ECU enforcing its own start permissions; and
+`ENERGYCFG.fuel` is the current **total measured** tank quantity, `round(litres * 100)`, with no
+incremental-addition path.
+
+**Remaining limitation.** No ECU hardware exists on this project and the source draft has not been
+verified against a device by anyone, here or at the vendor. The source PDF is not in the repository,
+so the ECU sections cannot be re-checked from a clone alone - keep a copy with the project records.
+
 ## PNUCAN-001 - the gimbal slew limiter divided by a nominal rate
 
 | | |
