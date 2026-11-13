@@ -24,14 +24,23 @@ from fake_pmu import CAN_FRAME_FMT, TakeoffWatcher, is_vehicle_heartbeat        
 from pmu_model import State                                                     # noqa: E402
 
 
-def make_pmu():
+def make_pmu(ecu=False):
     '''a FakePMU with no socket, recording what it would have sent'''
-    pmu = FakePMU('test0')
+    pmu = FakePMU('test0', ecu=ecu)
     pmu.sent = []
     pmu.send = lambda can_id, payload: pmu.sent.append((can_id, payload))
-    pmu.log = lambda msg: None
+    pmu.logged = []
+    pmu.log = lambda msg: pmu.logged.append(msg)
     pmu.model._log = lambda msg: None       # bound before pmu.log was replaced
     return pmu
+
+
+def reply(pmu, can_id):
+    '''the payload the fake answered @can_id with, or None'''
+    for sent_id, payload in pmu.sent:
+        if sent_id == can_id:
+            return payload
+    return None
 
 
 def frame(can_id, data=b'', rtr=False):
@@ -154,6 +163,146 @@ def test_an_undefined_engonoff_value_is_ignored():
 
 
 # -- takeoff detection ----------------------------------------------------------------
+
+# -- ECU V2.0 protocol mode -----------------------------------------------------------
+#
+# Stage 0 is PROTOCOL VERIFICATION, so these tests decode the fixed payloads back to the
+# values the ICD states in its own encoding examples.  A typo in MODESTS_EXAMPLE or
+# ENERGYSTS_EXAMPLE is therefore a failing test rather than a plausible-looking frame.
+
+def test_legacy_is_the_default_and_has_no_ecu_status_ids():
+    pmu = make_pmu()
+    assert pmu.ecu is False
+    for can_id in icd.ECU_STATUS_IDS:
+        pmu.handle_frame(frame(can_id, rtr=True))
+    assert pmu.sent == []
+
+
+def test_ecu_mode_answers_the_two_new_status_ids():
+    pmu = make_pmu(ecu=True)
+    for can_id in icd.ECU_STATUS_IDS:
+        pmu.handle_frame(frame(can_id, rtr=True))
+    assert [can_id for can_id, _ in pmu.sent] == list(icd.ECU_STATUS_IDS)
+    assert all(len(payload) == icd.STATUS_DLC for _, payload in pmu.sent)
+
+
+def test_a_data_frame_on_an_ecu_status_id_is_not_a_request():
+    pmu = make_pmu(ecu=True)
+    pmu.handle_frame(frame(icd.MODESTS, b'\x00' * 8))
+    assert pmu.sent == []
+
+
+def test_the_modests_example_decodes_to_the_values_the_icd_states():
+    pmu = make_pmu(ecu=True)
+    pmu.handle_frame(frame(icd.MODESTS, rtr=True))
+    data = reply(pmu, icd.MODESTS)
+    assert data[0] & 0x0F == 3                                  # system_state ENGINE_RUN
+    assert (data[0] >> 4) & 0x0F == 5                           # operation_mode RUNNING
+    assert data[1] == 6                                         # ctrl_mode EMS
+    assert data[2] == 0                                         # alert_level NONE
+    assert data[3] == 3                                         # ems_mode CHARGE
+    assert data[4] == 0                                         # start_gate
+    assert data[5] == 0                                         # initial_fail
+    assert struct.unpack('<H', data[6:8])[0] == 4300            # rpm_target
+
+
+def test_the_energysts_example_decodes_to_the_values_the_icd_states():
+    pmu = make_pmu(ecu=True)
+    pmu.handle_frame(frame(icd.ENERGYSTS, rtr=True))
+    tank, battery, endurance, reserved = struct.unpack('<HHHH', reply(pmu, icd.ENERGYSTS))
+    assert tank == 800                                          # 8.00 L at 0.01 L
+    assert battery == 220                                       # 22.0 Ah at 0.1 Ah
+    assert endurance == 7200                                    # 7200 s at 1 s
+    assert reserved == 0
+
+
+def test_ecu_versts_reports_software_2_00():
+    pmu = make_pmu(ecu=True)
+    pmu.handle_frame(frame(icd.VERSTS, rtr=True))
+    data = reply(pmu, icd.VERSTS)
+    date, minor, major, rsv = struct.unpack('<IBBH', data)
+    assert (major >> 4) * 10 + (major & 0x0F) == 2              # BCD 0x02 -> 2
+    assert (minor >> 4) * 10 + (minor & 0x0F) == 0              # BCD 0x00 -> 0
+    assert date == 0x20261201 and rsv == 0
+    # byte for byte, the ICD's own example reply
+    assert data == bytes((0x01, 0x12, 0x26, 0x20, 0x00, 0x02, 0x00, 0x00))
+
+
+def test_legacy_versts_still_reports_1_00():
+    pmu = make_pmu()
+    pmu.handle_frame(frame(icd.VERSTS, rtr=True))
+    _, minor, major, _ = struct.unpack('<IBBH', reply(pmu, icd.VERSTS))
+    assert major == icd.VERSION_MAJOR_BCD == 0x01
+    assert minor == icd.VERSION_MINOR_BCD == 0x00
+
+
+def test_hourcnt_is_24_bit_on_legacy_and_32_bit_on_the_ecu():
+    # the one existing-message difference, and the reason ECU_HOURCNT_BASE exists
+    legacy, ecu = make_pmu(), make_pmu(ecu=True)
+    for pmu in (legacy, ecu):
+        pmu.model.hour_count_s = 3600.0
+        pmu.handle_frame(frame(icd.AUX2STS, rtr=True))
+
+    old = reply(legacy, icd.AUX2STS)
+    assert struct.unpack('<I', old[:3] + b'\x00')[0] == 3600
+    assert old[3] == 0                                          # legacy RSV
+
+    new = reply(ecu, icd.AUX2STS)
+    assert struct.unpack('<I', new[:4])[0] == icd.ECU_HOURCNT_BASE + 3600
+    assert new[3] != 0                                          # byte 3 carries the count
+    # a decoder still reading 24 bits sees only the running time, never the true count
+    assert struct.unpack('<I', new[:3] + b'\x00')[0] == 3600
+
+
+def test_the_three_unchanged_replies_are_identical_in_both_modes():
+    legacy, ecu = make_pmu(), make_pmu(ecu=True)
+    for can_id in (icd.BATSTS, icd.ENGSTS, icd.AUX1STS):
+        for pmu in (legacy, ecu):
+            pmu.handle_frame(frame(can_id, rtr=True))
+        assert reply(legacy, can_id) == reply(ecu, can_id)
+
+
+# -- ENERGYCFG ------------------------------------------------------------------------
+
+def energycfg(tank, fuel, battery, soc, dlc=8):
+    return frame(icd.ENERGYCFG, struct.pack('<HHHH', tank, fuel, battery, soc)[:dlc])
+
+
+def test_energycfg_is_decoded_in_ecu_mode():
+    # the ICD's own command example: 8.00 L tank, 6.50 L fuel, 22.0 Ah, 95.0% SOC
+    pmu = make_pmu(ecu=True)
+    pmu.handle_frame(frame(icd.ENERGYCFG,
+                           bytes((0x20, 0x03, 0x8A, 0x02, 0xDC, 0x00, 0xB6, 0x03))))
+    assert pmu._energycfg_seen == 1
+    assert 'tank=800 fuel=650 battery=220 soc=950' in pmu.logged[-1]
+    assert pmu.sent == []                       # no application-level acknowledgment
+
+
+def test_energycfg_keep_current_value_fields_survive_decoding():
+    pmu = make_pmu(ecu=True)
+    pmu.handle_frame(energycfg(0xFFFF, 650, 0xFFFF, 0xFFFF))
+    assert 'tank=65535 fuel=650 battery=65535 soc=65535' in pmu.logged[-1]
+
+
+def test_energycfg_with_a_short_dlc_is_rejected():
+    pmu = make_pmu(ecu=True)
+    pmu.handle_frame(energycfg(800, 650, 220, 950, dlc=4))
+    assert pmu._energycfg_seen == 0
+    assert 'DLC 4' in pmu.logged[-1]
+
+
+def test_energycfg_is_ignored_on_a_legacy_pmu():
+    pmu = make_pmu()
+    pmu.handle_frame(energycfg(800, 650, 220, 950))
+    assert pmu._energycfg_seen == 0
+    assert pmu.sent == []
+
+
+def test_an_energycfg_is_not_counted_as_a_legacy_command():
+    pmu = make_pmu(ecu=True)
+    pmu.handle_frame(energycfg(800, 650, 220, 950))
+    assert pmu._cmd_seen == 0
+
 
 class FakeMessage(object):
     '''enough of a pymavlink message for TakeoffWatcher.consume()'''

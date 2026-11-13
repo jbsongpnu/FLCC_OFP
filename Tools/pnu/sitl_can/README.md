@@ -18,7 +18,7 @@ extended, the gimbal is 11-bit standard below `0x300`, the SAR is 11-bit standar
 | File | What it is |
 |---|---|
 | `pmu_model.py` | the engine, generator and battery. Pure state machine, no I/O |
-| `pmu_frames.py` | the five status frames. Wire format only, no state |
+| `pmu_frames.py` | the five status frames, plus the ECU V2.0 variants and its two new ones. Wire format only, no state |
 | `fake_pmu.py` | SocketCAN I/O, the operator console and MAVLink takeoff detection |
 | `tc1_inject.py` | TC1 injector and stopwatch for the step 2c interlock windows |
 | `sar_frames.py` | the SAR's 16 ids and the four frames a SAR transmits. Wire format only |
@@ -29,7 +29,7 @@ extended, the gimbal is 11-bit standard below `0x300`, the SAR is 11-bit standar
 | `run_all3.sh` | starts all three fakes and SITL together, collects the logs, tears down |
 | `mav_tap.py` | logs the FC's statustexts and TM50 for a run with no ground station |
 | `test_pmu_model.py` | 17 tests: the RPM ladder, and every field at the offset `AP_PMUCAN` reads |
-| `test_fake_pmu.py` | 26 tests: RTR dispatch, command decode, the silent trigger, takeoff detection |
+| `test_fake_pmu.py` | 40 tests: RTR dispatch, command decode, the silent trigger, takeoff detection, and the ECU V2.0 payloads decoded back to the ICD's stated values |
 | `test_fake_sar.py` | 29 tests: heartbeat framing, command responses, the navigation bundle, and the ids checked against both the ICD and `AP_PNUSAR.h` |
 | `test_fake_gimbal.py` | 23 tests: the codec against the manual's own vectors, the model, the stops |
 | `test_mav_tap.py` | 10 tests: MAVLink2 framing, and TM50 read in wire order |
@@ -224,6 +224,29 @@ last message, with no further input. Put the constant back afterwards.
 | `quit` | exit |
 
 `kill -USR1 <pid>` toggles silence, for scripted tests.
+
+## ECU V2.0 mode
+
+`--ecu` makes the fake answer as a second-generation PMU (ECU) running software 2.00
+instead of a legacy PMU. `run_all3.sh --pmu-ecu` does the same through the runner. It is a
+**protocol mode, not a second engine model**: the engine, generator and battery behave
+exactly as they do in legacy mode, because Stage 0 of `PMU-005a` verifies encoding and
+decoding, not ECU behaviour. There is no ECU operating-mode machine, no governor, no EMS
+and no fuel model here, and nothing persists.
+
+| In `--ecu` | Behaviour |
+|---|---|
+| `VERSTS` | DATE 2026-12-01 BCD, MN 0x00, MJ 0x02 - software 2.00, so the FC selects `ECU_V2`. Byte for byte the ICD's own example reply |
+| `AUX2STS` | HOURCNT is **UINT32** over bytes 0-3, offset by `ECU_HOURCNT_BASE` (2^24) so byte 3 is never zero. A decoder still reading 24 bits sees the plain running time, a correct one sees base + running time, and the two can never be confused |
+| `MODESTS` `0x10000150` | answered with the ICD's example payload `53 06 00 03 00 00 CC 10` |
+| `ENERGYSTS` `0x10000160` | answered with the ICD's example payload `20 03 DC 00 20 1C 00 00` |
+| `ENERGYCFG` `0x10000050` | **decoded and reported, not applied.** DLC must be 8; the four raw UINT16 fields are logged, `0xFFFF` included. Acceptance rules and persistence belong to the real ECU |
+| `BATSTS`, `ENGSTS`, `AUX1STS` | byte-identical to legacy mode, which a test asserts |
+
+The two ECU status ids exist **only** in this mode, so a legacy run proves the FC never
+polls them on a device it has identified as legacy. The fake prints which protocol it is
+speaking on startup and in every `status` line - the fake gimbal's feedback mode taught
+that lesson once already.
 
 Takeoff is FC state and never appears on CAN, so it is read from SITL's MAVLink output
 (`--mavlink udp:127.0.0.1:14550`, or `none` to disable). `EXTENDED_SYS_STATE.landed_state`

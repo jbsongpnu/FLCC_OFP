@@ -39,6 +39,7 @@ DURATION=0
 SCENARIO=
 EXTRA_PARAM=
 PMU_MAVLINK=tcp:127.0.0.1:5763
+PMU_ECU=0
 TAP=1
 NO_ROOT=0
 VERBOSE=0
@@ -64,6 +65,7 @@ Starts the three fakes on one vcan0, then SITL, then holds until Ctrl-C.
                     <mavlink url> <gimbal fifo> <sar fifo> <pmu fifo>
   --param FILE      extra parameter file, appended after the generated one
   --pmu-mavlink U   where the fake PMU watches for takeoff (default SERIAL2, or "none")
+  --pmu-ecu         run the fake PMU as an ECU V2.0 device instead of a legacy PMU
   --no-tap          do not log the FC's statustexts and TM50 on SERIAL5
   --interface NAME  SocketCAN interface (default vcan0; SITL hard-codes vcan0)
   --no-root         create the bus in a private user namespace instead of needing root.
@@ -107,6 +109,7 @@ while [ $# -gt 0 ]; do
         --scenario)     SCENARIO=$2; shift 2 ;;
         --param)        EXTRA_PARAM=$2; shift 2 ;;
         --pmu-mavlink)  PMU_MAVLINK=$2; shift 2 ;;
+        --pmu-ecu)      PMU_ECU=1; shift ;;
         --no-tap)       TAP=0; shift ;;
         --interface)    IFACE=$2; shift 2 ;;
         --no-root)      NO_ROOT=1; shift ;;
@@ -188,6 +191,9 @@ fi
 VFLAG=
 if [ $VERBOSE -eq 1 ]; then VFLAG=--verbose; fi
 
+PMU_ECU_FLAG=
+if [ $PMU_ECU -eq 1 ]; then PMU_ECU_FLAG=--ecu; fi
+
 # a wall-clock prefix: each fake stamps its own lines from its own start, which is no
 # use for lining three logs up against each other or against SITL
 stamp() {
@@ -253,7 +259,7 @@ echo "--- starting the fakes on $IFACE ---"
     $VFLAG < "$OUT/gimbal.fifo" 2>&1 | stamp > "$OUT/gimbal.log" &
 "$TOOLS/fake_sar.py" --interface "$IFACE" --counter 777000 \
     $VFLAG < "$OUT/sar.fifo" 2>&1 | stamp > "$OUT/sar.log" &
-"$TOOLS/fake_pmu.py" --interface "$IFACE" --mavlink "$PMU_MAVLINK" \
+"$TOOLS/fake_pmu.py" --interface "$IFACE" --mavlink "$PMU_MAVLINK" $PMU_ECU_FLAG \
     $VFLAG < "$OUT/pmu.fifo" 2>&1 | stamp > "$OUT/pmu.log" &
 
 # wait for all three to have bound their socket, rather than guessing with a sleep

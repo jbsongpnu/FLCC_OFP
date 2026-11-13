@@ -21,6 +21,59 @@ A feature exercised only in SITL is **not** hardware-verified. Entries say so ex
 
 ---
 
+## Tools, 2026-11-13 - an ECU V2.0 mode for the fake PMU (no version bump)
+
+`PMU-005a` stage 0.  No firmware change: the FC still speaks V1.05 only, and this is the
+device it will be tested against when it does not.
+
+**Changes**
+
+- `pmu_frames.py` gains the ECU V2.0 ids (`MODESTS 0x10000150`, `ENERGYSTS 0x10000160`,
+  `ENERGYCFG 0x10000050`), a `build_ecu()` that overrides two of the five legacy replies
+  and answers the two new ones, and `decode_energycfg()`.  `BATSTS`, `ENGSTS` and
+  `AUX1STS` are reached through the legacy builders rather than copied - they are
+  byte-identical on both generations, and a test asserts it.
+- `fake_pmu.py --ecu`, and `run_all3.sh --pmu-ecu`.  **A protocol mode, not a second
+  engine model.**  The engine, generator and battery behave exactly as in legacy mode;
+  stage 0 verifies encoding and decoding, so an ECU operating-mode machine, a governor,
+  an EMS or a fuel model here would be invention rather than a test vector.
+- `MODESTS` and `ENERGYSTS` answer with the ICD's own example payloads, verbatim.
+  `ENERGYCFG` is decoded and reported but **not applied**: its acceptance rules and its
+  persistence belong to the real ECU.
+- `AUX2STS` HOURCNT becomes UINT32, offset by `ECU_HOURCNT_BASE` = 2^24 so that **byte 3
+  is never zero**.  That is the whole point of the offset: a decoder still reading 24 bits
+  reports the plain running time, a correct one reports base + running time, and no run
+  can confuse the two.  Stage 2 is the firmware half of this.
+- The fake prints which protocol it is speaking at startup and in every `status` line.
+
+**Verification**
+
+| What | How |
+|---|---|
+| 40 tests in `test_fake_pmu.py`, 124 across the directory, all passing | Unit test |
+| `MODESTS` `53 06 00 03 00 00 CC 10` decodes to ENGINE_RUN/RUNNING, EMS, NONE, CHARGE, 0, 0, 4300 rpm | Unit test |
+| `ENERGYSTS` `20 03 DC 00 20 1C 00 00` decodes to 8.00 L, 22.0 Ah, 7200 s | Unit test |
+| `VERSTS` in `--ecu` equals the ICD's example reply byte for byte, and decodes to 2.00 | Unit test |
+| HOURCNT: 3600 s reads as 3600 at 24 bits and as 2^24 + 3600 at 32 bits, from the same frame | Unit test |
+| `ENERGYCFG` DLC 8 decoded (the ICD's example: 8.00 L, 6.50 L, 22.0 Ah, 95.0%), DLC 4 rejected, ignored entirely in legacy mode, never counted as a legacy command, never acknowledged | Unit test |
+| 30 s SITL run against `--pmu-ecu`: 1477 RTRs, 1477 answered | SITL |
+| The FC already receives what stage 1 will act on: `TM12` `MJ`/`MN` read **0x02 / 0x00** and `TM11` `DATE` reads **0x20261201**, against 0x01 / 0x00 and 0x20261029 on the legacy fake | SITL |
+| **Step 2c unaffected by the protocol mode**: `stop-start` commanded the engine **1.134 s** after the Start burst began against the ECU fake and **1.143 s** against the legacy one, a 9 ms difference against a 10 ms tick | SITL |
+| Same scenario, same traffic: 1024 RTRs / 821 commands in ECU mode against 1027 / 822 in legacy, over the same 21 s | SITL |
+| `flake8` clean on all four changed files; `bash -n` on the runner | Build |
+
+**Known Limitations**
+
+- The fixed MODESTS and ENERGYSTS payloads never change.  Nothing here models an ECU
+  changing mode, and no test that needs a *sequence* of ECU states can be written against
+  this fake until one is added deliberately.
+- `ENERGYCFG` is not applied, so there is nothing to read back.  Stage 5 will need more
+  than this.
+- No ECU hardware exists.  A fake that satisfies the ICD proves the ICD was read
+  correctly, not that a real ECU behaves this way.
+
+---
+
 ## Documents, 2026-11-12 - `PMU CAN Comm Protocol.md` V2.0, the ECU message set (no version bump)
 
 **No firmware change.** `AP_PMUCAN` still speaks the Version 1.05 message set only; nothing

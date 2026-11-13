@@ -19,6 +19,11 @@ takeoff detection, is imported lazily, and can be left out entirely - the consol
     sudo ip link add vcan0 type vcan && sudo ip link set vcan0 up
     Tools/pnu/sitl_can/fake_pmu.py --interface vcan0
 
+--ecu answers as an ECU V2.0 device instead of a legacy PMU: VERSTS reports software
+2.00, HOURCNT becomes UINT32, and the two ECU-only status ids are answered with the
+ICD's own example payloads.  It is a PROTOCOL mode, not a second engine model - there is
+no ECU operating-mode machine, governor or EMS here.  Legacy is the default.
+
 Console commands on stdin: silent, resume, status, start, stop, choke open|close,
 takeoff, land, help, quit.  SIGUSR1 toggles silence, for scripted tests.
 
@@ -53,9 +58,10 @@ TICK_HZ = 100.0
 
 class FakePMU(object):
 
-    def __init__(self, interface, verbose=False):
+    def __init__(self, interface, verbose=False, ecu=False):
         self.interface = interface
         self.verbose = verbose
+        self.ecu = ecu
         self.silent = False
         self.running = True
         self.commands = queue.Queue()
@@ -66,6 +72,7 @@ class FakePMU(object):
         self._rtr_seen = 0
         self._rtr_answered = 0
         self._cmd_seen = 0
+        self._energycfg_seen = 0
 
         self.sock = None
 
@@ -103,13 +110,18 @@ class FakePMU(object):
             self.handle_command(frame_id, dlc, data[:dlc])
 
     def handle_rtr(self, frame_id):
-        if frame_id not in icd.STATUS_IDS:
+        # The two ECU-only status ids exist only in --ecu mode.  A legacy PMU does not
+        # have them, so ignoring them here is what lets a test prove the FC never polls
+        # them on a device it has identified as legacy.
+        known = frame_id in icd.STATUS_IDS or (self.ecu and frame_id in icd.ECU_STATUS_IDS)
+        if not known:
             return
         self._rtr_seen += 1
         if self.silent:
             return
         self._rtr_answered += 1
-        self.send(frame_id, icd.build(frame_id, self.model))
+        builder = icd.build_ecu if self.ecu else icd.build
+        self.send(frame_id, builder(frame_id, self.model))
 
     def handle_command(self, frame_id, dlc, data):
         handlers = {
@@ -119,6 +131,9 @@ class FakePMU(object):
             icd.ENGPCL: self.model.cmd_throttle,
             icd.ENGCHK: self.model.cmd_choke,
         }
+        if frame_id == icd.ENERGYCFG:
+            self.handle_energycfg(dlc, data)
+            return
         if frame_id not in handlers:
             return
         if dlc != icd.COMMAND_DLC:
@@ -133,6 +148,22 @@ class FakePMU(object):
         elif self.verbose:
             self.log('RX 0x%08X CMD=%u' % (frame_id, value))
         handlers[frame_id](value)
+
+    def handle_energycfg(self, dlc, data):
+        '''ENERGYCFG, ECU V2.0 only.  DECODED AND REPORTED, NOT APPLIED: Stage 0 verifies
+           the wire format, and a persistent energy configuration is not part of it.  The
+           ICD's acceptance rules - 0xFFFF keeps a field, all-or-nothing validation, the
+           DO_NOTHING/STANDBY restriction - belong to the real ECU.'''
+        if not self.ecu:
+            self.log('ENERGYCFG 0x%08X on a legacy PMU - ignored' % icd.ENERGYCFG)
+            return
+        if dlc != icd.ENERGYCFG_DLC:
+            self.log('ENERGYCFG has DLC %u, ICD says %u - ignored' % (dlc, icd.ENERGYCFG_DLC))
+            return
+        self._energycfg_seen += 1
+        fields = icd.decode_energycfg(data)
+        self.log('RX ENERGYCFG tank=%u fuel=%u battery=%u soc=%u (raw, 0xFFFF = keep)'
+                 % (fields['tank'], fields['fuel'], fields['battery'], fields['soc']))
 
     # -- console ----------------------------------------------------------------------
 
@@ -172,8 +203,9 @@ class FakePMU(object):
             self.set_silent(not self.silent)
         elif cmd == 'status':
             self.log(self.model.summary())
-            self.log('silent=%s  RTR seen %u answered %u  commands %u'
-                     % (self.silent, self._rtr_seen, self._rtr_answered, self._cmd_seen))
+            self.log('protocol=%s  silent=%s  RTR seen %u answered %u  commands %u  ENERGYCFG %u'
+                     % ('ECU V2.0' if self.ecu else 'legacy PMU V1.05', self.silent,
+                        self._rtr_seen, self._rtr_answered, self._cmd_seen, self._energycfg_seen))
             # the MAVLink side is reported too: when takeoff is not detected, this is
             # where the answer is, and guessing at it once was enough
             self.log(self.watcher.summary() if self.watcher is not None else 'MAVLink: disabled')
@@ -476,11 +508,14 @@ def main():
                         help='relative altitude counted as airborne when EXTENDED_SYS_STATE is absent')
     parser.add_argument('--sysid', type=int, default=None,
                         help='pin the vehicle MAVLink system id instead of identifying it from telemetry')
+    parser.add_argument('--ecu', action='store_true',
+                        help='answer as an ECU V2.0 device (VERSTS 2.00, UINT32 HOURCNT, '
+                             'MODESTS and ENERGYSTS) instead of a legacy PMU')
     parser.add_argument('--silent', action='store_true', help='start without answering RTRs')
     parser.add_argument('--verbose', action='store_true', help='log every command frame')
     args = parser.parse_args()
 
-    pmu = FakePMU(args.interface, verbose=args.verbose)
+    pmu = FakePMU(args.interface, verbose=args.verbose, ecu=args.ecu)
     try:
         pmu.connect()
     except OSError as err:
@@ -488,6 +523,12 @@ def main():
         print('try: sudo modprobe vcan && sudo ip link add %s type vcan && sudo ip link set %s up'
               % (args.interface, args.interface), file=sys.stderr)
         return 1
+
+    # SAID LOUDLY, EVERY RUN.  Which protocol the fake is speaking changes what the FC
+    # is being tested against, and the fake gimbal's feedback mode taught this lesson
+    # once already: a mode nobody can see in the log is a mode nobody checks.
+    pmu.log('protocol: %s' % ('ECU V2.0 - VERSTS 2.00, UINT32 HOURCNT, MODESTS + ENERGYSTS'
+                              if args.ecu else 'legacy PMU V1.05 (default)'))
 
     if args.silent:
         pmu.set_silent(True)

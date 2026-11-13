@@ -531,8 +531,8 @@ per-stage record once a stage lands.
 
 | Stage | Content | Status |
 |---|---|---|
-| **0** | Minimal fake ECU in `Tools/pnu/sitl_can/` - VERSTS 2.00, the new ids and DLCs, fixed ICD-example MODESTS/ENERGYSTS payloads, a 32-bit HOURCNT payload. Legacy stays the default. Protocol encode/decode only, no ECU behaviour model | **NEXT** |
-| **1** | VERSTS-based protocol identification in `AP_PMUCAN`: `UNKNOWN` / `LEGACY_PMU` / `ECU_V2` | after 0 |
+| **0** | Minimal fake ECU in `Tools/pnu/sitl_can/` - VERSTS 2.00, the new ids and DLCs, fixed ICD-example MODESTS/ENERGYSTS payloads, a 32-bit HOURCNT payload. Legacy stays the default. Protocol encode/decode only, no ECU behaviour model | **DONE 2026-11-13** |
+| **1** | VERSTS-based protocol identification in `AP_PMUCAN`: `UNKNOWN` / `LEGACY_PMU` / `ECU_V2` | **NEXT** |
 | **2** | `AUX2STS` HOURCNT width by generation - UINT24 legacy, UINT32 ECU. One branch, no schema change | after 1 |
 | **3** | `AP_PMUCAN_ECU.{h,cpp}`: MODESTS at 10 Hz, ENERGYSTS at 1 Hz, on the free scheduling phases, active only in `ECU_V2` | after 2 |
 | **4** | MAVLink telemetry for ECU status - **design proposal only, needs approval before implementation** | blocked on approval |
