@@ -40,6 +40,7 @@ SCENARIO=
 EXTRA_PARAM=
 PMU_MAVLINK=tcp:127.0.0.1:5763
 PMU_ECU=0
+PMU_VERSTS=1
 TAP=1
 NO_ROOT=0
 VERBOSE=0
@@ -66,6 +67,7 @@ Starts the three fakes on one vcan0, then SITL, then holds until Ctrl-C.
   --param FILE      extra parameter file, appended after the generated one
   --pmu-mavlink U   where the fake PMU watches for takeoff (default SERIAL2, or "none")
   --pmu-ecu         run the fake PMU as an ECU V2.0 device instead of a legacy PMU
+  --pmu-no-versts   the fake PMU answers every status RTR except VERSTS
   --no-tap          do not log the FC's statustexts and TM50 on SERIAL5
   --interface NAME  SocketCAN interface (default vcan0; SITL hard-codes vcan0)
   --no-root         create the bus in a private user namespace instead of needing root.
@@ -110,6 +112,7 @@ while [ $# -gt 0 ]; do
         --param)        EXTRA_PARAM=$2; shift 2 ;;
         --pmu-mavlink)  PMU_MAVLINK=$2; shift 2 ;;
         --pmu-ecu)      PMU_ECU=1; shift ;;
+        --pmu-no-versts) PMU_VERSTS=0; shift ;;
         --no-tap)       TAP=0; shift ;;
         --interface)    IFACE=$2; shift 2 ;;
         --no-root)      NO_ROOT=1; shift ;;
@@ -193,6 +196,7 @@ if [ $VERBOSE -eq 1 ]; then VFLAG=--verbose; fi
 
 PMU_ECU_FLAG=
 if [ $PMU_ECU -eq 1 ]; then PMU_ECU_FLAG=--ecu; fi
+if [ $PMU_VERSTS -eq 0 ]; then PMU_ECU_FLAG="$PMU_ECU_FLAG --no-versts"; fi
 
 # a wall-clock prefix: each fake stamps its own lines from its own start, which is no
 # use for lining three logs up against each other or against SITL

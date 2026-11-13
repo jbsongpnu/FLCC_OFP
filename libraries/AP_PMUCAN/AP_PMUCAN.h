@@ -154,6 +154,25 @@ enum PMUE_Event : uint8_t {
     PMUE_EVT_STOP_TX_FAIL     = 7,  // ENGONOFF(0) could not be sent; still ON, retrying
 };
 
+// PMU-005a STAGE 1 : WHICH GENERATION OF DEVICE IS ON THE BUS.
+//
+// Selected from VERSTS and from nothing else.  The bit rate is NOT a discriminator -
+// both generations configure it, so it says nothing about which one answered.
+//
+// UNKNOWN means no valid VERSTS has been decoded yet, NOT "no device".  While unknown the
+// ECU behaviour is used - see protocol() - which is the approved fallback: a device that
+// never identifies itself is treated as the newer one.  The alternative, falling back to
+// legacy, would have silently mis-decoded a real ECU that was slow to answer.
+//
+// The selection LATCHES on the first valid version and is re-evaluated on every later
+// one, with no hysteresis: a late legacy reply switches the generation live, without a
+// reboot and without touching the engine state or either step 2c counter.
+enum Protocol : uint8_t {
+    PROTO_UNKNOWN    = 0,
+    PROTO_LEGACY_PMU = 1,       // VERSTS reported below 2.0
+    PROTO_ECU_V2     = 2,       // VERSTS reported 2.0 or higher
+};
+
 class PMU_CTRL_CMD
 {
 public:
@@ -211,6 +230,11 @@ public:
     void log_engine_event(uint8_t evt, uint32_t on_cnt, uint32_t off_cnt,
                           int32_t stop_age);    // one PMUE record
 
+    // PMU-005a stage 1 : protocol selection, from the VERSTS reply and the 1 Hz report
+    void note_versts(uint8_t mn_bcd, uint8_t mj_bcd);
+    void report_protocol(void);
+    void report_missing_versts(void);
+
     int pmucan_cmd(uint32_t can_id, uint32_t data_cmd);
     int pmucan_rtr(uint32_t can_id);
     /**
@@ -221,6 +245,14 @@ public:
      */
     void send2gcs(); //igpark
     void sendchanges(); // KAL
+
+    // PMU-005a stage 1.  THE EFFECTIVE GENERATION, fallback included: anything that has
+    // to decode or transmit differently asks this, never _proto, so the fallback is
+    // applied in exactly one place.  protocol_identified() distinguishes "VERSTS said
+    // ECU" from "nothing said anything, so ECU is assumed" - which is a reporting
+    // difference, not a behavioural one.
+    Protocol protocol(void) const { return (_proto == PROTO_UNKNOWN) ? PROTO_ECU_V2 : _proto; }
+    bool protocol_identified(void) const { return _proto != PROTO_UNKNOWN; }
 
 private:
 
@@ -263,6 +295,13 @@ private:
 	uint32_t _cmd_tx_err;
 	uint32_t _short_frame_cnt;                  // PNU-ISSUE(D6) : PMU status frames dropped for short DLC
 	uint32_t _last_short_frame_warn_ms;         // PNU-ISSUE(D6) : rate limit for the warning above
+
+    // PMU-005a stage 1 : what VERSTS said, or UNKNOWN until it says something.  Read it
+    // through protocol(), which applies the fallback.
+    Protocol _proto;
+    bool     _proto_reported;                   // false while a selection is waiting to be announced
+    uint8_t  _proto_mj;                         // the decoded version behind that selection,
+    uint8_t  _proto_mn;                         // kept only so the message can quote it
 
     uint32_t _engineonoffmode;                                      // 0: OFF, 1: ON
 	uint32_t _engineoncnt;

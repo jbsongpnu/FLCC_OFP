@@ -55,6 +55,13 @@ AP_PMUCAN::AP_PMUCAN(AP_PNU_CAN &frontend) :
     _next_counter_log_ms        = 0;
 
 
+    // PMU-005a stage 1 : nothing has identified itself yet.  protocol() reads this as
+    // ECU_V2 until VERSTS says otherwise.
+    _proto                  = PROTO_UNKNOWN;
+    _proto_reported         = false;
+    _proto_mj               = 0;
+    _proto_mn               = 0;
+
     _engineonoffmode        = 0;                            // OFF
     _engineoncnt            = 0;
     _engineoffcnt           = 0;
@@ -146,6 +153,8 @@ void AP_PMUCAN::update(uint32_t tick)
 
     if ((tick % PMUCAN_ONRUNNING_INTERVAL) == 0) {      // nominal 1 Hz
         sendchanges();
+        report_protocol();                              // PMU-005a stage 1
+        report_missing_versts();
     }
 
 #if HAL_LOGGING_ENABLED
@@ -519,6 +528,11 @@ bool AP_PMUCAN::handle_frame(const AP_HAL::CANFrame& can_rxframe)
             memcpy(&uint8_temp, &can_rxframe.data[5], 1);
             PMU_Status.Version_Main_Number = uint8_temp;
 
+            // PMU-005a stage 1 : the same two bytes, now also used to decide which
+            // generation is on the bus.  They are passed on rather than re-read so that
+            // the selection can never disagree with what TM1 and TM12 report.
+            note_versts(can_rxframe.data[4], can_rxframe.data[5]);
+
             _handleFrame_cnt++;
 
             break;
@@ -551,6 +565,114 @@ void AP_PMUCAN::report_short_frame(uint32_t frame_id, uint8_t dlc)
 
     GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "PMUCAN: short frame 0x%lX dlc %u (%lu dropped)",
                   (unsigned long)frame_id, (unsigned)dlc, (unsigned long)_short_frame_cnt);
+}
+
+
+// -------------------------------------------------------------------------
+// note_versts : PMU-005a stage 1 - select the protocol generation from VERSTS
+// -------------------------------------------------------------------------
+// VERSTS IS THE ONLY DISCRIMINATOR.  The bit rate is not one: both generations configure
+// it, so a bus running at 1 Mbit/s says nothing about which device answered.
+//
+// MJ and MN are PACKED BCD, not binary - the ICD's own example is that 0x12 means version
+// 12, not 18.  A byte whose nibbles are not both 0-9 is therefore not a version at all,
+// and is ignored rather than converted into a plausible-looking number.  That is the one
+// filter here: there is deliberately NO sample hysteresis, so the first valid reply
+// selects and every later one re-evaluates.
+//
+// No reset, anywhere in here.  A generation change does not touch _engineonoffmode, the
+// step 2c counters or either interlock window: the two generations send ENGONOFF with the
+// same id and the same payload, so the engine state means exactly the same thing on both
+// sides of a switch.
+// -------------------------------------------------------------------------
+static bool pmucan_bcd_valid(uint8_t v)
+{
+    return (((v >> 4) & 0x0FU) <= 9U) && ((v & 0x0FU) <= 9U);
+}
+
+static uint8_t pmucan_bcd_to_dec(uint8_t v)
+{
+    return uint8_t((10U * ((v >> 4) & 0x0FU)) + (v & 0x0FU));
+}
+
+void AP_PMUCAN::note_versts(uint8_t mn_bcd, uint8_t mj_bcd)
+{
+    if (!pmucan_bcd_valid(mj_bcd) || !pmucan_bcd_valid(mn_bcd)) {
+        return;
+    }
+
+    const uint8_t mj = pmucan_bcd_to_dec(mj_bcd);
+    const uint8_t mn = pmucan_bcd_to_dec(mn_bcd);
+
+    // 2.0 or higher is the ECU; anything below it is the legacy PMU.  Only the major
+    // number decides, so 1.99 is legacy and 2.00 is not.
+    const Protocol reported = (mj >= 2U) ? PROTO_ECU_V2 : PROTO_LEGACY_PMU;
+    if (reported == _proto) {
+        return;
+    }
+
+    // SELECT HERE, ANNOUNCE FROM report_protocol().  Saying it here instead put the
+    // line on the bus within ~100 ms of boot, where it was dropped before any GCS had
+    // attached - measured, and the same loss the driver's own startup report was fixed
+    // for on the bench 2026-10-19.  A one-shot message nobody receives is the silence
+    // PNU-ISSUE(D6) exists to remove.
+    _proto = reported;
+    _proto_mj = mj;
+    _proto_mn = mn;
+    _proto_reported = false;
+}
+
+
+// -------------------------------------------------------------------------
+// report_protocol : PMU-005a stage 1 - announce the selection, once anyone can hear it
+// -------------------------------------------------------------------------
+// Held until a GCS is LISTENING rather than for a fixed delay, which is the trigger
+// AP_PNU_CAN::report_startup() settled on for the same reason.  There is no upper bound
+// on purpose: a ground station attaching ten minutes in still learns which generation the
+// FC decided it was talking to, and if none ever attaches there is nobody to tell.
+//
+// Re-armed by every change, so a late legacy reply that switches the generation live
+// announces itself too.
+// -------------------------------------------------------------------------
+void AP_PMUCAN::report_protocol(void)
+{
+    if (_proto_reported || (_proto == PROTO_UNKNOWN)) {
+        return;
+    }
+    if (GCS_MAVLINK::active_channel_mask() == 0) {
+        return;
+    }
+
+    _proto_reported = true;
+
+    // kept short: MAVLink STATUSTEXT truncates at 50 characters
+    GCS_SEND_TEXT(MAV_SEVERITY_INFO, "PMU: %s protocol, v%u.%02u",
+                  (_proto == PROTO_ECU_V2) ? "ECU V2.0" : "legacy",
+                  (unsigned)_proto_mj, (unsigned)_proto_mn);
+}
+
+
+// -------------------------------------------------------------------------
+// report_missing_versts : PMU-005a stage 1 - a device that will not say what it is
+// -------------------------------------------------------------------------
+// ONLY WHILE THE PMU IS OTHERWISE TALKING.  The condition is PMUCAN_Fail_Status, the
+// health this backend already maintains, so there is no second monitor to keep in step
+// with the first.  That gate is what keeps this quiet in the two cases it has nothing to
+// say about: an aircraft flying with NO PMU FITTED - a supported configuration, where
+// the status stays CONNECTION_FAILURE for the whole flight - and a PMU that has stopped
+// answering, where the missing VERSTS is a symptom of the lost link and the link already
+// has its own report in sendchanges().
+//
+// Reached from the 1 Hz slot in update(), so the rate is the caller's and this needs no
+// limiter of its own.  It stops as soon as any valid version arrives.
+// -------------------------------------------------------------------------
+void AP_PMUCAN::report_missing_versts(void)
+{
+    if (protocol_identified() || (PMUCAN_Fail_Status != PMUCAN_STATUS::CONNECTED)) {
+        return;
+    }
+
+    GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "PMU: no VERSTS, assuming ECU V2.0");
 }
 
 

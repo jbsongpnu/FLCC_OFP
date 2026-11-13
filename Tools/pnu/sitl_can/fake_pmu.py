@@ -25,7 +25,7 @@ ICD's own example payloads.  It is a PROTOCOL mode, not a second engine model - 
 no ECU operating-mode machine, governor or EMS here.  Legacy is the default.
 
 Console commands on stdin: silent, resume, status, start, stop, choke open|close,
-takeoff, land, help, quit.  SIGUSR1 toggles silence, for scripted tests.
+versts on|off, takeoff, land, help, quit.  SIGUSR1 toggles silence, for scripted tests.
 
 AP_FLAKE8_CLEAN
 '''
@@ -58,10 +58,14 @@ TICK_HZ = 100.0
 
 class FakePMU(object):
 
-    def __init__(self, interface, verbose=False, ecu=False):
+    def __init__(self, interface, verbose=False, ecu=False, versts=True):
         self.interface = interface
         self.verbose = verbose
         self.ecu = ecu
+        # a device that answers everything EXCEPT VERSTS.  Not a failure mode anyone has
+        # seen - it exists so the FC's missing-VERSTS fallback can be exercised, and so
+        # that a late reply can be turned on mid-run to test the live switch.
+        self.answer_versts = versts
         self.silent = False
         self.running = True
         self.commands = queue.Queue()
@@ -118,6 +122,8 @@ class FakePMU(object):
             return
         self._rtr_seen += 1
         if self.silent:
+            return
+        if (frame_id == icd.VERSTS) and not self.answer_versts:
             return
         self._rtr_answered += 1
         builder = icd.build_ecu if self.ecu else icd.build
@@ -201,10 +207,17 @@ class FakePMU(object):
             self.set_silent(False)
         elif cmd == 'toggle-silent':
             self.set_silent(not self.silent)
+        elif cmd == 'versts':
+            if arg in ('on', 'off'):
+                self.answer_versts = (arg == 'on')
+                self.log('VERSTS replies %s' % ('ON' if self.answer_versts else 'OFF'))
+            else:
+                self.log('usage: versts on|off')
         elif cmd == 'status':
             self.log(self.model.summary())
-            self.log('protocol=%s  silent=%s  RTR seen %u answered %u  commands %u  ENERGYCFG %u'
-                     % ('ECU V2.0' if self.ecu else 'legacy PMU V1.05', self.silent,
+            self.log('protocol=%s  versts=%s  silent=%s  RTR seen %u answered %u  commands %u  ENERGYCFG %u'
+                     % ('ECU V2.0' if self.ecu else 'legacy PMU V1.05',
+                        'on' if self.answer_versts else 'OFF', self.silent,
                         self._rtr_seen, self._rtr_answered, self._cmd_seen, self._energycfg_seen))
             # the MAVLink side is reported too: when takeoff is not detected, this is
             # where the answer is, and guessing at it once was enough
@@ -222,7 +235,8 @@ class FakePMU(object):
         elif cmd in ('quit', 'exit'):
             self.running = False
         elif cmd == 'help':
-            self.log('silent | resume | status | start | stop | choke open|close | takeoff | land | quit')
+            self.log('silent | resume | status | start | stop | choke open|close | '
+                     'versts on|off | takeoff | land | quit')
         else:
             self.log('unknown command "%s", try help' % cmd)
 
@@ -511,11 +525,13 @@ def main():
     parser.add_argument('--ecu', action='store_true',
                         help='answer as an ECU V2.0 device (VERSTS 2.00, UINT32 HOURCNT, '
                              'MODESTS and ENERGYSTS) instead of a legacy PMU')
+    parser.add_argument('--no-versts', dest='versts', action='store_false',
+                        help='answer every status RTR except VERSTS, for the FC fallback test')
     parser.add_argument('--silent', action='store_true', help='start without answering RTRs')
     parser.add_argument('--verbose', action='store_true', help='log every command frame')
     args = parser.parse_args()
 
-    pmu = FakePMU(args.interface, verbose=args.verbose, ecu=args.ecu)
+    pmu = FakePMU(args.interface, verbose=args.verbose, ecu=args.ecu, versts=args.versts)
     try:
         pmu.connect()
     except OSError as err:
@@ -529,6 +545,9 @@ def main():
     # once already: a mode nobody can see in the log is a mode nobody checks.
     pmu.log('protocol: %s' % ('ECU V2.0 - VERSTS 2.00, UINT32 HOURCNT, MODESTS + ENERGYSTS'
                               if args.ecu else 'legacy PMU V1.05 (default)'))
+
+    if not args.versts:
+        pmu.log('VERSTS replies OFF - the FC will see no version at all')
 
     if args.silent:
         pmu.set_silent(True)

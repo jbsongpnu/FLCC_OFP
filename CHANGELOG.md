@@ -21,6 +21,98 @@ A feature exercised only in SITL is **not** hardware-verified. Entries say so ex
 
 ---
 
+## Firmware, 2026-11-13 - the PMU says which generation it is - PMU-005a stage 1 (no version bump)
+
+`AP_PMUCAN` now decides from VERSTS whether it is talking to a legacy PMU or to an ECU.
+**Nothing acts on the decision yet** - stages 2 and 3 are the consumers - so this changes
+no decoding, no transmission and no timing.  What it adds is the selection, and two
+messages that say what was selected.
+
+**How the generation is chosen**
+
+| State | Means | Reached when |
+|---|---|---|
+| `PROTO_UNKNOWN` | no valid VERSTS yet | boot, and any device that never answers VERSTS |
+| `PROTO_LEGACY_PMU` | VERSTS reported below 2.0 | first valid reply with major < 2 |
+| `PROTO_ECU_V2` | VERSTS reported 2.0 or higher | first valid reply with major >= 2 |
+
+`protocol()` applies the approved fallback in one place: while `UNKNOWN` it reads
+`ECU_V2`, so **a device that never identifies itself is treated as the newer one**.
+`protocol_identified()` separates "VERSTS said ECU" from "nothing said anything".
+
+- **VERSTS is the only discriminator.**  The bit rate is not one - both generations
+  configure it - and nothing here looks at it.
+- **MJ and MN are packed BCD**, so a byte whose nibbles are not both 0-9 is not a version
+  and is ignored rather than converted into a plausible number.  That is the only filter:
+  there is deliberately **no sample hysteresis**, so the first valid reply selects and
+  every later one re-evaluates.
+- **A late reply switches live.**  A legacy device that answers VERSTS after the fallback
+  has been assumed moves the FC to `LEGACY_PMU` without a reboot, and **without touching
+  `_engineonoffmode`, either step 2c counter or either interlock window** - both
+  generations send `ENGONOFF` with the same id and the same payload, so the engine state
+  means the same thing on both sides of a switch.
+- **No new polling.**  Slot 4 of the existing rotation already polls VERSTS at 10 Hz and
+  still does; "identify once" means the decision latches, not that the frames stop.  The
+  late-switch path is free because of it.
+
+**The missing-VERSTS warning, and when it stays quiet**
+
+`PMU: no VERSTS, assuming ECU V2.0` at 1 Hz, gated on `PMUCAN_Fail_Status == CONNECTED` -
+the health this backend already maintains, so there is no second monitor to keep in step
+with the first.  That gate keeps it silent in the two cases it has nothing to say about:
+**an aircraft flying with no PMU fitted**, a supported configuration where the status
+stays `CONNECTION_FAILURE` all flight, and **a PMU that has stopped answering**, where the
+lost link already has its own report.  It stops on the first valid version.
+
+**One defect, found by measuring rather than by reading**
+
+The first version announced the selection from `note_versts()`, inside the decode.  That
+put the line on the bus within ~100 ms of boot and **it was never seen**: measured, zero
+occurrences in the statustext tap on both a legacy and an ECU run, while every other PMU
+message arrived.  It is the same loss `AP_PNU_CAN::report_startup()` was fixed for on the
+bench 2026-10-19 - a one-shot statustext sent before any GCS has attached is dropped, and
+being one-shot it never comes back.  The announcement now waits for
+`GCS_MAVLINK::active_channel_mask() != 0` in the 1 Hz slot, with no upper bound, and is
+re-armed by every change so a live switch announces itself too.
+
+**Verification**
+
+| What | Result |
+|---|---|
+| Legacy fake | `PMU: legacy protocol, v1.00`, once, at 1.013 s |
+| ECU fake | `PMU: ECU V2.0 protocol, v2.00`, once, at 1.059 s |
+| Fake answering everything but VERSTS | fallback taken, **11 warnings in 11.5 s**, intervals 1.003-1.160 s |
+| A late legacy VERSTS at 12.5 s | `PMU: legacy protocol, v1.00` and the warning **stops dead** - none after |
+| `PNU_OPTS=6`, no PMU backend | **zero** protocol or VERSTS messages; driver reports "no PMU" |
+| PMU goes silent mid-run | last warning 5.238 s, `[PMU] Communication Error` 6.255 s, **none after** |
+| VERSTS polling unchanged | sniffed on `vcan0`: all five status RTRs at **9.50 Hz**, VERSTS among them, no new ids |
+| No engine command during selection or switching | **0** `ENGONOFF` frames on the wire and **0** `PMUE` records across the fallback and the live switch; `TM3` `EGOF` never left 0 |
+| Step 2c duration, three protocol states | legacy **1.198 / 1.254 / 1.172 s**, ECU **1.208 / 1.150 / 1.292 s**, fallback **1.254 s** - one 1.803 s outlier in a batch of three back-to-back runs, bracketed by in-band results on both sides, so run-to-run and not a mode effect |
+| Existing records | `TM11`/`TM12`/`TM13`/`TM3` at 9.7 Hz, `PMUC` at 1 Hz, formats unchanged; `PMUC` `RxSts` 835 against `RtrTx` 950 made the 115 refused VERSTS polls visible in the log on its own |
+| Gimbal and SAR | unchanged - MIT mode, 50 Hz feedback per axis, 0 wrong-mode frames; SAR heartbeats nominal; no internal errors in any run |
+| Tests and lint | 10 CubeMars + 12 SAR gtests, 124 Python device tests, `run_astyle.py --dry-run`, `flake8` |
+
+**Tools**
+
+`fake_pmu.py --no-versts` and the console's `versts on|off`, plumbed through
+`run_all3.sh --pmu-no-versts`.  Not a failure anyone has seen - it exists so the fallback
+and the live switch can be exercised, and it is the only way to produce a device that
+answers four status ids and refuses the fifth.
+
+**Known Limitations**
+
+- **The generation is not in the flight log.**  It is a statustext and nothing else, so a
+  flight with no GCS attached keeps no record of which generation was selected - the very
+  gap V5.1.25 closed for the telemetry records.  The natural home is stage 3's ECU record;
+  until then this is a statustext-only fact.
+- Without hysteresis, a single corrupted-but-valid-BCD VERSTS flips the generation and
+  announces it.  Accepted deliberately; DLC 8 and nibble validation are the only filters.
+- The `UNKNOWN` to `ECU_V2` fallback is not yet observable in behaviour, because nothing
+  consumes `protocol()` until stage 2.
+- No ECU hardware.  Every result above is SITL against a fake built from the ICD.
+
+---
+
 ## Tools, 2026-11-13 - an ECU V2.0 mode for the fake PMU (no version bump)
 
 `PMU-005a` stage 0.  No firmware change: the FC still speaks V1.05 only, and this is the

@@ -532,8 +532,8 @@ per-stage record once a stage lands.
 | Stage | Content | Status |
 |---|---|---|
 | **0** | Minimal fake ECU in `Tools/pnu/sitl_can/` - VERSTS 2.00, the new ids and DLCs, fixed ICD-example MODESTS/ENERGYSTS payloads, a 32-bit HOURCNT payload. Legacy stays the default. Protocol encode/decode only, no ECU behaviour model | **DONE 2026-11-13** |
-| **1** | VERSTS-based protocol identification in `AP_PMUCAN`: `UNKNOWN` / `LEGACY_PMU` / `ECU_V2` | **NEXT** |
-| **2** | `AUX2STS` HOURCNT width by generation - UINT24 legacy, UINT32 ECU. One branch, no schema change | after 1 |
+| **1** | VERSTS-based protocol identification in `AP_PMUCAN`: `UNKNOWN` / `LEGACY_PMU` / `ECU_V2` | **DONE 2026-11-13** |
+| **2** | `AUX2STS` HOURCNT width by generation - UINT24 legacy, UINT32 ECU. One branch, no schema change | **NEXT** |
 | **3** | `AP_PMUCAN_ECU.{h,cpp}`: MODESTS at 10 Hz, ENERGYSTS at 1 Hz, on the free scheduling phases, active only in `ECU_V2` | after 2 |
 | **4** | MAVLink telemetry for ECU status - **design proposal only, needs approval before implementation** | blocked on approval |
 | **5** | MAVLink telecommand for `ENERGYCFG` - **design proposal only, needs approval before implementation** | blocked on approval |
@@ -573,20 +573,33 @@ re-litigated:
 3. **A late legacy VERSTS switches live**, without reboot, disabling ECU polls and leaving
    every step 2c counter and the engine state exactly as they were.
 
+**The three findings, decided 2026-11-13:**
+
+1. **Missing-VERSTS warning - APPROVED and implemented in stage 1.** The 1 Hz message is
+   gated on `PMUCAN_Fail_Status == CONNECTED`, the health this backend already keeps, so an
+   aircraft flying with no PMU fitted (`PNU-ISSUE D9b`, a supported configuration) and a PMU
+   that has stopped answering are both silent. `PMUCAN_Fail`'s own semantics, including the
+   difference between never-detected and lost, are untouched.
+2. **HOURCNT width during the fallback - WORKAROUND REJECTED, kept as a bench item.** The
+   width follows the selected generation, fallback included: `ECU_V2` decodes 32 bits even
+   when that generation was assumed rather than reported. No `version_confirmed` flag, no
+   special HOURCNT path. The residual risk is a real legacy PMU that never answers VERSTS
+   **and** puts a non-zero value in the AUX2STS `RSV` byte, which the V1.05 source leaves
+   undefined: engine hours would then read up to 16.7 Ms high. It is bounded by the fact
+   that a module needs overhaul long before 100 h, so a valid count stays inside UINT24 and
+   the low three bytes still read correctly. **Check the `RSV` byte on the first bench run
+   with a real legacy PMU**; reconsider only if it is non-zero.
+3. **Existing VERSTS polling - APPROVED.** Slot 4 keeps polling at 10 Hz, the rotation is
+   untouched, and no new polling mechanism was added. "Identify once" means the decision
+   latches, not that the frames stop; the late-switch path exists because the frames keep
+   coming.
+
 **Open items, to settle at the stage that reaches them:**
 
-- **Stage 1 - do not report missing VERSTS when no PMU is fitted.** An aircraft flying
-  without a PMU is a supported configuration (`PNU-ISSUE D9b`), and an unconditional 1 Hz
-  statustext would flood the link for the whole flight. The message should be emitted only
-  while the PMU is otherwise communicating - a device that talks but will not say its
-  version - which is also the only case the message is about.
-- **Stage 2 - HOURCNT width while in the missing-VERSTS fallback.** `ECU_V2` decodes four
-  bytes, but AUX2STS byte 3 is `RSV` on a legacy PMU and the legacy source never defines its
-  value. If a real legacy PMU puts anything non-zero there, engine hours jump by up to
-  16.7 Ms. The exposure is small, because VERSTS is polled at 10 Hz and normally answers
-  within ~100 ms, but it is not zero on a device that never answers. The cheap alternative is
-  to let the fallback govern polling only and keep HOURCNT at 24 bits until a version is
-  confirmed. Decide before Stage 2 lands.
+- **Stage 1, carried forward - the generation is not in the flight log.** It is announced by
+  statustext only, so a flight with no GCS attached keeps no record of which generation was
+  selected - the gap V5.1.25 closed for the telemetry records. The natural home is stage 3's
+  ECU record, and stage 4 asks the same question for MAVLink.
 - **Stage 3 - ECU-only RTR polls reach an unidentified device** during the fallback window.
   The ECU draft says it ignores unexpected frames; the legacy PMU's behaviour is unspecified.
   Risk is low and the window is ~100 ms, but it is the first thing to check on the bench.
