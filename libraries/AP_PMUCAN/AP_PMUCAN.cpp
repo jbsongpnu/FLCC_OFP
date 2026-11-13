@@ -492,15 +492,29 @@ bool AP_PMUCAN::handle_frame(const AP_HAL::CANFrame& can_rxframe)
 
         case PMU_AUX2STS:
 
-            // Parse Engine Operating Time(hour) - 24-bit field.
-            // PNU-ISSUE(D15) : the zeroing is load-bearing.  LSB-first means the
-            // three bytes land in the low three of the uint32, so the top byte
+            // Parse Engine Operating Time(hour).
+            //
+            // PMU-005a STAGE 2 : THE WIDTH IS THE ONLY THING THE TWO GENERATIONS DECODE
+            // DIFFERENTLY.  The legacy PMU sends a UINT24 in bytes 0-2 and leaves byte 3
+            // reserved; the ECU sends a UINT32 and byte 3 is the top of the count.  Both
+            // are seconds, both land in the same uint32, and nothing downstream changes -
+            // PMU_Status.Engine_Hour_Count, TM1 and TM11 were already 32 bits wide.
+            //
+            // The ECU width is used for the UNKNOWN fallback too, which is deliberate:
+            // see protocol().  The residual - a legacy PMU that never answers VERSTS AND
+            // puts something non-zero in its reserved byte - is a bench item, not a case
+            // this code guesses at.  No real capture of that byte exists, because this
+            // decoder has never read it.
+            //
+            // PNU-ISSUE(D15) : the zeroing is load-bearing in the 24-bit case.  LSB-first
+            // means the three bytes land in the low three of the uint32, so the top byte
             // must already be 0 - it is never written by the memcpy below.
             uint32_temp = 0U;
-            memcpy(&uint32_temp, &can_rxframe.data[0], 3);
+            memcpy(&uint32_temp, &can_rxframe.data[0],
+                   (protocol() == PROTO_ECU_V2) ? 4U : 3U);
             PMU_Status.Engine_Hour_Count = uint32_temp;
 
-            // 1-byte reserved here - Not used
+            // byte 3 is reserved on the legacy PMU, and part of HOURCNT above on the ECU
 
             // Parse PMU Status
             memcpy(&uint16_temp, &can_rxframe.data[4], 2);

@@ -533,8 +533,8 @@ per-stage record once a stage lands.
 |---|---|---|
 | **0** | Minimal fake ECU in `Tools/pnu/sitl_can/` - VERSTS 2.00, the new ids and DLCs, fixed ICD-example MODESTS/ENERGYSTS payloads, a 32-bit HOURCNT payload. Legacy stays the default. Protocol encode/decode only, no ECU behaviour model | **DONE 2026-11-13** |
 | **1** | VERSTS-based protocol identification in `AP_PMUCAN`: `UNKNOWN` / `LEGACY_PMU` / `ECU_V2` | **DONE 2026-11-13** |
-| **2** | `AUX2STS` HOURCNT width by generation - UINT24 legacy, UINT32 ECU. One branch, no schema change | **NEXT** |
-| **3** | `AP_PMUCAN_ECU.{h,cpp}`: MODESTS at 10 Hz, ENERGYSTS at 1 Hz, on the free scheduling phases, active only in `ECU_V2` | after 2 |
+| **2** | `AUX2STS` HOURCNT width by generation - UINT24 legacy, UINT32 ECU. One branch, no schema change | **DONE 2026-11-13** |
+| **3** | `AP_PMUCAN_ECU.{h,cpp}`: MODESTS at 10 Hz, ENERGYSTS at 1 Hz, on the free scheduling phases, active only in `ECU_V2` | **NEXT** |
 | **4** | MAVLink telemetry for ECU status - **design proposal only, needs approval before implementation** | blocked on approval |
 | **5** | MAVLink telecommand for `ENERGYCFG` - **design proposal only, needs approval before implementation** | blocked on approval |
 
@@ -593,6 +593,25 @@ re-litigated:
    untouched, and no new polling mechanism was added. "Identify once" means the decision
    latches, not that the frames stop; the late-switch path exists because the frames keep
    coming.
+
+**Bench items - two questions about the REAL legacy PMU that no existing data can answer.**
+The current decoder has only ever read three bytes of AUX2STS, so nothing in any log from
+any bench session, including 2026-10-19 on hardware, carries evidence about byte 3. The
+fake's zero is our own construction from the ICD. Both are answered by one `candump` on the
+real bus:
+
+1. **Does the real legacy PMU answer VERSTS (`0x10000140`), and with what MJ/MN?** Nothing
+   in the project history records a PMU version number. If it does not answer, the aircraft
+   runs in the `ECU_V2` fallback and decodes HOURCNT as 32 bits whatever the branch says -
+   so this question gates the next one. Stage 1 makes it visible without a capture: the
+   bench prints `PMU: legacy protocol, v1.0x` or `PMU: no VERSTS, assuming ECU V2.0` within
+   a second of boot.
+2. **What is in AUX2STS (`0x10000130`) byte 3, engine stopped and engine running, and what
+   is the response DLC?** If it is always zero, the stage 2 width branch becomes a one-line
+   simplification that can be deleted with evidence behind it. If it is not, the
+   `ECU_V2`-fallback policy is the thing to revisit - not the branch.
+
+The fallback policy stands until a bench result says otherwise.
 
 **Open items, to settle at the stage that reaches them:**
 

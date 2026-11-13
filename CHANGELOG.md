@@ -21,6 +21,56 @@ A feature exercised only in SITL is **not** hardware-verified. Entries say so ex
 
 ---
 
+## Firmware, 2026-11-13 - HOURCNT is as wide as the device that sent it - PMU-005a stage 2 (no version bump)
+
+The first consumer of stage 1's protocol selection, and the whole of it is one memcpy
+length.  The legacy PMU sends a UINT24 in AUX2STS bytes 0-2 and leaves byte 3 reserved;
+the ECU sends a UINT32 and byte 3 is the top of the count.
+
+```
+    memcpy(&uint32_temp, &can_rxframe.data[0],
+           (protocol() == PROTO_ECU_V2) ? 4U : 3U);
+```
+
+Nothing else moves.  Both generations count SECONDS, both land in the same `uint32`, and
+every consumer downstream was already 32 bits wide - `PMU_Status.Engine_Hour_Count`, TM1's
+`Engine_Hour_Count` and `TM11`'s `HOURCNT`.  **No MAVLink or DataFlash schema changed**,
+which is what makes this a one-line change rather than a protocol change.
+
+`protocol()` is what is asked, so the ECU width is used for the UNKNOWN fallback too, as
+decided.  There is deliberately **no version-confirmation flag and no byte-3 warning**:
+the residual case - a legacy PMU that never answers VERSTS *and* puts something non-zero
+in its reserved byte - is a bench item, not something this code guesses at.
+
+**Why no capture settles it.** The old decoder read three bytes, so byte 3 has never been
+read, stored or logged by this firmware.  No dataflash log from any bench session,
+including the real-hardware run of 2026-10-19, can contain evidence about that byte even
+in principle, and the fake's zero is our own construction from the ICD rather than
+evidence about the device.  Two bench items now carry the question - see `PMU-005a`.
+
+**Verification**
+
+| What | Result |
+|---|---|
+| Legacy fake, engine stopped | `HOURCNT` **0** across 167 records - byte 3 ignored, unchanged from V5.1.28 |
+| ECU fake, engine stopped | `HOURCNT` **16777216** = 2^24 exactly, the fake's `ECU_HOURCNT_BASE`. The same frame read **0** before this change |
+| ECU fake, no VERSTS - the fallback | `HOURCNT` **16777216**, so the fallback decodes 32 bits as decided |
+| Legacy fake, engine running | 0 -> **15** over 18.6 s of log |
+| ECU fake, engine running | 16777216 -> **16777231**, the same +15 s - the low bytes behave identically in both widths |
+| Step 2c | start commanded **1.124 s** (legacy) and **1.219 s** (ECU) after the burst began, inside the 1.15-1.29 s band measured in stage 1 |
+| `PMUE` | exactly one record for the scenario: `START_CMD`, `Mode` 1, `OnCnt` 10, `StopAge` 6290 ms - the same shape V5.1.28 measured |
+| Record schemas | `TM11`, `TM12`, `TM13`, `TM3`, `PMUC`, `PMUE` field lists identical to V5.1.28, verified field by field from the log |
+| Tests and lint | 10 CubeMars + 12 SAR gtests, 124 Python device tests, `run_astyle.py --dry-run` |
+
+**Known Limitations**
+
+- The ECU-width result is measured against a fake built from the ICD.  No ECU hardware
+  exists, and the 2^24 offset is a test construction, not an ECU behaviour.
+- A legacy PMU that never answers VERSTS runs on the ECU width.  Whether that matters
+  depends on a byte nobody has ever observed - both bench items below.
+
+---
+
 ## Firmware, 2026-11-13 - the PMU says which generation it is - PMU-005a stage 1 (no version bump)
 
 `AP_PMUCAN` now decides from VERSTS whether it is talking to a legacy PMU or to an ECU.
