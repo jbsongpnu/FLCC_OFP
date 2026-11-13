@@ -533,7 +533,7 @@ per-stage record once a stage lands.
 |---|---|---|
 | **0** | Minimal fake ECU in `Tools/pnu/sitl_can/` - VERSTS 2.00, the new ids and DLCs, fixed ICD-example MODESTS/ENERGYSTS payloads, a 32-bit HOURCNT payload. Legacy stays the default. Protocol encode/decode only, no ECU behaviour model | **DONE 2026-11-13** |
 | **1** | VERSTS-based protocol identification in `AP_PMUCAN`: `UNKNOWN` / `LEGACY_PMU` / `ECU_V2` | **DONE 2026-11-13** |
-| **2** | `AUX2STS` HOURCNT width by generation - UINT24 legacy, UINT32 ECU. One branch, no schema change | **DONE 2026-11-13** |
+| **2** | `AUX2STS` HOURCNT width by generation - UINT24 legacy, UINT32 ECU. One branch, no schema change | **DONE 2026-11-13**, bench-verified |
 | **3** | `AP_PMUCAN_ECU.{h,cpp}`: MODESTS at 10 Hz, ENERGYSTS at 1 Hz, on the free scheduling phases, active only in `ECU_V2` | **NEXT** |
 | **4** | MAVLink telemetry for ECU status - **design proposal only, needs approval before implementation** | blocked on approval |
 | **5** | MAVLink telecommand for `ENERGYCFG` - **design proposal only, needs approval before implementation** | blocked on approval |
@@ -587,31 +587,34 @@ re-litigated:
    **and** puts a non-zero value in the AUX2STS `RSV` byte, which the V1.05 source leaves
    undefined: engine hours would then read up to 16.7 Ms high. It is bounded by the fact
    that a module needs overhaul long before 100 h, so a valid count stays inside UINT24 and
-   the low three bytes still read correctly. **Check the `RSV` byte on the first bench run
-   with a real legacy PMU**; reconsider only if it is non-zero.
+   the low three bytes still read correctly. **Bench-checked 2026-11-13: the real legacy PMU
+   answers VERSTS v1.00 and its `RSV` byte is zero**, so neither half of that risk has an
+   instance on this hardware. See the bench items below.
 3. **Existing VERSTS polling - APPROVED.** Slot 4 keeps polling at 10 Hz, the rotation is
    untouched, and no new polling mechanism was added. "Identify once" means the decision
    latches, not that the frames stop; the late-switch path exists because the frames keep
    coming.
 
-**Bench items - two questions about the REAL legacy PMU that no existing data can answer.**
-The current decoder has only ever read three bytes of AUX2STS, so nothing in any log from
-any bench session, including 2026-10-19 on hardware, carries evidence about byte 3. The
-fake's zero is our own construction from the ICD. Both are answered by one `candump` on the
-real bus:
+**Bench items - BOTH ANSWERED on the real legacy PMU, 2026-11-13.** The two questions below were
+open because the decoder had only ever read three bytes of AUX2STS, so no log from any earlier
+bench session could carry evidence about byte 3. They were checked on the real device and both
+came back as the stage 1 and stage 2 code assumes. Recorded from the bench report; no capture file
+is stored in this repository.
 
-1. **Does the real legacy PMU answer VERSTS (`0x10000140`), and with what MJ/MN?** Nothing
-   in the project history records a PMU version number. If it does not answer, the aircraft
-   runs in the `ECU_V2` fallback and decodes HOURCNT as 32 bits whatever the branch says -
-   so this question gates the next one. Stage 1 makes it visible without a capture: the
-   bench prints `PMU: legacy protocol, v1.0x` or `PMU: no VERSTS, assuming ECU V2.0` within
-   a second of boot.
-2. **What is in AUX2STS (`0x10000130`) byte 3, engine stopped and engine running, and what
-   is the response DLC?** If it is always zero, the stage 2 width branch becomes a one-line
-   simplification that can be deleted with evidence behind it. If it is not, the
-   `ECU_V2`-fallback policy is the thing to revisit - not the branch.
+1. **Does the real legacy PMU answer VERSTS (`0x10000140`), and with what MJ/MN?** - **Yes,
+   v1.00.** The device replies to the existing slot 4 poll, so `LEGACY_PMU` is selected on real
+   hardware within a second of boot and the `ECU_V2` fallback is **not** the normal path for this
+   aircraft. The fallback remains what it was designed to be: the behaviour for a device that
+   stays silent.
+2. **What is in AUX2STS (`0x10000130`) byte 3?** - **Zero.** The reserved byte reads zero on the
+   real device, so the UINT24 decode and a UINT32 decode of the same frame agree, and finding 2's
+   residual risk - a silent legacy PMU with a non-zero `RSV` byte - has no instance on this
+   hardware.
 
-The fallback policy stands until a bench result says otherwise.
+**The stage 2 width branch stays as implemented.** Byte 3 reading zero would allow one common
+UINT32 decoder, but the branch is kept: it is one ternary, it keeps the decode matching what each
+generation's ICD actually defines, and V1.05 still leaves the byte undefined for any other unit.
+Decided 2026-11-13, no further stage 2 modification.
 
 **Open items, to settle at the stage that reaches them:**
 

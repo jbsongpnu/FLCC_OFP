@@ -21,6 +21,33 @@ A feature exercised only in SITL is **not** hardware-verified. Entries say so ex
 
 ---
 
+## Bench, 2026-11-13 - the legacy PMU answers VERSTS v1.00 and its AUX2STS reserved byte is zero
+
+Both bench items opened by stage 2 were checked on the real legacy PMU, and both came back
+as stages 1 and 2 assume.  **Bench** evidence, on hardware, no firmware change.
+
+| Question | Result |
+|---|---|
+| Does the real legacy PMU answer VERSTS `0x10000140`? | **Yes**, and it reports **v1.00** |
+| AUX2STS `0x10000130` byte 3, the V1.05 reserved byte | **Zero** |
+
+**What each answer settles.**
+
+- The device replies to the slot 4 poll that has always been there, so a real aircraft
+  selects `PROTO_LEGACY_PMU` within a second of boot.  The `ECU_V2` fallback is **not**
+  the normal path on this hardware - it is what happens to a device that stays silent,
+  which is what it was designed for.
+- The reserved byte is zero, so a UINT24 decode and a UINT32 decode of the same legacy
+  frame agree.  The residual risk recorded against stage 2 - a silent legacy PMU with a
+  non-zero `RSV` byte - has no instance here, and it needed both halves to be true.
+
+**The stage 2 branch is kept.**  A common UINT32 decoder would now be defensible for this
+unit, but the one ternary stays: it decodes what each generation's ICD actually defines,
+and V1.05 still leaves the byte undefined for any other unit.  No code changed as a result
+of this bench run.
+
+---
+
 ## Firmware, 2026-11-13 - HOURCNT is as wide as the device that sent it - PMU-005a stage 2 (no version bump)
 
 The first consumer of stage 1's protocol selection, and the whole of it is one memcpy
