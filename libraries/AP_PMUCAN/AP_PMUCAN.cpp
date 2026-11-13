@@ -43,6 +43,9 @@ extern const AP_HAL::HAL& hal;
 
 AP_PMUCAN::AP_PMUCAN(AP_PNU_CAN &frontend) :
     AP_PNU_CAN_Backend(frontend)
+#if AP_PMUCAN_ECU_ENABLED
+    , _ecu(*this)
+#endif
 {
     _handleFrame_cnt        = 0;
     _rtr_tx_cnt             = 0;
@@ -147,6 +150,12 @@ void AP_PMUCAN::update(uint32_t tick)
         transmit_slot(uint8_t(phase / stride));
     }
 
+#if AP_PMUCAN_ECU_ENABLED
+    // PMU-005a stage 3 : the ECU polls go on the ODD phases this rotation never uses, so
+    // they cannot delay a legacy slot.  Inert unless the ECU generation is selected.
+    _ecu.update(tick);
+#endif
+
     if ((tick % PMUCAN_MAVLINK_INTERVAL) == 0) {        // nominal 10 Hz
         send2gcs();
     }
@@ -160,6 +169,9 @@ void AP_PMUCAN::update(uint32_t tick)
 #if HAL_LOGGING_ENABLED
     log_status();                                       // self-paced, 10 Hz on millis()
     log_counters();                                     // self-paced, 1 Hz on millis()
+#if AP_PMUCAN_ECU_ENABLED
+    _ecu.log();                                         // ECUM/ECUE/ECUC, also self-paced
+#endif
 #endif
 }
 
@@ -396,6 +408,16 @@ bool AP_PMUCAN::handle_frame(const AP_HAL::CANFrame& can_rxframe)
     }
 
     const uint32_t frame_id = can_rxframe.id & can_rxframe.MaskExtID;
+
+#if AP_PMUCAN_ECU_ENABLED
+    // PMU-005a stage 3 : MODESTS and ENERGYSTS, which the switch below does not know and
+    // would reject as not ours.  Offered first, and only those two ids are claimed there.
+    // They deliberately do NOT feed _pmu_frames_seen: the health bucket's input set is
+    // the five legacy status messages, which are polled on both generations.
+    if (_ecu.handle_frame(can_rxframe)) {
+        return true;
+    }
+#endif
 
     // PNU-ISSUE(D6) : every field parsed below sits within the ICD's 8-byte
     // payload, so a short frame means the tail bytes are not ours to read.
@@ -1247,5 +1269,24 @@ int AP_PMUCAN::pmucan_rtr(uint32_t can_id)
 
     return rtr_send_res;    // PNU : was unconditionally 0; match pmucan_cmd()
 }
+
+
+#if AP_PMUCAN_ECU_ENABLED
+// -------------------------------------------------------------------------
+// send_ecu_frame : PMU-005a stage 3 - one RTR poll for the ECU module
+// -------------------------------------------------------------------------
+// Three lines, and all three are the reason it exists: send_frame() is protected in
+// AP_PNU_CAN_Backend, so only this class can reach it; the ECU module is a member rather
+// than a backend; and its polls must not be counted in PMUC's RtrTx/RtrErr, which is
+// what calling pmucan_rtr() would have done.  The caller counts.
+// -------------------------------------------------------------------------
+bool AP_PMUCAN::send_ecu_frame(uint32_t can_id, uint8_t dlc)
+{
+    uint8_t can_data[8] = {0};  // RTR request: always dummy zeros, as pmucan_rtr() sends
+
+    // @can_id already carries FlagEFF | FlagRTR
+    return send_frame(can_id, can_data, dlc);
+}
+#endif  // AP_PMUCAN_ECU_ENABLED
 
 #endif  // AP_PNU_CAN_ENABLED

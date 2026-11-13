@@ -486,9 +486,12 @@ generations, in **two compatibility classes keyed on `VERSTS`**: below 2.0 is le
 legacy behaviour, 2.0 or higher enables the new set, and a `VERSTS` that cannot be obtained or
 decoded counts as below 2.0.
 
-**Nothing in this tree decodes any of it.** `git grep` finds no `0x10000150`, `0x10000160` or
-`0x10000050`. The FC is unaffected until someone implements ECU support, and this issue exists so
-the decisions behind the ICD are not re-litigated from memory when they do.
+**Two of the three are implemented as of 2026-11-13.** `PMU-005a` stages 1-3 added the VERSTS
+generation selection, the HOURCNT width branch and `AP_PMUCAN_ECU`, which polls and decodes
+`MODESTS 0x10000150` and `ENERGYSTS 0x10000160` into the `ECUM`/`ECUE`/`ECUC` records.
+`ENERGYCFG 0x10000050` is still unimplemented - it is stage 5, and stage 5 needs approval. None
+of it has met an ECU: every result is against a fake built from this document. This issue exists
+so the decisions behind the ICD are not re-litigated from memory.
 
 **The one thing worth knowing for the FC.** The ECU draft asked for `ENGONOFF` Stop to be repeated
 every 500 ms until confirmed; that was **not adopted** - Start and Stop are each sent once when the
@@ -534,9 +537,17 @@ per-stage record once a stage lands.
 | **0** | Minimal fake ECU in `Tools/pnu/sitl_can/` - VERSTS 2.00, the new ids and DLCs, fixed ICD-example MODESTS/ENERGYSTS payloads, a 32-bit HOURCNT payload. Legacy stays the default. Protocol encode/decode only, no ECU behaviour model | **DONE 2026-11-13** |
 | **1** | VERSTS-based protocol identification in `AP_PMUCAN`: `UNKNOWN` / `LEGACY_PMU` / `ECU_V2` | **DONE 2026-11-13** |
 | **2** | `AUX2STS` HOURCNT width by generation - UINT24 legacy, UINT32 ECU. One branch, no schema change | **DONE 2026-11-13**, bench-verified |
-| **3** | `AP_PMUCAN_ECU.{h,cpp}`: MODESTS at 10 Hz, ENERGYSTS at 1 Hz, on the free scheduling phases, active only in `ECU_V2` | **NEXT** |
+| **3** | `AP_PMUCAN_ECU.{h,cpp}`: MODESTS at 10 Hz, ENERGYSTS at 1 Hz, on the free scheduling phases, active only in `ECU_V2` | **DONE 2026-11-13** |
 | **4** | MAVLink telemetry for ECU status - **design proposal only, needs approval before implementation** | blocked on approval |
 | **5** | MAVLink telecommand for `ENERGYCFG` - **design proposal only, needs approval before implementation** | blocked on approval |
+
+**What stage 3 added, in one place.** `libraries/AP_PMUCAN/AP_PMUCAN_ECU.{h,cpp}` behind
+`AP_PMUCAN_ECU_ENABLED` in a new `AP_PMUCAN_config.h`; polls on phases 1 and 3 of the
+10-tick window; three dataflash records - `ECUM` (MODESTS, 10 Hz), `ECUE` (ENERGYSTS,
+1 Hz) and `ECUC` (the ECU link's own counters plus the selected generation, 1 Hz, written
+on both generations). The ECU polls deliberately bypass `pmucan_rtr()` and the ECU
+replies deliberately do not feed `_pmu_frames_seen`, so PMUC's counters and the health
+bucket keep the meanings they had. No FC logic reads any decoded ECU field.
 
 **Architecture: hybrid, decided rather than assumed.** One `AP_PMUCAN` backend with a
 latched protocol generation, one version branch in the AUX2STS decode, and a separate
@@ -616,15 +627,22 @@ UINT32 decoder, but the branch is kept: it is one ternary, it keeps the decode m
 generation's ICD actually defines, and V1.05 still leaves the byte undefined for any other unit.
 Decided 2026-11-13, no further stage 2 modification.
 
-**Open items, to settle at the stage that reaches them:**
+**Open items:**
 
-- **Stage 1, carried forward - the generation is not in the flight log.** It is announced by
-  statustext only, so a flight with no GCS attached keeps no record of which generation was
-  selected - the gap V5.1.25 closed for the telemetry records. The natural home is stage 3's
-  ECU record, and stage 4 asks the same question for MAVLink.
-- **Stage 3 - ECU-only RTR polls reach an unidentified device** during the fallback window.
-  The ECU draft says it ignores unexpected frames; the legacy PMU's behaviour is unspecified.
-  Risk is low and the window is ~100 ms, but it is the first thing to check on the bench.
+- **CLOSED in stage 3 - the generation is now in the flight log.** `ECUC`'s `Proto` column
+  carries the raw latched selection and the record is written on both generations, so a
+  flight with no GCS attached keeps the evidence that the statustext used to carry alone.
+  Stage 4 asks the same question for MAVLink and is still open.
+- **MEASURED in stage 3, still a bench item - ECU-only RTR polls reach an unidentified
+  device** during the fallback window. In SITL it is **exactly two frames at boot**, one
+  MODESTS and one ENERGYSTS, before VERSTS answers and selects legacy; the legacy fake
+  ignores both and nothing else changes. The ECU draft says the ECU ignores unexpected
+  frames and the real legacy PMU's behaviour is still unspecified, so confirm on the bench
+  that those two frames are harmless - now that VERSTS is known to answer at v1.00, the
+  window is the boot gap and nothing more.
+- **Stage 3 decoded MODESTS against a draft that is still under development.** The frame
+  carries no layout version and VERSTS identifies software, not frame layout, so the field
+  order must be re-validated against a real capture before the decoder is trusted.
 
 **Not in scope at any stage:** FC-side interlocks built on MODESTS or `initial_fail`, changes
 to TM11/TM12/TM13/TM3/TM1/TC1, changes to PMUC's columns or meanings, changes to the health

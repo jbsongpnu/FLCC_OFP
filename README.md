@@ -172,7 +172,7 @@ no message to say why. Wrong since 5.1.13. See `CHANGELOG.md`.
 
 | Area | State |
 |---|---|
-| PMU | Full telemetry, commands, prearm, in-flight failsafe, engine-start interlock with two guards. **Bench-verified** except the shared bus and Stop-command timing. Legacy V1.05 message set only - the ECU V2.0 set is specified but **not implemented**, `PMU-005` |
+| PMU | Full telemetry, commands, prearm, in-flight failsafe, engine-start interlock with two guards. **Bench-verified** except the shared bus and Stop-command timing. Both generations are decoded as of `PMU-005a` stages 1-3 - VERSTS selects, HOURCNT follows the sender's width, MODESTS and ENERGYSTS are polled and logged - but **the ECU side is SITL only against a fake built from the ICD**; `ENERGYCFG` is not implemented |
 | Gimbal | Mount backend, lifecycle state machine, Appendix 1 homing, per-axis direction parameters. **SITL only - no motor has ever turned** |
 | SAR | Connection layer, both MAVLink messages, the command layer with the Start interlock, the 10 Hz navigation bundle with automatic termination, and `SARN` bundle accounting. **SITL only - no SAR hardware** |
 | Camera | Viewpro via the KGCS TC2/TM2 interface; Gremsy VIO via standard MAVLink with four functions GCS-direct. **Bench-verified on both**, though the TM2 producer moved to `AP_Q30::update()` in 5.1.25 and that move is SITL-verified only |
@@ -186,9 +186,17 @@ no message to say why. Wrong since 5.1.13. See `CHANGELOG.md`.
 `ISSUES.md`. One `AP_PMUCAN` backend with a latched protocol generation, one version branch in
 the AUX2STS decode and a separate module for the two new ECU messages - no Legacy/ECU backend
 split. Stage 0 is the minimal fake ECU in `Tools/pnu/sitl_can/`, because no ECU hardware
-exists and nothing downstream is testable without a device that speaks V2.0. Stages 4 and 5,
-the MAVLink telemetry and the `ENERGYCFG` telecommand, are design proposals that need PNU's
-approval before any code.
+exists and nothing downstream is testable without a device that speaks V2.0.
+
+**Stages 0-3 are done.** The fake ECU, the VERSTS generation selection, the HOURCNT width
+branch and `AP_PMUCAN_ECU` - MODESTS at 10 Hz and ENERGYSTS at 1 Hz on the scheduling phases
+the five legacy slots leave free, behind `AP_PMUCAN_ECU_ENABLED`, logged as `ECUM`, `ECUE`
+and `ECUC`. The real legacy PMU was bench-checked on 2026-11-13 and answers VERSTS at v1.00
+with a zero AUX2STS reserved byte, so legacy hardware selects the legacy path on its own.
+
+**NEXT: stages 4 and 5**, the MAVLink telemetry and the `ENERGYCFG` telecommand. Both are
+design proposals that need PNU's approval before any code, and until stage 4 lands the ECU
+data reaches the flight log only - KGCS sees none of it.
 
 Everything else is at a clean point: every applied step is recorded, and step 3f remains
 blocked on measurements only PNU can make.
@@ -223,7 +231,8 @@ terminates every observation, because a constant has no age.
   rewrite has only ever run in SITL.
 - **Put three questions to the ECU author** - `PMU-005`. A reliable completed-stop indication,
   whether `GCMD` reports the requested or the clamped setpoint, and the undefined `MODESTS`
-  codes. None blocks anything today, because no ECU is implemented.
+  codes. The third one now has a decoder behind it: stage 3 logs `MODESTS` raw, and the frame
+  carries no layout version, so the field order needs a real capture before it is trusted.
 - **KGCS/PNU-GCS side:** TC50 must be sent from a sysid `MAV_GCS_SYSID` covers (default 255), and
   both endpoints must use CRC_EXTRA **231** (TC50) and **7** (TM50) - `GCS-002`.
 

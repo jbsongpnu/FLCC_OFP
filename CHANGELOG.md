@@ -21,6 +21,81 @@ A feature exercised only in SITL is **not** hardware-verified. Entries say so ex
 
 ---
 
+## Firmware, 2026-11-13 - MODESTS and ENERGYSTS, the two ECU-only messages - PMU-005a stage 3 (no version bump)
+
+The first stage that adds a message rather than reinterpreting one.  `AP_PMUCAN_ECU`
+polls MODESTS (`0x10000150`) at 10 Hz and ENERGYSTS (`0x10000160`) at 1 Hz, decodes both,
+and writes them to the flight log.  Nothing in the FC acts on either: the ICD is explicit
+that the ECU enforces its own modes and start permissions, so **no interlock was built on
+`start_gate` or `initial_fail`** and none should be.
+
+**Where the polls go.**  `AP_PMUCAN`'s five command/RTR slots fire on the EVEN phases of
+each 10-tick window - `stride = (100/10)/5 = 2` - so phases 1, 3, 5, 7 and 9 have never
+carried a frame.  MODESTS takes phase 1 of every window, ENERGYSTS phase 3 of every
+hundredth tick.  Nothing can displace a legacy slot, which matters because
+PNU-ISSUE(D7)'s interlock is calibrated on `engineonoffstate()` being reached at 10 Hz.
+
+**Active only on the ECU generation**, fallback included.  `protocol()` is what is asked,
+so a device that never answers VERSTS is polled as an ECU - the approved behaviour, and
+the reason a legacy PMU can be asked for a message it has never heard of.  Measured: that
+costs exactly **two frames at boot** before VERSTS arrives and selects legacy.
+
+**Not a second backend.**  It is a member of `AP_PMUCAN`, driven by its `update()` and
+its `handle_frame()`.  Backends are constructed before any CAN frame exists, so one could
+never have been selected by generation; and a second backend claiming PMU ids would have
+to be ordered against the first in the dispatch.
+
+**What was deliberately kept separate**
+
+| Kept apart | Why |
+|---|---|
+| ECU polls do not go through `pmucan_rtr()` | it increments PMUC's `RtrTx`/`RtrErr`, whose meaning is "the five legacy polls" at a rate a reader can predict from the ICD |
+| ECU replies do not feed `_pmu_frames_seen` | the health bucket's input set is the five legacy status messages, fixed by PNU-ISSUE(D6).  They are polled on both generations, so PMU health means the same thing either way |
+| Short ECU frames count in the ECU's own counter | `_short_frame_cnt` is PMUC's column for the legacy five |
+
+**Three new records.**  `ECUM` at 10 Hz carries MODESTS, `ECUE` at 1 Hz carries
+ENERGYSTS, both written only once a reply of that kind has been decoded - without that,
+the fallback case would fill the log at 10 Hz with zeroes about a device that never
+answered.  `ECUC` at 1 Hz carries the ECU link's own counters and, in `Proto`, **the
+generation this backend selected** - written on BOTH generations.  That closes the gap
+stage 1 left: the selection was announced by statustext only, so a flight with no GCS
+attached kept no record of it.  `Proto` is the RAW latched value, so 0 means "nothing
+identified itself and the ECU fallback is in use" and is distinct from a reported 2.
+
+`AP_PMUCAN_ECU_ENABLED` (new `AP_PMUCAN_config.h`) compiles the whole thing out; with it
+off the PMU backend is exactly V5.1.28.  SITL text cost with it on: **1328 bytes**.
+
+**Verification**
+
+| What | Result |
+|---|---|
+| MODESTS decode | `SSt` 3, `OMd` 5, `CMd` 6, `Alrt` 0, `EMd` 3, `Gate` 0, `IFl` 0, `RPMT` **4300** - the ICD's own example `53 06 00 03 00 00 CC 10`, field for field |
+| ENERGYSTS decode | `Tank` **800** (8.00 L), `Batt` **220** (22.0 Ah), `Endr` **7200** s - the ICD example `20 03 DC 00 20 1C 00 00` |
+| Poll rate, on the wire | MODESTS median **100.79 ms**, ENERGYSTS median **1012.89 ms**, kernel timestamps on vcan0 |
+| Poll phase, on the wire | MODESTS lands a median **9.61 ms** after the previous legacy poll - one tick, the free odd phase |
+| Legacy cadence, same capture | 100.52 - 100.79 ms per id with ECU polling, 100.52 - 101.05 ms in a legacy control run on the same binary - unchanged |
+| ECU poll DLC | **8** for both ids, as ICD V2.0 requires of ECU RTR |
+| Legacy run | **no `ECUM` and no `ECUE` records at all**; `ECUC` `Proto` 1 with `RtrTx` frozen at **2** - the two boot frames before VERSTS answered |
+| ECU-fallback run (`--pmu-no-versts`) | `Proto` **0**, polls continue at 10.77 Hz, both records decoded |
+| Legacy device polled as an ECU | `RtrTx` +248 over 23 s, `ModeRx`/`EnrgRx` **0**, `Short` **0**, no `ECUM`/`ECUE` written, no errors.  The fake ignores the unknown ids, as the ECU draft says the ECU does |
+| Step 2c | start commanded **1.185 s** (legacy) and **1.176 s** (ECU) after the burst began, inside the 1.15 - 1.29 s band |
+| `PMUE` | one record per scenario: `START_CMD`, `Mode` 1, `OnCnt` 10, `StopAge` 6229/6225 ms |
+| Record schemas | `TM11`, `TM12`, `TM13`, `TM3`, `PMUC`, `PMUE` format strings and field lists compared against a stage 2 log - identical |
+| PMUC ratio | `CmdTx`/`RtrTx` **0.801** with ECU polling and **0.801** without, so the command rotation is untouched |
+| Gimbal and SAR | 1786/1785/1785 feedback frames per axis and 22 SAR heartbeats in the ECU run, unchanged |
+| Build | CubeOrangePlus and SITL, and SITL again with `AP_PMUCAN_ECU_ENABLED 0` |
+| Tests and lint | 10 CubeMars + 12 SAR gtests, 124 Python device tests, `run_astyle.py --dry-run` |
+
+**Known Limitations**
+
+- Every ECU number above comes from a fake built from the ICD's own examples, so the
+  decode is verified against the document, not against a device.  No ECU hardware exists.
+- MODESTS is under development and its frame carries no layout version, so the field
+  order must be re-validated against a real capture before this decoder is trusted.
+- The ECU data reaches the flight log only.  KGCS sees none of it until stage 4.
+
+---
+
 ## Bench, 2026-11-13 - the legacy PMU answers VERSTS v1.00 and its AUX2STS reserved byte is zero
 
 Both bench items opened by stage 2 were checked on the real legacy PMU, and both came back

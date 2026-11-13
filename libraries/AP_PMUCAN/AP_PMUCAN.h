@@ -40,6 +40,8 @@ extern mavlink_sys_icd_gcs_flcc_pmu_ctrl_echo_t         PMU_Ctrl_Echo;      // P
 #include <AP_HAL/CANIface.h>
 #include <AP_PNU_CAN/AP_PNU_CAN_Backend.h>
 
+#include "AP_PMUCAN_ECU.h"      // PMU-005a stage 3 : MODESTS and ENERGYSTS
+
 // PNU : relocated from the former pmucan_build_config.hpp (vendored libuavcan v0,
 // removed - AP_HAL::CANFrame / AP_HAL::CANIface now provide everything used).
 #define PMUCAN_VERSION_MAJOR        1
@@ -237,6 +239,14 @@ public:
 
     int pmucan_cmd(uint32_t can_id, uint32_t data_cmd);
     int pmucan_rtr(uint32_t can_id);
+
+#if AP_PMUCAN_ECU_ENABLED
+    // PMU-005a stage 3 : one frame for the ECU module.  It exists because send_frame()
+    // is protected in the backend base, and because an ECU poll must NOT pass through
+    // pmucan_rtr() - that would fold ECU traffic into PMUC's RtrTx and change what every
+    // existing PMUC record means.  Counting belongs to the caller.
+    bool send_ecu_frame(uint32_t can_id, uint8_t dlc);
+#endif
     /**
      * Returns:
      *  0 - rejected/timedout/enqueued
@@ -253,6 +263,11 @@ public:
     // difference, not a behavioural one.
     Protocol protocol(void) const { return (_proto == PROTO_UNKNOWN) ? PROTO_ECU_V2 : _proto; }
     bool protocol_identified(void) const { return _proto != PROTO_UNKNOWN; }
+
+    // The LATCHED selection, with the fallback NOT applied - PROTO_UNKNOWN means nothing
+    // has identified itself.  Nothing may decide behaviour from this; it exists so the
+    // flight log can record which of the two cases an ECU-width decode came from.
+    Protocol protocol_raw(void) const { return _proto; }
 
 private:
 
@@ -346,6 +361,13 @@ private:
 
     uint32_t _next_log_ms;                      // deadline for the next log_status()
     uint32_t _next_counter_log_ms;              // deadline for the next log_counters()
+
+#if AP_PMUCAN_ECU_ENABLED
+    // PMU-005a stage 3 : the ECU-only messages.  A member rather than a second backend -
+    // backends are constructed before any CAN frame exists, so one could never have been
+    // chosen by generation.  It is inert on a legacy PMU: update() returns immediately.
+    AP_PMUCAN_ECU _ecu;
+#endif
 
 };
 
