@@ -182,8 +182,16 @@ no message to say why. Wrong since 5.1.13. See `CHANGELOG.md`.
 
 ## 4. Current Development Plan
 
-**Nothing is in progress.** The tree is at a clean point: every applied step is recorded, and the
-next step is blocked on measurements only PNU can make.
+**ECU V2.0 support, Stages 0-5**, approved 2026-11-13 and recorded as `PMU-005a` in
+`ISSUES.md`. One `AP_PMUCAN` backend with a latched protocol generation, one version branch in
+the AUX2STS decode and a separate module for the two new ECU messages - no Legacy/ECU backend
+split. Stage 0 is the minimal fake ECU in `Tools/pnu/sitl_can/`, because no ECU hardware
+exists and nothing downstream is testable without a device that speaks V2.0. Stages 4 and 5,
+the MAVLink telemetry and the `ENERGYCFG` telecommand, are design proposals that need PNU's
+approval before any code.
+
+Everything else is at a clean point: every applied step is recorded, and step 3f remains
+blocked on measurements only PNU can make.
 
 ---
 

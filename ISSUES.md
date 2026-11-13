@@ -524,6 +524,78 @@ incremental-addition path.
 verified against a device by anyone, here or at the vendor. The source PDF is not in the repository,
 so the ECU sections cannot be re-checked from a clone alone - keep a copy with the project records.
 
+### PMU-005a - the approved implementation plan, Stages 0-5
+
+Approved 2026-11-13. Status by stage is kept in this table; `CHANGELOG.md` carries the
+per-stage record once a stage lands.
+
+| Stage | Content | Status |
+|---|---|---|
+| **0** | Minimal fake ECU in `Tools/pnu/sitl_can/` - VERSTS 2.00, the new ids and DLCs, fixed ICD-example MODESTS/ENERGYSTS payloads, a 32-bit HOURCNT payload. Legacy stays the default. Protocol encode/decode only, no ECU behaviour model | **NEXT** |
+| **1** | VERSTS-based protocol identification in `AP_PMUCAN`: `UNKNOWN` / `LEGACY_PMU` / `ECU_V2` | after 0 |
+| **2** | `AUX2STS` HOURCNT width by generation - UINT24 legacy, UINT32 ECU. One branch, no schema change | after 1 |
+| **3** | `AP_PMUCAN_ECU.{h,cpp}`: MODESTS at 10 Hz, ENERGYSTS at 1 Hz, on the free scheduling phases, active only in `ECU_V2` | after 2 |
+| **4** | MAVLink telemetry for ECU status - **design proposal only, needs approval before implementation** | blocked on approval |
+| **5** | MAVLink telecommand for `ENERGYCFG` - **design proposal only, needs approval before implementation** | blocked on approval |
+
+**Architecture: hybrid, decided rather than assumed.** One `AP_PMUCAN` backend with a
+latched protocol generation, one version branch in the AUX2STS decode, and a separate
+compile-guarded module for the two genuinely new messages. No Legacy/ECU backend split, no
+inheritance, no protocol abstraction layer, no code moved for symmetry. The decisive reason
+against a backend split: `create_backends()` runs at `AP_PNU_CAN.cpp:349`, **before**
+`thread_create()` at line 353, so backends are constructed before any CAN frame can exist
+and therefore before VERSTS can be known. Selecting a backend by protocol is impossible;
+constructing both would duplicate `_engineonoffmode`, the two step 2c windows and the health
+bucket, and both would claim the same five ids in a dispatch that stops at the first claim.
+
+**The whole existing-message delta is one memcpy length.** Every other ECU difference -
+ICMD type, GCMD scaling, PSTS bit meanings - is interpretation, and the FC interprets
+nothing: every use of `PMU_Status.*` outside the decoder is a logger argument or a MAVLink
+argument. The FC is a relay for PMU status, so those differences belong to KGCS.
+
+**Scheduling headroom already exists.** `update()` uses phases 0, 2, 4, 6 and 8 of each
+10-tick window (`stride = (100/10)/5 = 2`); phases 1, 3, 5, 7 and 9 are free. The ECU polls
+go there, so the five legacy slots and `engineonoffstate()`'s calibrated 10 Hz are untouched.
+
+**No new VERSTS polling mechanism is needed.** Slot 4 of the existing rotation already polls
+VERSTS at 10 Hz and must keep doing so - removing it would change the measured RTR rate and
+PMUC's meaning. "Identification happens once" therefore means *the decision latches*, not
+that the frames stop; late-arriving legacy detection comes free from the existing poll.
+
+**Three decisions taken against the earlier analysis**, recorded so they are not silently
+re-litigated:
+
+1. **Missing VERSTS falls back to `ECU_V2`, not to legacy behaviour**, with a GCS message
+   once a second until a version arrives, and no interlock or inhibition of engine control.
+2. **No five-sample hysteresis** on a generation change, and no forced-generation parameter.
+   A single valid-BCD frame can therefore flip the generation; DLC 8 and nibble validation
+   are the only filters. Accepted as simple-until-proven-otherwise.
+3. **A late legacy VERSTS switches live**, without reboot, disabling ECU polls and leaving
+   every step 2c counter and the engine state exactly as they were.
+
+**Open items, to settle at the stage that reaches them:**
+
+- **Stage 1 - do not report missing VERSTS when no PMU is fitted.** An aircraft flying
+  without a PMU is a supported configuration (`PNU-ISSUE D9b`), and an unconditional 1 Hz
+  statustext would flood the link for the whole flight. The message should be emitted only
+  while the PMU is otherwise communicating - a device that talks but will not say its
+  version - which is also the only case the message is about.
+- **Stage 2 - HOURCNT width while in the missing-VERSTS fallback.** `ECU_V2` decodes four
+  bytes, but AUX2STS byte 3 is `RSV` on a legacy PMU and the legacy source never defines its
+  value. If a real legacy PMU puts anything non-zero there, engine hours jump by up to
+  16.7 Ms. The exposure is small, because VERSTS is polled at 10 Hz and normally answers
+  within ~100 ms, but it is not zero on a device that never answers. The cheap alternative is
+  to let the fallback govern polling only and keep HOURCNT at 24 bits until a version is
+  confirmed. Decide before Stage 2 lands.
+- **Stage 3 - ECU-only RTR polls reach an unidentified device** during the fallback window.
+  The ECU draft says it ignores unexpected frames; the legacy PMU's behaviour is unspecified.
+  Risk is low and the window is ~100 ms, but it is the first thing to check on the bench.
+
+**Not in scope at any stage:** FC-side interlocks built on MODESTS or `initial_fail`, changes
+to TM11/TM12/TM13/TM3/TM1/TC1, changes to PMUC's columns or meanings, changes to the health
+leaky bucket's input set, and any periodic retransmission of `ENGONOFF`.
+
+
 ## PNUCAN-001 - the gimbal slew limiter divided by a nominal rate
 
 | | |
