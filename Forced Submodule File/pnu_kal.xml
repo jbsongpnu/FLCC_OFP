@@ -11,6 +11,13 @@
 
   All ids are >= 50001, so these messages are MAVLink2 only - a link on
   SERIALn_PROTOCOL=1 carries none of them.  See README PNU-ISSUE D2.
+
+  THIS FILE IS ALSO THE GROUND-STATION INTERFACE SPECIFICATION for the ECU V2.0
+  messages TC60, TM60 and TM61.  Their comments and field descriptions carry every
+  scale factor, every defined code, the flight controller's own command behaviour and
+  the required display rules, so a ground station can be implemented from this file
+  alone without the CAN-side protocol document.  The older PNU-KAL messages above are
+  documented to the lighter standard they were written to.
 -->
 <mavlink>
   <!-- No <include> here: this file is pulled in by ardupilotmega.xml, which already
@@ -130,71 +137,504 @@
     <field type="uint32_t" name="Live_Counter">FC-maintained valid SAR Heart_Beat reception count. Increment by one per valid CAN 0x510, not per TM transmission. Reset on FC boot during the common single-battery power reset; no persistence or separate SAR reboot detection. No terminal-count handling required in the operating lifetime.</field>
   </message>
 
+<!-- ================================================================================== -->
+<!-- ECU V2.0 - KGCS INTERFACE                                                          -->
+<!-- ================================================================================== -->
+<!--
+  TC60, TM60 and TM61 are the COMPLETE ECU V2.0 interface between KGCS and the FLCC.
+  Everything needed to implement the ground station is in this file: scaling, every
+  defined code, what the FC does, and what the operator should see.  The CAN-side
+  document these were derived from is not needed to implement KGCS.
+
+  = FEATURE AVAILABILITY =======================================================
+
+    Legacy PMU                     TM60 no   TM61 no   TC60 refused
+    Confirmed ECU 2.00 or higher   TM60 yes  TM61 yes  TC60 accepted (see TC60)
+    Unconfirmed ECU fallback       TM60 no   TM61 no   TC60 refused
+
+  The FC transmits TM60 and TM61 only after a VERSTS reply has POSITIVELY confirmed ECU
+  software 2.00 or higher.  The CAN layer has a fallback that treats a device which never
+  answers VERSTS as an ECU; that fallback deliberately does NOT enable any MAVLink
+  message, because an unknown message id is what an older ground station cannot tolerate.
+
+  THE ABSENCE OF TM60 AND TM61 IS NOT PROOF THAT A LEGACY PMU IS FITTED.  It equally
+  means: unconfirmed fallback, ECU support compiled out of this firmware, or the PMU link
+  down.  KGCS must not infer the fitted hardware from it.  Which generation the FC
+  selected is announced once at boot by STATUSTEXT and recorded permanently in the ECUC
+  dataflash record; no MAVLink message carries it and none will - TM3 is NOT modified and
+  no message is added for this purpose.
+
+  Everything else is unchanged: TM1, TM2, TM3, TM5, TM50, TC1, TC2, TC4 and TC50 keep
+  their ids, fields, rates and CRC_EXTRA on every generation.  A KGCS build that knows
+  nothing about ECU V2.0 continues to work against a legacy aircraft exactly as before.
+
+  = THREE RULES THAT APPLY TO EVERY ECU FIELD BELOW =============================
+
+  1. RAW INTEGERS ON THE WIRE.  No field is converted to physical units by the FC.
+     KGCS applies the scale factor given in each field description.  This is the same
+     convention TM1 and TM50 already use.
+
+  2. AN UNDEFINED CODE IS DISPLAYED RAW.  Where a field lists its defined values, any
+     value not listed - including 0 where 0 is not listed - must be shown as
+     "Unknown (raw N)".  Never map an unlisted code onto the nearest defined one and
+     never hide it.  The ECU also transmits reserved fields as zero, so a zero and a
+     genuine state cannot be told apart.
+
+  3. STALE DATA HOLDS ITS LAST VALUE.  When a message goes stale the FC keeps sending
+     the last values it decoded rather than zeroing them, because zero is a value the
+     ECU itself transmits.  The freshness bit in Data_Valid, not the value, is what
+     tells KGCS the reading is old.  The one exception is TM61.Battery_SOC - see there.
+
+  = WHAT KGCS MUST NOT DO ======================================================
+
+  - No engine Start interlock, permission check or safety action built on any field in
+    TM60.  Start_Gate and Initial_Fail are ECU status for display only; the ECU performs
+    those checks itself and is the sole authority on them.
+  - No second retry loop for TC60.  The FC already retries, up to three CAN frames.
+  - No independent accept/reject decision for an ENERGYCFG command.  Display the FC's
+    reported outcome.
+  - No assumption that a successful outcome is an ECU acknowledgment.  The protocol
+    defines none; see TM61.Cfg_Result.
+-->
+
 <!-- ====================================================== -->
 <!-- ECU V2.0 - TELECOMMAND (TC)                            -->
 <!-- ====================================================== -->
+<!--
+  TC60 - ECU ENERGY CONFIGURATION.  The only command that writes to the ECU.
 
-  <!-- PMU-005a stage 5.  ENERGYCFG (CAN 0x10000050), carried as the CAN payload itself:
-       four little-endian UINT16 in the ICD's own raw units, 65535 meaning "keep the
-       current value".  The FC performs NO arithmetic on it - it validates the four
-       numbers and copies the eight bytes onto the bus - which is the only shape that
-       keeps `fuel_raw = round(fuel_litres * 100)` a single rounding, performed once, by
-       the operator's own tooling.  A float payload could not carry 65535 at all.
+  = WHAT IT CARRIES ============================================================
 
-       OPERATOR ACTION ONLY.  One frame per TC60, never on boot, never on reconnect and
-       never from a stored list; the FC keeps no persistent copy.  The outcome is
-       reported in TM61's Cfg_Result / Cfg_Attempts extension fields.
+  Four raw UINT16 fields, identical to the ECU's own CAN command payload.  KGCS converts
+  the operator's physical entry into the raw count; the FC performs NO arithmetic on the
+  numbers and copies them to the device unchanged.  Rounding therefore happens once, in
+  KGCS, which is what keeps the value the operator read off the gauge intact.
 
-       ACCEPTED ONLY WHEN VERSTS HAS CONFIRMED ECU SOFTWARE 2.00 OR HIGHER, and only from
-       a sender MAV_GCS_SYSID covers.  See README PMU-005a. -->
+  Each field independently accepts the raw value 65535, meaning KEEP THE CURRENT VALUE.
+  No real setting can collide with it: the largest legal raw setting is 10000.
+
+  = RECOMMENDED KGCS INPUT CONTROLS ============================================
+
+    Field    Control             Unit   Operator range      Raw conversion
+    Tank     numeric text box    L      0.10 to 100.00      raw = round(L   * 100)
+    Fuel     numeric text box    L      0.00 to Tank        raw = round(L   * 100)
+    Battery  numeric text box    Ah     5.0 to 100.0        raw = round(Ah  * 10)
+    SOC      numeric text box    %      0.0 to 100.0        raw = round(pct * 10)
+
+  Plus: a per-field "Keep current" checkbox, ONE Apply button, a transaction progress
+  indicator, and a result display.  Ticking "Keep current" transmits raw 65535 for that
+  field.  THE OPERATOR MUST NEVER BE ASKED TO TYPE 65535 - it is a protocol sentinel,
+  not a value, and typing 65535 into the litres box would mean 655.35 L.
+
+  TANK AND FUEL ARE DIFFERENT QUANTITIES.  Tank is the physical CAPACITY of the tank and
+  changes only when the tank is changed.  Fuel is HOW MUCH IS IN IT RIGHT NOW, read off
+  the tank level indication and entered as an absolute quantity.
+
+  FUEL IS NOT A REFUELLING AMOUNT.  Never offer an "add N litres" control and never
+  compute the field by adding an amount to a previously displayed quantity.  The normal
+  after-refuelling action is: read the gauge, type the total, tick "Keep current" on the
+  other three, Apply.
+
+  = WHEN THE APPLY BUTTON SHOULD BE ENABLED ====================================
+
+  Recommended KGCS gate - all of these true:
+    a. TM60 and TM61 are being received at all (so the ECU generation is confirmed).
+    b. TM60.Data_Valid bit 1 is set (MODESTS is fresh).
+    c. TM60.Operation_Mode is 1 DO_NOTHING or 3 STANDBY.
+    d. TM61.Cfg_Result is not 1 IN_PROGRESS.
+    e. Every field not set to "Keep current" is inside its range above.
+    f. Fuel does not exceed the effective tank - the Tank being set if one is, else
+       TM61.Tank - when that capacity is known.
+
+  This is a usability gate, not a safety gate.  The FC validates independently and the
+  ECU is the final authority; KGCS only prevents commands that are obviously going to be
+  refused.
+
+  ONE TC60 PER APPLY PRESS.  Never transmit TC60 on startup, on reconnection, when a
+  saved UI profile is loaded, or on any automatic trigger.  The FC keeps no persistent
+  copy of any command and replays nothing after a reboot; KGCS must not reintroduce that.
+
+  = ONE TRANSACTION AT A TIME ==================================================
+
+  The FC runs at most one ENERGYCFG transaction.  A TC60 that arrives while one is active
+  is counted and refused; it does NOT replace the running command and does NOT queue.
+  KGCS must therefore, while TM61.Cfg_Result is 1 IN_PROGRESS:
+    - disable Apply,
+    - send nothing automatically,
+    - show progress using TM61.Cfg_Attempts (see TM61),
+    - wait for a terminal Cfg_Result,
+    - and NOT present the act of sending TC60 as a successful configuration.
+
+  IF TELEMETRY IS LOST DURING A TRANSACTION, the FC carries on without KGCS: it will
+  finish, time out or cancel on its own within about 10.5 seconds of the command.  KGCS
+  should show "outcome unknown - telemetry lost" and, when TM61 returns, read the latched
+  Cfg_Result, which still describes that transaction.  Do not resend on reconnection and
+  do not assume failure.
+
+  = HOW THE FC VERIFIES THE COMMAND (so KGCS can explain it, not repeat it) =====
+
+  On accepting a TC60 the FC sends ONE ENERGYCFG CAN frame and then checks the ECU's own
+  status messages:
+
+    Tank     verified against the ECU's reported tank capacity, exactly
+    Battery  verified against the ECU's reported battery capacity, exactly
+    Fuel     verified indirectly through the ECU's fuel percentage, which is an INTEGER
+             percent of tank capacity rounded down.  The FC accepts
+             floor(100 * fuel / tank) or one percentage point less, which is the
+             tolerance the ECU protocol itself specifies for its internal rounding.
+             THIS CANNOT CONFIRM 0.01 L.  On an 8 L tank one percent is 80 ml
+    SOC      verified against the ECU's battery state-of-charge reading, within 0.1
+             percentage point
+    Fields set to "Keep current" are not verified, and are not waited for
+
+  A reading only counts if the status frame carrying it arrived AFTER a mandatory one
+  second had elapsed since the frame was sent - an earlier reading may predate the
+  command.  If the needed readings have not arrived within 3500 ms, that attempt has
+  failed.  A failed attempt is retried with the IDENTICAL frame, to a maximum of THREE
+  frames in total, after which the outcome is reported with the values that were read
+  back.  The whole sequence is bounded at about 10.5 seconds.
+
+  KGCS DISPLAYS THAT OUTCOME.  It does not re-derive it, does not apply its own
+  tolerance, and does not resend while the FC is still retrying.
+-->
   <message id="50060" name="SYS_ICD_GCS_FLCC_ECU_ENERGY_CFG">
-  <description>TC60 (ECU). Energy configuration from GCS to FLCC, operator action only. The FC sends one ENERGYCFG frame per accepted command and retries the identical frame to a maximum of three transmissions; the result appears in TM61.</description>
-    <field type="uint16_t" name="Tank" units="l">Tank[SF:0.01, MIN:10, MAX:10000]. Tank capacity. 65535 keeps the current value.</field>
-    <field type="uint16_t" name="Fuel" units="l">Fuel[SF:0.01, MIN:0, MAX:Tank]. Current TOTAL fuel in the tank, read from the tank level indication - not an amount added. 65535 keeps the current value.</field>
-    <field type="uint16_t" name="Battery" units="Ah">Battery[SF:0.1, MIN:50, MAX:1000]. Battery capacity. 65535 keeps the current value.</field>
-    <field type="uint16_t" name="SOC" units="%">SOC[SF:0.1, MIN:0, MAX:1000]. Optional state-of-charge correction. 65535 keeps the voltage-derived estimate.</field>
+  <description>TC60 (ECU). Energy configuration from GCS to FLCC, operator action only. The FC sends one ENERGYCFG frame per accepted command and retries the identical frame to a maximum of three transmissions; the result appears in TM61 Cfg_Result and Cfg_Attempts.</description>
+    <field type="uint16_t" name="Tank" units="l">Tank capacity[SF:0.01, MIN:10, MAX:10000]. Raw UINT16, 0.01 L per count, so raw 800 is 8.00 L. Operator enters litres from 0.10 to 100.00; KGCS sends round(litres * 100). THE PHYSICAL SIZE OF THE TANK, not how much is in it. Send 65535 to keep the ECU's current capacity. Verified exactly against TM61 Tank.</field>
+    <field type="uint16_t" name="Fuel" units="l">Current total fuel in tank[SF:0.01, MIN:0, MAX:Tank]. Raw UINT16, 0.01 L per count. Operator reads the tank level indication and enters the ABSOLUTE total now in the tank, 0.00 L up to the tank capacity; KGCS sends round(litres * 100). NEVER an amount added, and never computed by adding a refuelling quantity to a previous reading. May not exceed the tank capacity being set, or the ECU's retained capacity if none is being set. Send 65535 to keep the ECU's current quantity. The ECU stores this across power cycles and decrements it as fuel is burned. Verified only indirectly, through an integer fuel percentage - see the TC60 comment above.</field>
+    <field type="uint16_t" name="Battery" units="Ah">Battery capacity[SF:0.1, MIN:50, MAX:1000]. Raw UINT16, 0.1 Ah per count, so raw 220 is 22.0 Ah. Operator enters 5.0 to 100.0 Ah; KGCS sends round(Ah * 10). Send 65535 to keep the ECU's current capacity. Verified exactly against TM61 Battery.</field>
+    <field type="uint16_t" name="SOC" units="%">Optional state-of-charge correction[SF:0.1, MIN:0, MAX:1000]. Raw UINT16, 0.1 percent per count, so raw 850 is 85.0 percent. Operator enters 0.0 to 100.0 percent; KGCS sends round(percent * 10). OPTIONAL: the ECU estimates state of charge from battery voltage at power-up, and this field exists only to correct that estimate deliberately. The normal value is 65535, keep current. Verified against TM61 Battery_SOC within 0.1 percentage point.</field>
   </message>
 
 <!-- ====================================================== -->
 <!-- ECU V2.0 - TELEMETRY (TM)                              -->
 <!-- ====================================================== -->
+<!--
+  TM60 - ECU MODE STATUS.  Nominal 10 Hz.  What the ECU says it is doing.
 
-  <!-- PMU-005a stage 4.  MODESTS (CAN 0x10000150) and ENERGYSTS (CAN 0x10000160),
-       forwarded RAW.  "PMU CAN Comm Protocol.md" requires undefined codes to be reported
-       as received rather than mapped onto the nearest defined state, and the endurance
-       sentinels override their own scale, so neither message can be converted to physical
-       units here - KGCS applies the scale factors quoted below.
+  INFORMATIONAL ONLY.  The ECU enforces its own operating modes and its own engine-start
+  permissions.  Nothing in this message authorises, blocks or implies any ground-station
+  action beyond display, with one exception: TM60.Operation_Mode is the condition the
+  ECU itself places on accepting TC60, so KGCS uses it to enable the Apply button.
 
-       BOTH ARE TRANSMITTED ONLY WHEN VERSTS HAS CONFIRMED ECU SOFTWARE 2.00 OR HIGHER.
-       A legacy PMU emits neither, and neither does the unconfirmed ECU_V2 CAN fallback;
-       that is what keeps an existing KGCS compatible on a legacy aircraft.  See
-       README PMU-005a. -->
+  = SUGGESTED PRESENTATION =====================================================
+
+  Normal operation      System_State, Operation_Mode, Ctrl_Mode and EMS_Mode shown as
+                        their names.  RPM_Target shown as a number with "rpm"
+  Alert_Level 1         ADVISORY - amber, "plan to land"
+  Alert_Level 2         IMMEDIATE - red, "land now".  The ECU raises this for a battery
+                        at landing reserve, or a low state of charge combined with low
+                        fuel or a cylinder head above 260 degC
+  Initial_Fail non-zero amber, listing the set bits by name.  Every defined bit blocks
+                        engine start INSIDE THE ECU, so it needs operator attention
+                        but KGCS must not evaluate it or act on it
+  Start_Gate non-zero   shown with the last start attempt, by name
+  Unknown code          "Unknown (raw N)", in the same place the name would go
+  Data_Valid bit 1 clear every field greyed out, with the age from Mode_Age
+
+  = TWO THINGS KGCS MUST NOT INFER =============================================
+
+  1. RPM_Target 0 DOES NOT MEAN THE ENGINE IS STOPPED.  It means the ECU is not
+     governing RPM, which is also true while cranking, in MANUAL, and in several fail
+     and stop modes.  During an over-RPM cut the throttle can be forced to zero while
+     RPM_Target still reports a target.
+  2. Start_Gate 0 DOES NOT MEAN THE ENGINE IS RUNNING.  It means the last start attempt
+     passed its gates - or that there has been no attempt since power-on.
+
+  = DATA VALIDITY ==============================================================
+
+  Data_Valid bit 0  at least one MODESTS has been decoded since boot
+  Data_Valid bit 1  the last one arrived no more than 500 ms ago
+  Mode_Age          milliseconds since that reply, 1 ms per count, saturating at 65535.
+                    Reported as 65535 while bit 0 is clear
+  Stale behaviour   the fields keep their last decoded values; only bit 1 clears
+
+  A STATE THAT WAS RUNNING MUST NOT GO ON LOOKING LIVE AFTER BIT 1 CLEARS.  The values
+  are the last ones that were true, not the ones that are true now; present them as a
+  greyed-out last-known reading with their age, never as current ECU state.
+-->
   <message id="51060" name="SYS_ICD_FLCC_GCS_ECU_MODE_STATUS">
   <description>TM60 (ECU). ECU operating modes, RPM target and start permission, as received. 10 Hz. Informational only: the ECU enforces its own modes and start permissions.</description>
-    <field type="uint16_t" name="RPM_Target" units="rpm">RPM_Target[SF:1, MIN:0, MAX:65535]. Governor target; zero when RPM is not under governor control and not proof of engine stop.</field>
-    <field type="uint16_t" name="Mode_Age" units="ms">Mode_Age[SF:1, MIN:0, MAX:65535]. Time since the last MODESTS reply, saturating at 65535.</field>
-    <field type="uint8_t" name="System_State" units="N/A">System_State[SF:N/A, MIN:0, MAX:15]. 1 INITIALIZATION, 2 READY, 3 ENGINE_RUN, 4 USER_SHELL; 0 and undefined codes are unknown.</field>
-    <field type="uint8_t" name="Operation_Mode" units="N/A">Operation_Mode[SF:N/A, MIN:0, MAX:15]. 1 DO_NOTHING, 3 STANDBY, 4 STARTUP, 5 RUNNING, 6 STOP; 0, 2 and undefined codes are unknown.</field>
-    <field type="uint8_t" name="Ctrl_Mode" units="N/A">Ctrl_Mode[SF:N/A, MIN:0, MAX:255]. 1 NONE through 10 FAIL_VOLT_SENSOR; undefined codes are unknown.</field>
-    <field type="uint8_t" name="Alert_Level" units="N/A">Alert_Level[SF:N/A, MIN:0, MAX:255]. 0 NONE, 1 ADVISORY, 2 IMMEDIATE.</field>
-    <field type="uint8_t" name="EMS_Mode" units="N/A">EMS_Mode[SF:N/A, MIN:0, MAX:255]. 0 INIT through 9 FORCED_CHARGE; undefined codes are unknown.</field>
-    <field type="uint8_t" name="Start_Gate" units="N/A">Start_Gate[SF:N/A, MIN:0, MAX:255]. Result of the last start attempt; 0 also means no attempt since power-on and is not proof of running.</field>
-    <field type="uint8_t" name="Initial_Fail" units="N/A">Initial_Fail[SF:N/A, MIN:0, MAX:255]. Bitmask 0x01 HEADER_BAD, 0x02 EEPROM_LAYOUT, 0x04 CALIB_MISSING, 0x20 FUEL_LEVEL. Display only; the ECU performs this check itself.</field>
-    <field type="uint8_t" name="Data_Valid" units="N/A">Data_Valid[SF:N/A, MIN:0, MAX:255]. Bit0 at least one MODESTS decoded, Bit1 reception fresh. Fields hold their last decoded values when stale.</field>
+    <field type="uint16_t" name="RPM_Target" units="rpm">Governor RPM target[SF:1, MIN:0, MAX:65535]. Raw UINT16, 1 rpm per count. Display as a number. ZERO MEANS THE ECU IS NOT GOVERNING RPM - engine stopped, cranking, MANUAL, or certain fail and stop modes - AND IS NOT PROOF OF AN ENGINE STOP. A missing tachometer pulse can also leave it non-zero; once the ECU enters FAIL_TACHO it reports zero.</field>
+    <field type="uint16_t" name="Mode_Age" units="ms">Age of the MODESTS reading[SF:1, MIN:0, MAX:65535]. Milliseconds since the last MODESTS reply, saturating at 65535, and reported as 65535 while Data_Valid bit 0 is clear. In normal operation it settles around 80 ms, which is the gap between the ECU poll and this message; that is not a fault.</field>
+    <field type="uint8_t" name="System_State" units="N/A">ECU system state[SF:N/A, MIN:0, MAX:15]. Raw 4-bit value. Values: 1 INITIALIZATION; 2 READY; 3 ENGINE_RUN; 4 USER_SHELL. ALL OTHER VALUES INCLUDING 0 ARE UNDEFINED - display the raw number as Unknown and give it no meaning.</field>
+    <field type="uint8_t" name="Operation_Mode" units="N/A">ECU operation mode[SF:N/A, MIN:0, MAX:15]. Raw 4-bit value. Values: 1 DO_NOTHING; 3 STANDBY; 4 STARTUP; 5 RUNNING; 6 STOP. VALUES 0 AND 2 ARE UNDEFINED, as is anything above 6 - display the raw number as Unknown. This is the field KGCS uses to enable the TC60 Apply button: the ECU accepts an energy configuration only in 1 DO_NOTHING or 3 STANDBY, and leaving those two modes cancels a transaction in progress.</field>
+    <field type="uint8_t" name="Ctrl_Mode" units="N/A">ECU control mode[SF:N/A, MIN:0, MAX:255]. Values: 1 NONE; 2 MANUAL; 3 STARTUP; 4 STOP; 5 FIXED_RPM; 6 EMS; 7 INACTIVE; 8 FAIL_TACHO; 9 FAIL_CURR_SENSOR; 10 FAIL_VOLT_SENSOR. All other values including 0 are undefined - display the raw number as Unknown. The three FAIL_ modes are ECU-detected sensor faults and warrant operator attention.</field>
+    <field type="uint8_t" name="Alert_Level" units="N/A">ECU alert level[SF:N/A, MIN:0, MAX:255]. Values: 0 NONE; 1 ADVISORY, meaning plan to land; 2 IMMEDIATE, meaning land now. All other values are undefined - display the raw number as Unknown. The ECU raises ADVISORY for a low state of charge, EMS THERMAL_HOLD or FORCED_CHARGE, or low fuel or fuel endurance, and clears it two seconds after all causes clear. It raises IMMEDIATE for a battery at landing reserve, or a low state of charge together with low fuel or a cylinder head above 260 degC, and clears to the then-current level five seconds after the causes clear.</field>
+    <field type="uint8_t" name="EMS_Mode" units="N/A">ECU energy-management state[SF:N/A, MIN:0, MAX:255]. Values: 0 INIT; 1 START; 2 WARMUP; 3 CHARGE; 4 IDLE; 5 DISCHARGE; 6 EMERGENCY; 7 STOPPING; 8 THERMAL_HOLD; 9 FORCED_CHARGE. All other values are undefined - display the raw number as Unknown. EMERGENCY, THERMAL_HOLD and FORCED_CHARGE are the states that also drive Alert_Level.</field>
+    <field type="uint8_t" name="Start_Gate" units="N/A">Result of the last engine start attempt[SF:N/A, MIN:0, MAX:255]. Values: 0 OK, start gates passed - BUT ALSO MEANS NO ATTEMPT SINCE POWER-ON, so it is not proof of a running engine; 4 BLOCKED_ALREADY_RUNNING; 5 BLOCKED_EEPROM_BAD; 6 BLOCKED_CALIB_MISSING; 7 BLOCKED_TACHO_FAULT; 8 BLOCKED_THROTTLE_UNCALIBRATED; 9 BLOCKED_CHOKE_UNCALIBRATED; 10 BLOCKED_STARTER_UNCALIBRATED; 11 BLOCKED_SHELL_ACTIVE; 12 BLOCKED_NOT_STANDBY; 13 BLOCKED_FUEL_LEVEL; 15 ABORTED_TIMEOUT, cranked but did not run in time; 16 ABORTED_NO_ROTATION, starter driven but no tachometer pulses; 17 ABORTED_STOPPED_AT_HANDOVER; 18 ABORTED_STOP_REQUESTED. CODES 1, 2, 3 AND 14 ARE UNDEFINED, as is anything above 18 - display the raw number as Unknown. A BLOCKED_ code is a start refused before cranking; an ABORTED_ code is a start terminated after cranking began. The code persists until the next start attempt.</field>
+    <field type="uint8_t" name="Initial_Fail" units="N/A">ECU boot and calibration prerequisites, bitmask[SF:N/A, MIN:0, MAX:255]. Bits: 0x01 HEADER_BAD, stored-configuration header invalid; 0x02 EEPROM_LAYOUT, stored-configuration layout invalid; 0x04 CALIB_MISSING, a sensor calibration is missing; 0x20 FUEL_LEVEL, the fuel quantity has never been initialised - clear it by sending TC60 with a Fuel value. BITS 0x08, 0x10, 0x40 AND 0x80 ARE UNDEFINED - show them as set-but-unknown and give them no meaning. EVERY DEFINED BIT BLOCKS ENGINE START INSIDE THE ECU, which performs that check itself, so a non-zero value needs operator attention; KGCS displays it, raw value included, and MUST NOT evaluate it or build a start interlock on it.</field>
+    <field type="uint8_t" name="Data_Valid" units="N/A">Reception and freshness flags[SF:N/A, MIN:0, MAX:255]. Bit0 at least one MODESTS has been decoded since boot; Bit1 the last one arrived no more than 500 ms ago. Other bits are reserved and zero. While Bit1 is clear the other fields hold their last decoded values and must be displayed as a greyed-out last-known reading with Mode_Age, never as current ECU state. While Bit0 is clear no reading exists at all and every field reads zero with Mode_Age 65535.</field>
   </message>
 
+<!--
+  TM61 - ECU ENERGY STATUS.  Nominal 1 Hz.  The ECU's energy configuration, its
+  endurance estimate, and the outcome of the last TC60.
+
+  = RECOMMENDED KGCS DISPLAYS, ALL READ-ONLY ===================================
+
+    Tank capacity        Tank / 100, in litres
+    Battery capacity     Battery / 10, in Ah
+    Remaining endurance  Endurance, see the field for its two special values
+    Battery SOC          Battery_SOC / 10, in percent
+    Data status          from Data_Valid and Energy_Age
+    Configuration result from Cfg_Result
+    Transmissions        from Cfg_Attempts
+
+  TM61 Tank AND Battery ARE WHAT THE ECU REPORTS, NOT INPUT FIELDS.  They are the
+  read-back of the configuration and belong in a status panel.  The operator changes
+  them through TC60, which is a separate control.
+
+  = DATA VALIDITY ==============================================================
+
+  Data_Valid bit 0  at least one energy status reply has been decoded since boot
+  Data_Valid bit 1  the last one arrived no more than 2500 ms ago
+  Data_Valid bit 2  the battery state of charge is available and no more than 500 ms old
+  Energy_Age        milliseconds since the last energy reply, saturating at 65535, and
+                    reported as 65535 while bit 0 is clear
+
+  ENERGY_AGE IS NORMALLY ABOUT 970 ms AND THAT IS NOT AN ERROR.  The ECU is polled for
+  this data once a second and the message is sent on a different phase of the same
+  second, so a healthy link shows an age just under one second.  The 2500 ms threshold
+  behind bit 1 is chosen to accommodate exactly that; a 1000 ms threshold would flicker.
+  Judge staleness from BIT 1, never from Energy_Age against a threshold of your own.
+
+  WHEN BIT 1 CLEARS, SHOW THE DATA AS STALE EVEN THOUGH THE NUMBERS HAVE NOT CHANGED.
+  The FC holds the last decoded values rather than zeroing them, so an unchanging
+  reading is exactly what a dead link looks like.
+
+  Battery_SOC IS THE ONE FIELD THAT IS NOT HELD.  When bit 2 is clear the FC transmits
+  zero, so KGCS must display it as Unknown and never as 0.0 percent.
+
+  = ENERGYCFG RESULT - Cfg_Result AND Cfg_Attempts =============================
+
+  Both are MAVLink2 EXTENSION fields.  See the note at the end of this comment.
+
+  Cfg_Result latches: it describes the LAST transaction and stays unchanged until
+  another command is accepted.  Receiving it again at 1 Hz is not a new event, so KGCS
+  must act on a CHANGE of value, not on each reception.  Do not re-announce or re-pop a
+  dialog every second.
+
+    0 NONE
+      No command has been accepted since boot.  Terminal, idle.
+      Suggested text: "No configuration sent".
+      Another command may be issued.  ECU settings: not described by this field.
+
+    1 IN_PROGRESS
+      Accepted; transmitting or waiting for the read-back.  ONGOING.
+      Suggested text: "Configuring, attempt N of 3".
+      No further command may be issued; Apply stays disabled.
+      ECU settings: UNCONFIRMED - the frame may already have been applied.
+
+    2 OK
+      Every supplied field read back within tolerance.  Terminal.
+      Suggested text: "Configuration verified".
+      Another command may be issued.  ECU settings: CONFIRMED BY FC READ-BACK.
+      THIS IS NOT AN ECU ACKNOWLEDGMENT.  The protocol defines none.  It means the FC
+      compared what it sent against what the ECU subsequently reported and they agreed.
+
+    3 MISMATCH_AFTER_3
+      Three frames were sent and the read-back never agreed, or never arrived.  Terminal.
+      Suggested text: "Not verified after 3 attempts - check the values shown".
+      Another command may be issued.  ECU settings: UNCONFIRMED.
+      THIS DOES NOT NECESSARILY MEAN THE ECU REFUSED THE COMMAND.  It equally covers a
+      lost or late status reply, and the ECU may well have applied the configuration.
+      Show the current TM61 Tank, Battery and Battery_SOC beside the message so the
+      operator can see what the ECU is actually reporting.
+
+    4 CANCELLED_MODE_CHANGE
+      The ECU left DO_NOTHING or STANDBY while the transaction was running, so the FC
+      stopped and sent nothing further.  Terminal.
+      Suggested text: "Cancelled - ECU left standby".
+      Another command may be issued once the ECU is back in DO_NOTHING or STANDBY.
+      ECU settings: UNCONFIRMED, AND POSSIBLY ALREADY APPLIED.  THERE IS NO ROLLBACK.
+      Any frame already sent may have taken effect; cancellation stops the FC, not the
+      ECU.  Check TM61 Tank, Battery and Battery_SOC.
+
+    5 REJECTED_RANGE
+      A supplied value was outside its permitted range.  Terminal.
+      Suggested text: "Rejected - value out of range".
+      Another command may be issued.  ECU settings: UNCHANGED - validation happens
+      before transmission, so NO CAN FRAME WAS SENT.  Cfg_Attempts is 0.
+
+    6 REJECTED_MODE
+      The ECU was not in DO_NOTHING or STANDBY when the command arrived.  Terminal.
+      Suggested text: "Rejected - ECU not in standby".
+      Another command may be issued once the mode allows it.
+      ECU settings: UNCHANGED, no CAN frame was sent.  Cfg_Attempts is 0.
+      NOTE: the FC applies this check only when it has a MODESTS reading less than
+      500 ms old.  With no fresh reading it transmits and lets the ECU decide, which is
+      the ECU protocol's own position - the ECU silently ignores a command outside those
+      modes.  That case therefore ends as MISMATCH_AFTER_3, not as REJECTED_MODE.
+
+    7 REJECTED_NOT_ECU
+      VERSTS has not confirmed ECU software 2.00 or higher - a legacy PMU, or the
+      unconfirmed fallback.  Terminal.
+      Suggested text: "Not supported by the fitted PMU".
+      No command may be issued until an ECU is confirmed.
+      ECU settings: UNCHANGED, no CAN frame was sent.  Cfg_Attempts is 0.
+      In practice KGCS will rarely see this code, because on those configurations TM61
+      is not transmitted at all; it is reachable only if the generation changes while a
+      command is in flight.
+
+    8 TX_FAIL
+      A frame could not be handed to the CAN interface at all.  Terminal.
+      Suggested text: "CAN transmission failed".
+      Another command may be issued.  ECU settings: READ Cfg_Attempts.  If it is 0,
+      nothing reached the bus and the ECU is untouched.  If it is 1 or 2, earlier frames
+      DID reach the bus and their effect is unknown.
+
+  Cfg_Attempts IS A PROGRESS COUNT, NOT A FAILURE COUNT.  It counts ENERGYCFG frames
+  actually handed to the bus in the current or last transaction, including the one being
+  verified right now.  While Cfg_Result is 1 IN_PROGRESS, display it as "attempt N of 3".
+  On a terminal result it is how many frames were sent in total: 1 on a first-time
+  success, 0 on any rejection that happened before transmission.
+
+  = MAVLINK2 EXTENSION FIELDS AND TRUNCATION ===================================
+
+  Cfg_Result and Cfg_Attempts sit after the extensions boundary, so they are outside
+  this message's CRC_EXTRA.  Two consequences for the decoder:
+
+  1. A receiver that knows only the 11-byte base message must accept a 13-byte payload
+     without treating the extra bytes as an error.
+  2. MAVLink2 TRUNCATES TRAILING ZERO BYTES.  A decoder MUST NOT assume the payload is
+     always 13 bytes - when Cfg_Result and Cfg_Attempts are both 0 the payload is sent
+     as 11 bytes, and shorter still if Data_Valid is also 0.  Zero-fill any missing
+     trailing bytes before reading the fields.  Every standard MAVLink2 library does
+     this automatically; a hand-written parser must do it explicitly.
+-->
   <message id="51061" name="SYS_ICD_FLCC_GCS_ECU_ENERGY_STATUS">
   <description>TM61 (ECU). ECU energy configuration and endurance, as received, plus the ENERGYCFG transaction result. 1 Hz.</description>
-    <field type="uint16_t" name="Tank" units="l">Tank[SF:0.01, MIN:0, MAX:65535]. Configured tank capacity.</field>
-    <field type="uint16_t" name="Battery" units="Ah">Battery[SF:0.1, MIN:0, MAX:65535]. Configured battery capacity.</field>
-    <field type="uint16_t" name="Endurance" units="s">Endurance[SF:1, MIN:0, MAX:65535]. 65534 means 65534 s or more and 65535 means unknown; both sentinels override the scale and neither may be displayed as a duration or as zero.</field>
-    <field type="uint16_t" name="Energy_Age" units="ms">Energy_Age[SF:1, MIN:0, MAX:65535]. Time since the last ENERGYSTS reply, saturating at 65535.</field>
-    <field type="int16_t" name="Battery_SOC" units="%">Battery_SOC[SF:0.1, MIN:-32768, MAX:32767]. Battery state of charge from BATSTS GAGE; valid only while Data_Valid bit2 is set.</field>
-    <field type="uint8_t" name="Data_Valid" units="N/A">Data_Valid[SF:N/A, MIN:0, MAX:255]. Bit0 at least one ENERGYSTS decoded, Bit1 ENERGYSTS fresh, Bit2 Battery_SOC available and fresh.</field>
+    <field type="uint16_t" name="Tank" units="l">Configured tank capacity as reported by the ECU[SF:0.01, MIN:0, MAX:65535]. Raw UINT16, 0.01 L per count, so raw 800 is 8.00 L. READ-ONLY STATUS, not an input field; it is changed through TC60 Tank and is the exact read-back the FC verifies that command against.</field>
+    <field type="uint16_t" name="Battery" units="Ah">Configured battery capacity as reported by the ECU[SF:0.1, MIN:0, MAX:65535]. Raw UINT16, 0.1 Ah per count, so raw 220 is 22.0 Ah. READ-ONLY STATUS, not an input field; it is changed through TC60 Battery and is the exact read-back the FC verifies that command against.</field>
+    <field type="uint16_t" name="Endurance" units="s">Estimated remaining fuel endurance[SF:1, MIN:0, MAX:65535]. Raw UINT16, 1 second per count, with TWO SPECIAL VALUES THAT OVERRIDE THE SCALE: 65534 means 65534 seconds or more, display as "65534 s or more" and never as an exact time; 65535 means Unknown, display as "Unknown" and NEVER as zero or as "0 s". Any other value is a count of seconds. The ECU reports 65535 whenever no fuel is being burned, so a stopped engine normally shows Unknown - that is correct, not a fault. The FC does not compute or estimate this value and KGCS must not either.</field>
+    <field type="uint16_t" name="Energy_Age" units="ms">Age of the energy reading[SF:1, MIN:0, MAX:65535]. Milliseconds since the last energy status reply, saturating at 65535, and reported as 65535 while Data_Valid bit 0 is clear. NORMALLY ABOUT 970 ms ON A HEALTHY LINK, because the ECU is polled once a second and this message is sent on a different phase of that second. Do not treat that as a communication error; judge staleness from Data_Valid bit 1.</field>
+    <field type="int16_t" name="Battery_SOC" units="%">Battery state of charge[SF:0.1, MIN:-32768, MAX:32767]. Signed INT16, 0.1 percent per count, so raw 850 is 85.0 percent. VALID ONLY WHILE Data_Valid BIT 2 IS SET. Unlike every other field in this message it is NOT held when it goes stale: the FC transmits zero, so a cleared bit 2 must be displayed as Unknown and never as 0.0 percent. This is the value the FC verifies a TC60 SOC correction against, within 0.1 percentage point.</field>
+    <field type="uint8_t" name="Data_Valid" units="N/A">Reception and freshness flags[SF:N/A, MIN:0, MAX:255]. Bit0 at least one energy status reply has been decoded since boot; Bit1 the last one arrived no more than 2500 ms ago; Bit2 the battery state of charge is available and arrived no more than 500 ms ago. Other bits are reserved and zero. While Bit1 is clear, Tank, Battery and Endurance hold their last decoded values and must be shown as a stale last-known reading with Energy_Age - the numbers not changing is what a dead link looks like.</field>
     <extensions/>
-    <field type="uint8_t" name="Cfg_Result" units="N/A">Cfg_Result[SF:N/A, MIN:0, MAX:255]. Last ENERGYCFG outcome: 0 NONE, 1 IN_PROGRESS, 2 OK, 3 MISMATCH_AFTER_3, 4 CANCELLED_MODE_CHANGE, 5 REJECTED_RANGE, 6 REJECTED_MODE, 7 REJECTED_NOT_ECU, 8 TX_FAIL. OK means the FC verified the readback, not that the ECU acknowledged anything.</field>
-    <field type="uint8_t" name="Cfg_Attempts" units="N/A">Cfg_Attempts[SF:1, MIN:0, MAX:3]. ENERGYCFG frames actually submitted to the bus in that transaction.</field>
+    <field type="uint8_t" name="Cfg_Result" units="N/A">Outcome of the last ENERGYCFG transaction[SF:N/A, MIN:0, MAX:255]. Values: 0 NONE, nothing sent since boot; 1 IN_PROGRESS, ongoing; 2 OK, verified by FC read-back; 3 MISMATCH_AFTER_3, three frames sent and never verified; 4 CANCELLED_MODE_CHANGE, the ECU left standby mid-transaction; 5 REJECTED_RANGE, a value was out of range and nothing was sent; 6 REJECTED_MODE, the ECU was not in standby and nothing was sent; 7 REJECTED_NOT_ECU, no confirmed ECU 2.00 or higher and nothing was sent; 8 TX_FAIL, a frame could not be handed to the CAN interface. LATCHED - it describes the last transaction and is retransmitted unchanged at 1 Hz, so act on a change of value and not on each reception. OK MEANS THE FC VERIFIED THE READ-BACK; the protocol defines no ECU acknowledgment and there is no rollback. See the TM61 comment above for the full per-code handling.</field>
+    <field type="uint8_t" name="Cfg_Attempts" units="N/A">ENERGYCFG frames actually handed to the bus in that transaction[SF:1, MIN:0, MAX:3]. A PROGRESS COUNT, NOT A FAILURE COUNT - while Cfg_Result is 1 IN_PROGRESS display it as "attempt N of 3". It is 0 for any result that was refused before transmission, and 1 for a command verified on the first frame.</field>
   </message>
+
+<!-- ====================================================== -->
+<!-- ECU V2.0 - KGCS UI STATE GUIDE                         -->
+<!-- ====================================================== -->
+<!--
+  One row per state KGCS has to render.  The four columns are deliberately separate
+  responsibilities and must not be merged:
+
+    UI        what the operator sees
+    INPUT     what KGCS allows to be entered or pressed
+    FC        what the flight controller does - already implemented, do not reimplement
+    ECU       what the engine controller does - outside this interface entirely
+
+  >> ECU unsupported: legacy PMU, unconfirmed fallback, or ECU support not built
+     UI     hide or grey the whole ECU panel; "ECU V2.0 not available".  Do NOT claim a
+            legacy PMU is fitted - the absence of TM60/TM61 has several causes
+     INPUT  Apply disabled
+     FC     transmits no TM60/TM61; refuses TC60 with Cfg_Result 7 and a STATUSTEXT
+     ECU    not involved
+
+  >> ECU telemetry unavailable: TM60/TM61 were arriving and stopped
+     UI     keep the panel, grey every value, show the age; "ECU telemetry lost"
+     INPUT  Apply disabled
+     FC     holds its last decoded values and clears the freshness bits
+     ECU    unknown
+
+  >> Valid but stale data: Data_Valid bit 0 set, bit 1 clear
+     UI     values greyed with their age from Mode_Age or Energy_Age; label them
+            last-known, never current.  Numbers that stop changing are what this
+            looks like, so the bit is the only reliable indicator
+     INPUT  Apply disabled
+     FC     holds last values, clears bit 1
+     ECU    unknown
+
+  >> Unknown enum value
+     UI     "Unknown (raw N)" in place of the name, in the field's normal position.
+            Never map it to the nearest defined code and never hide the field
+     INPUT  unaffected
+     FC     passes the raw value through unmodified
+     ECU    may be a reserved field transmitted as zero
+
+  >> Initial configuration idle: Cfg_Result 0 NONE
+     UI     "No configuration sent"; show the ECU's current Tank, Battery and SOC
+     INPUT  Apply enabled when the recommended gate in the TC60 comment is satisfied
+     FC     idle
+     ECU    running its retained configuration
+
+  >> Command in progress: Cfg_Result 1 IN_PROGRESS
+     UI     progress indicator, "Configuring, attempt N of 3" from Cfg_Attempts
+     INPUT  Apply DISABLED; send nothing automatically
+     FC     one frame sent, waiting at least 1 s for a fresh read-back, up to 3 frames,
+            3500 ms per attempt, about 10.5 s worst case
+     ECU    applies or silently ignores the frame; it acknowledges nothing
+
+  >> Command succeeded: Cfg_Result 2 OK
+     UI     "Configuration verified"; refresh the displayed ECU values
+     INPUT  Apply re-enabled
+     FC     read-back of every supplied field agreed
+     ECU    settings applied and retained across power cycles
+
+  >> Rejected, range: Cfg_Result 5
+     UI     "Rejected - value out of range"; keep the entered values for correction
+     INPUT  Apply re-enabled; highlight the offending field
+     FC     validated before transmitting - NO CAN FRAME WAS SENT, Cfg_Attempts 0
+     ECU    untouched
+
+  >> Rejected, operating mode: Cfg_Result 6
+     UI     "Rejected - ECU not in standby", showing the current Operation_Mode
+     INPUT  Apply re-enabled, but the recommended gate keeps it disabled until the mode
+            is 1 DO_NOTHING or 3 STANDBY
+     FC     no CAN frame sent, Cfg_Attempts 0.  Applied only when MODESTS is fresher
+            than 500 ms; otherwise the FC transmits and the ECU decides
+     ECU    would ignore the frame in any other mode, without acknowledgment
+
+  >> Rejected, unsupported ECU version: Cfg_Result 7
+     UI     "Not supported by the fitted PMU"
+     INPUT  Apply disabled
+     FC     no CAN frame sent, Cfg_Attempts 0
+     ECU    not involved
+
+  >> Read-back mismatch after maximum retries: Cfg_Result 3
+     UI     "Not verified after 3 attempts", shown beside the ECU's CURRENT reported
+            Tank, Battery and SOC so the operator can see what the device says.
+            Do not state that the ECU refused the command - it may have applied it
+     INPUT  Apply re-enabled
+     FC     three identical frames sent; read-back never agreed or never arrived
+     ECU    unknown - possibly applied
+
+  >> CAN transmission failure: Cfg_Result 8 TX_FAIL
+     UI     "CAN transmission failed".  If Cfg_Attempts is 0 add "nothing was sent";
+            if it is 1 or 2 add "earlier attempts may have been applied"
+     INPUT  Apply re-enabled
+     FC     could not hand a frame to the interface for 200 ms and gave up
+     ECU    see Cfg_Attempts
+
+  >> Mode change during verification: Cfg_Result 4 CANCELLED_MODE_CHANGE
+     UI     "Cancelled - ECU left standby".  State plainly that THERE IS NO ROLLBACK and
+            show the ECU's current reported values
+     INPUT  Apply re-enabled once the mode allows it
+     FC     stopped immediately and sent no further frame
+     ECU    may already have applied a frame that was sent; it does not undo it
+
+  >> Communication lost after command submission
+     UI     "Outcome unknown - telemetry lost".  When TM61 returns, read the latched
+            Cfg_Result: it still describes that transaction
+     INPUT  Apply disabled while telemetry is down; DO NOT resend on reconnection
+     FC     continues and finishes the transaction without the ground station
+     ECU    unaffected by the telemetry link
+
+  = OPERATOR INPUT VALIDATION, IN ONE PLACE ====================================
+  Range-check each entered field against the limits in the TC60 field descriptions;
+  check Fuel against the effective tank capacity when it is known; convert to raw with
+  the stated rounding; send 65535 for any field marked Keep current.  That is the whole
+  of KGCS's validation responsibility.  The FC revalidates and the ECU is final.
+
+  = WHAT KGCS NEVER IMPLEMENTS =================================================
+  An engine start interlock or permission check of any kind from TM60.  A retry loop for
+  TC60.  An independent accept or reject decision for a configuration.  A fuel estimate,
+  an endurance estimate, or an incremental refuelling calculation.
+-->
+
   <!-- PNU-KAL -->
   </messages>
 </mavlink>
