@@ -4716,6 +4716,12 @@ void GCS_MAVLINK::handle_message(const mavlink_message_t &msg)
         handle_gcs_flcc_sar_ctrl(msg);
         break;
 
+#if AP_PMUCAN_ECU_ENABLED
+    case MAVLINK_MSG_ID_SYS_ICD_GCS_FLCC_ECU_ENERGY_CFG:
+        handle_gcs_flcc_ecu_energy_cfg(msg);
+        break;
+#endif
+
 #if AP_Q30_ENABLED
     case MAVLINK_MSG_ID_SYS_ICD_GCS_FLCC_CAM_CMD:
         handle_gcs_flcc_cam_cmd(msg);

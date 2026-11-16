@@ -490,7 +490,7 @@ decoded counts as below 2.0.
 `PMU-005a` stages 1-3 added the VERSTS generation selection, the HOURCNT width branch and
 `AP_PMUCAN_ECU`, which polls and decodes `MODESTS 0x10000150` and `ENERGYSTS 0x10000160` into the
 `ECUM`/`ECUE`/`ECUC` records; stage 4 put both on the link as `TM60 51060` and `TM61 51061`.
-`ENERGYCFG 0x10000050` is stage 5. None of it has met an ECU: every result is against a fake
+`ENERGYCFG 0x10000050` landed in stage 5 as `TC60 50060`. None of it has met an ECU: every result is against a fake
 built from this document. This issue exists so the decisions behind the ICD are not re-litigated
 from memory.
 
@@ -540,7 +540,7 @@ per-stage record once a stage lands.
 | **2** | `AUX2STS` HOURCNT width by generation - UINT24 legacy, UINT32 ECU. One branch, no schema change | **DONE 2026-11-13**, bench-verified |
 | **3** | `AP_PMUCAN_ECU.{h,cpp}`: MODESTS at 10 Hz, ENERGYSTS at 1 Hz, on the free scheduling phases, active only in `ECU_V2` | **DONE 2026-11-13** |
 | **4** | MAVLink telemetry for ECU status - `TM60 51060` MODESTS at 10 Hz, `TM61 51061` ENERGYSTS at 1 Hz, both suppressed unless VERSTS confirms ECU 2.00+ | **DONE 2026-11-16** |
-| **5** | MAVLink telecommand for `ENERGYCFG` - `TC60 50060` | blocked on approval |
+| **5** | MAVLink telecommand for `ENERGYCFG` - `TC60 50060`, one bounded transaction at a time, readback-verified, at most three frames | **DONE 2026-11-16** |
 
 **What stage 3 added, in one place.** `libraries/AP_PMUCAN/AP_PMUCAN_ECU.{h,cpp}` behind
 `AP_PMUCAN_ECU_ENABLED` in a new `AP_PMUCAN_config.h`; polls on phases 1 and 3 of the
@@ -580,6 +580,40 @@ published on phase 0, so it is nearly a whole window old. That is why TM61's fre
 is **2500 ms**: a 1000 ms threshold would have flickered on ordinary jitter. Publishing TM61 a few
 ticks after its poll instead would cut `Energy_Age` to about 20 ms without changing the rate - not
 done, because it was not part of the approved design.
+
+**What stage 5 added, in one place.** `TC60 50060 SYS_ICD_GCS_FLCC_ECU_ENERGY_CFG` (8 B, the
+CAN payload itself), a handler in `GCS_PNU.cpp` that checks `sysid_is_gcs()` and does nothing
+else, and a bounded transaction state machine in `AP_PMUCAN_ECU`. Two new records, `ECUT` (every
+TC60 at ingress, with its sender) and `ECUX` (one per transaction state change, carrying both the
+commanded values and the readbacks); `ECUC` gained `CfgAcc` and `CfgBsy`. No existing record
+changed.
+
+**One transaction at a time, and the second command is refused rather than queued.** There is no
+queue and no transaction id. A TC60 that arrives while one is running is counted, announced and
+dropped; the running transaction keeps its own payload, attempt count and deadline. `_cfg_seq_seen`
+matches `gcs().ECU_Cfg_Seq` at boot, so nothing is replayed on reconnect or reboot, and the FC
+holds no persistent copy of any command.
+
+**The one-second wait is a deadline, not a sleep.** The ICD says "wait 1 second, then compare".
+Taken literally that can compare against an ENERGYSTS that arrived *before* the command, because
+ENERGYSTS is polled once a second - so a readback counts only if the frame carrying it arrived
+after `tx + 1000 ms`. The timeout is **3500 ms**: 1000 ms of wait plus one whole ENERGYSTS period
+is about 2010 ms with no margin at all, 2500 ms would fail on a single lost reply, and 3500 ms
+absorbs exactly one while still bounding an unverifiable transaction at 3 x 3.5 s. **Measured:**
+with the device silenced immediately after the command, three attempts and
+`MISMATCH_AFTER_3` arrived **10.528 s** after the TC60.
+
+**The mode gate is conditional on MODESTS being usable, deliberately.** MODESTS is still under
+development and a real ECU may not answer it; refusing every ENERGYCFG in that case would make the
+aircraft unconfigurable over a message the ICD itself calls informational. With no fresh MODESTS
+the frame goes out and the ECU - the final authority - applies or ignores it. With a fresh one
+showing anything but DO_NOTHING or STANDBY, the command is refused before transmitting, and a mode
+change *during* a transaction cancels it. Neither is a Start interlock: nothing in stage 5 reads
+or writes step 2c's state, counters or windows.
+
+**`GAS` cannot verify 0.01 L and is never reported as if it could.** `ENERGYCFG.fuel` is checked
+against `floor(100 * fuel / tank)` or one point less, which is all the ICD offers. A quarter of a
+litre in an 8 L tank is three percent; a litre either way hides inside one count on a large tank.
 
 **Architecture: hybrid, decided rather than assumed.** One `AP_PMUCAN` backend with a
 latched protocol generation, one version branch in the AUX2STS decode, and a separate
@@ -681,6 +715,11 @@ Decided 2026-11-13, no further stage 2 modification.
   carries no layout version and VERSTS identifies software, not frame layout, so the field
   order must be re-validated against a real capture before the decoder is trusted.
 
+- **`ENERGYCFG` has never been sent to an ECU.** The fake applies it and answers with
+  it, which is what makes the readback comparison mean anything, but the real device's
+  acceptance rules, its retained fuel quantity and its `GAS` rounding are all unverified.
+  The `initial_fail` bit `0x20 FUEL_LEVEL` clearing on a successful fuel setting is
+  likewise untested - the FC does not read that bit, so nothing here depends on it.
 - **`TM60`'s CRC_EXTRA is 0.** Legal, and ArduPilot's own parser is unaffected, but KGCS
   must look the message up by id rather than testing `mavlink_get_crc_extra()` against
   zero. Renaming a field to avoid it was rejected: the field names are the approved ICD.

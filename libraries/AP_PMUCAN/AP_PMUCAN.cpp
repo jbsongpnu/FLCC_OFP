@@ -1332,6 +1332,21 @@ bool AP_PMUCAN::send_ecu_frame(uint32_t can_id, uint8_t dlc)
     // @can_id already carries FlagEFF | FlagRTR
     return send_frame(can_id, can_data, dlc);
 }
+
+
+// -------------------------------------------------------------------------
+// send_ecu_data : PMU-005a stage 5 - the ENERGYCFG data frame
+// -------------------------------------------------------------------------
+// Eight bytes, unaltered.  ENERGYCFG is NOT a legacy command: pmucan_cmd() packs a
+// four-byte little-endian UINT32 and counts into PMUC's CmdTx, both of which would be
+// wrong here - the ICD is explicit that ENERGYCFG "must not be treated as a legacy
+// UINT32 command", and PMUC's CmdTx means "the five legacy commands".
+// -------------------------------------------------------------------------
+bool AP_PMUCAN::send_ecu_data(uint32_t can_id, const uint8_t *data, uint8_t dlc)
+{
+    // @can_id already carries FlagEFF, and no FlagRTR - this is a data frame
+    return send_frame(can_id, data, dlc);
+}
 #endif  // AP_PMUCAN_ECU_ENABLED
 
 #endif  // AP_PNU_CAN_ENABLED

@@ -19,6 +19,7 @@
      TM5  51005  SYS_ICD_FLCC_GCS_OBJECT_AVOIDANCE_STATUS  avoidance status to KGCS
      TC50 50050  SYS_ICD_GCS_FLCC_SAR_CTRL                 SAR observation control from KGCS
      TM50 51050  SYS_ICD_FLCC_GCS_SAR_STATUS               SAR status to KGCS, 5 Hz
+     TC60 50060  SYS_ICD_GCS_FLCC_ECU_ENERGY_CFG           ECU energy config from KGCS
      TM60 51060  SYS_ICD_FLCC_GCS_ECU_MODE_STATUS          ECU modes to KGCS, 10 Hz
      TM61 51061  SYS_ICD_FLCC_GCS_ECU_ENERGY_STATUS        ECU energy to KGCS, 1 Hz
 
@@ -61,6 +62,10 @@
 // PNU : how long the TC50 wrong-source warning is suppressed for, in milliseconds.
 // Same shape as the PNU_CAN driver's warnings: the first is always reported.
 #define PNU_SAR_TC_REJECT_WARN_MS 10000
+
+// PNU : the same rate limit for TC60.  Its own counter, so a storm of one does not
+// silence the other - they come from different KGCS pages and mean different things.
+#define PNU_ECU_TC_REJECT_WARN_MS 10000
 
 // PNU : object-avoidance warning thresholds reported to KGCS in TM5, in centimetres
 #define PNU_OA_ALERT_DISTANCE_CM 1000
@@ -451,6 +456,64 @@ void GCS_MAVLINK::send_message_flcc_gcs_ecu_energy_status() const
             ECU_Energy_Status.Cfg_Result,
             ECU_Energy_Status.Cfg_Attempts);
 }
+
+// -------------------------------------------------------------------------
+// Receive ECU energy configuration from GCS (TC60 / msg 50060)
+// -------------------------------------------------------------------------
+// THIS LAYER OWNS THE MESSAGE, NOT THE DEVICE.  It logs every TC60 that arrives, checks
+// the one thing only it can check - who sent it - and hands the payload to
+// AP_PMUCAN_ECU through a sequence number.  Range validation, the ECU-generation test,
+// the operating-mode gate, the three-frame retry and the readback all belong to the CAN
+// side, which is also where Cfg_Result is produced; splitting them would mean two places
+// could refuse the same command and only one of them could say so in TM61.
+//
+// Same shape as handle_gcs_flcc_sar_ctrl(), deliberately.
+//
+// THE SENDER IS CHECKED, as TC50's is.  TC60 carries no target_system, so the sender is
+// the only addressing there is, and this one writes the engine's fuel and battery
+// configuration - a stricter case than TC1, which has never checked (an accepted
+// residual of PNU-ISSUE D7).  sysid_is_gcs() is MAV_GCS_SYSID, the parameter the
+// aircraft already uses for RC override and GCS failsafe.  The component id is
+// deliberately not filtered: the ICD names no permitted value, so a filter would be
+// invented rather than specified.  It is logged instead.
+// -------------------------------------------------------------------------
+void GCS_MAVLINK::handle_gcs_flcc_ecu_energy_cfg(const mavlink_message_t &msg)
+{
+    mavlink_sys_icd_gcs_flcc_ecu_energy_cfg_t cfg;
+    mavlink_msg_sys_icd_gcs_flcc_ecu_energy_cfg_decode(&msg, &cfg);
+
+#if HAL_LOGGING_ENABLED
+    // EVERY TC60, before any test, with the sender and the channel.  A command refused
+    // for its source is the one somebody will be looking for afterwards, and this is the
+    // only record of who sent it.  Raw counts, as received: 65535 is "keep".
+    AP::logger().Write("ECUT", "TimeUS,Tank,Fuel,Batt,SOC,SYS,COMP,CHAN", "QHHHHBBB",
+                       AP_HAL::micros64(),
+                       cfg.Tank,
+                       cfg.Fuel,
+                       cfg.Battery,
+                       cfg.SOC,
+                       msg.sysid,
+                       msg.compid,
+                       (uint8_t)chan);
+#endif
+
+    if (!gcs().sysid_is_gcs(msg.sysid)) {
+        const uint32_t now_ms = AP_HAL::millis();
+        if ((now_ms - gcs().ECU_Cfg_reject_ms) >= PNU_ECU_TC_REJECT_WARN_MS) {
+            gcs().ECU_Cfg_reject_ms = now_ms;
+            GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "ECU: TC60 sysid %u not MAV_GCS_SYSID",
+                          (unsigned)msg.sysid);
+        }
+        return;
+    }
+
+    // The payload is stored FIRST so that a reader seeing the new sequence number sees
+    // the command that goes with it.  The increment is the handshake; AP_PMUCAN_ECU
+    // consumes it once, from the CAN thread, and refuses it if one is already running.
+    gcs().ECU_Cfg = cfg;
+    gcs().ECU_Cfg_Seq++;
+}
+
 #endif  // AP_PMUCAN_ECU_ENABLED
 
 

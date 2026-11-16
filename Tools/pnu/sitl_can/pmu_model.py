@@ -167,6 +167,23 @@ class PMUModel(object):
 
         self._hold_s = 0.0          # time spent at the crank RPM
 
+        # -- ECU V2.0 energy configuration, PMU-005a stage 5 --------------------------
+        #
+        # ONLY WHAT ENERGYCFG NEEDS, and nothing more.  This is not an EMS, not a
+        # governor and not a fuel-consumption model: it is the storage ENERGYCFG writes
+        # to and the readbacks the FC compares against.  Nothing here burns fuel or
+        # discharges a battery over time, because nothing in the transaction depends on
+        # that and inventing it would make the readback non-deterministic.
+        #
+        # None means "the ICD example payload, unaltered", so a fake that is never sent
+        # an ENERGYCFG answers exactly as it did before this existed - which is what
+        # keeps test_fake_pmu.py's ICD-example assertions meaningful.
+        self.ecu_tank = None            # raw, 0.01 L
+        self.ecu_fuel = None            # raw, 0.01 L
+        self.ecu_battery = None         # raw, 0.1 Ah
+        self.ecu_soc = None             # raw, 0.1 %
+        self.ecu_operation_mode = None  # MODESTS byte 0 high nibble, None = ICD example
+
     # -- commands ---------------------------------------------------------------------
 
     def cmd_engine_onoff(self, value):
@@ -198,6 +215,79 @@ class PMUModel(object):
 
     def cmd_battery(self, value):
         self.battery_cmd = value
+
+    # -- ECU V2.0 ---------------------------------------------------------------------
+
+    ENERGYCFG_KEEP = 0xFFFF
+
+    # The ICD example ENERGYSTS reports an 8.00 L tank, and that is what build_energysts()
+    # answers with until an ENERGYCFG configures one.  GAS is a percentage OF THAT TANK,
+    # so the same default has to be used here - otherwise a fuel-only ENERGYCFG, which is
+    # the ordinary after-refuelling case, could never be read back at all.
+    ECU_DEFAULT_TANK = 800
+
+    def set_ecu_operation_mode(self, mode):
+        '''MODESTS operation_mode, so a test can put the fake in a state that accepts
+           ENERGYCFG.  The ICD example payload reports RUNNING (5), which the ICD says
+           must NOT accept the command - that is the point of being able to change it.'''
+        self.ecu_operation_mode = mode
+        self._log('ECU operation_mode = %s' % ('ICD example' if mode is None else mode))
+
+    def ecu_accepts_energycfg(self):
+        '''ICD: DO_NOTHING (1) or STANDBY (3), user shell inactive.  With the mode left
+           at the ICD example this is False, which is itself worth being able to test.'''
+        mode = self.ecu_operation_mode
+        if mode is None:
+            mode = 5                    # the ICD example payload reports RUNNING
+        return mode in (1, 3)
+
+    def apply_energycfg(self, fields):
+        '''ICD acceptance rules, in the order the ICD gives them.  Returns a short
+           string for the log.
+
+           ALL OR NOTHING.  Every supplied field is validated before any of them is
+           applied, 0xFFFF keeps the current value in each, and fuel may not exceed the
+           supplied or retained tank.  A rejected frame changes nothing and is NOT
+           acknowledged on CAN - the ICD defines no acknowledgment and this fake must
+           not invent one for the FC to accidentally depend on.'''
+        if not self.ecu_accepts_energycfg():
+            return 'ignored: operation_mode is not DO_NOTHING or STANDBY'
+
+        keep = self.ENERGYCFG_KEEP
+        tank = fields['tank']
+        fuel = fields['fuel']
+        batt = fields['battery']
+        soc = fields['soc']
+
+        if (tank != keep) and not (10 <= tank <= 10000):
+            return 'ignored: tank %u out of range' % tank
+        if (batt != keep) and not (50 <= batt <= 1000):
+            return 'ignored: battery %u out of range' % batt
+        if (soc != keep) and not (0 <= soc <= 1000):
+            return 'ignored: soc %u out of range' % soc
+
+        new_tank = self.ecu_tank if tank == keep else tank
+        if new_tank is None:
+            new_tank = self.ECU_DEFAULT_TANK
+        if (fuel != keep) and (fuel > new_tank):
+            return 'ignored: fuel %u exceeds tank %u' % (fuel, new_tank)
+
+        self.ecu_tank = self.ecu_tank if tank == keep else tank
+        self.ecu_fuel = self.ecu_fuel if fuel == keep else fuel
+        self.ecu_battery = self.ecu_battery if batt == keep else batt
+        self.ecu_soc = self.ecu_soc if soc == keep else soc
+        return ('applied: tank=%s fuel=%s battery=%s soc=%s'
+                % (self.ecu_tank, self.ecu_fuel, self.ecu_battery, self.ecu_soc))
+
+    def ecu_gas_percent(self):
+        '''ENGSTS.GAS once a fuel quantity has been configured: an integer percentage of
+           tank capacity, rounded DOWN, which is the only readback the ICD offers for
+           ENERGYCFG.fuel.  None while nothing has been configured, so GAS keeps its
+           fixed 100 %.'''
+        if self.ecu_fuel is None:
+            return None
+        tank = self.ecu_tank if self.ecu_tank is not None else self.ECU_DEFAULT_TANK
+        return int((100 * self.ecu_fuel) // tank)
 
     def _start(self):
         if self.state not in (State.STOPPED, State.ABORT):

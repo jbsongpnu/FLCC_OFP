@@ -48,6 +48,24 @@ extern bool                                          ECU_TM_Enabled;
 #define ECU_VALID_FRESH     (1U << 1)   // the last one is inside this message's threshold
 #define ECU_VALID_SOC       (1U << 2)   // TM61 only: BATSTS GAGE is available and fresh
 
+// PMU-005a STAGE 5 : TM61's Cfg_Result.  THESE VALUES ARE ON THE WIRE AND IN FLIGHT
+// LOGS, so they are append-only: never renumber one and never reuse a retired one.
+//
+// OK MEANS THE FC VERIFIED THE READBACK.  The ECU defines no application-layer
+// acknowledgment and this firmware does not invent one: every code below describes what
+// the FC did and what it then observed in ENERGYSTS, ENGSTS and BATSTS.
+enum ECU_CfgResult : uint8_t {
+    ECU_CFG_NONE                  = 0,  // no ENERGYCFG has been accepted since boot
+    ECU_CFG_IN_PROGRESS           = 1,  // accepted; transmitting or waiting for readback
+    ECU_CFG_OK                    = 2,  // every supplied field read back within tolerance
+    ECU_CFG_MISMATCH_AFTER_3      = 3,  // three frames sent, readback never agreed
+    ECU_CFG_CANCELLED_MODE_CHANGE = 4,  // operation_mode left DO_NOTHING/STANDBY
+    ECU_CFG_REJECTED_RANGE        = 5,  // a field was outside the ICD range
+    ECU_CFG_REJECTED_MODE         = 6,  // the ECU was not in DO_NOTHING or STANDBY
+    ECU_CFG_REJECTED_NOT_ECU      = 7,  // VERSTS has not confirmed ECU 2.00 or higher
+    ECU_CFG_TX_FAIL               = 8,  // the frame could not be put on the bus
+};
+
 // PMU-005a STAGE 3 : THE TWO MESSAGES THAT EXIST ONLY ON THE ECU.
 //
 // MODESTS (0x10000150) and ENERGYSTS (0x10000160) are new in ICD V2.0 and are the only
@@ -91,6 +109,11 @@ public:
     void publish_mode_tm(void);                 // 10 Hz, TM60
     void publish_energy_tm(void);               // 1 Hz, TM61
 
+    // PMU-005a stage 5 : the ENERGYCFG transaction.  Driven from update(), so it runs on
+    // BOTH generations - a TC60 that arrives on a legacy aircraft has to be refused out
+    // loud rather than ignored (PNU-ISSUE D6), and that refusal is produced here.
+    void service_config(void);
+
     // Decoded MODESTS, raw as received.  Undefined codes are NOT mapped onto the nearest
     // defined state - the ICD requires them to be carried through as the raw value - so
     // these are plain integers and not enums.
@@ -123,6 +146,7 @@ private:
 
     static constexpr unsigned ECU_MODESTS   = 0x10000150;
     static constexpr unsigned ECU_ENERGYSTS = 0x10000160;
+    static constexpr unsigned ECU_ENERGYCFG = 0x10000050;   // stage 5, Host -> ECU
 
     // ICD V2.0 : both replies are DLC 8, and so are the RTR requests for them - the ECU
     // sections specify RTR DLC 8 where the legacy ICD left it unstated.
@@ -137,6 +161,61 @@ private:
     static constexpr uint32_t ENERGYSTS_PHASE = 3U;
 
     void poll(uint32_t can_id);
+
+    // ---- PMU-005a stage 5 : ENERGYCFG ----------------------------------------------
+    //
+    // ICD ranges, in RAW counts.  None of them can collide with ECU_CFG_KEEP, which is
+    // why "keep the current value" needs no separate flag.
+    static constexpr uint8_t  ECU_CFG_DLC  = 8U;            // ICD: a short frame is ignored
+    static constexpr uint16_t ECU_CFG_KEEP = 0xFFFFU;
+    static constexpr uint16_t CFG_TANK_MIN = 10U,   CFG_TANK_MAX = 10000U;
+    static constexpr uint16_t CFG_BATT_MIN = 50U,   CFG_BATT_MAX = 1000U;
+    static constexpr uint16_t CFG_SOC_MIN  = 0U,    CFG_SOC_MAX  = 1000U;
+
+    // The only two operation_mode values that may receive an ENERGYCFG.  This is the
+    // ICD's own send condition for this one command - NOT a new FC interlock, and
+    // nothing here gates engine Start.
+    static constexpr uint8_t CFG_OPMODE_DO_NOTHING = 1U;
+    static constexpr uint8_t CFG_OPMODE_STANDBY    = 3U;
+
+    static constexpr uint8_t CFG_MAX_ATTEMPTS = 3U;         // ICD: three transmissions total
+
+    // THE READBACK WINDOW, and the arithmetic behind the timeout.
+    //
+    // The ICD says "wait 1 second, then compare".  Taken literally that can compare
+    // against an ENERGYSTS that arrived BEFORE the command did, because ENERGYSTS is
+    // polled once a second: the readback only proves anything if the frame carrying it
+    // arrived after the wait expired, which is what CFG_READBACK_MIN_MS below is used
+    // for - as a deadline, not as a sleep.
+    //
+    // Worst case to satisfy that: 1000 ms of mandatory wait, plus up to one whole
+    // ENERGYSTS period (1000 ms) before the next reply, plus scheduling jitter - about
+    // 2010 ms with no margin at all.  2500 ms would leave 490 ms and would fail on a
+    // single lost reply.  3500 ms absorbs exactly one lost ENERGYSTS and still bounds a
+    // completely unverifiable transaction at 3 x 3.5 s.
+    static constexpr uint32_t CFG_READBACK_MIN_MS     = 1000U;
+    static constexpr uint32_t CFG_READBACK_TIMEOUT_MS = 3500U;
+
+    // How long a frame that cannot be put on the bus keeps being retried before the
+    // transaction is abandoned.  A busy mailbox for 200 ms is a bus problem, not a
+    // readback problem, so it does NOT consume one of the three ICD attempts - those
+    // count frames that actually went out.
+    static constexpr uint32_t CFG_TX_RETRY_MS = 200U;
+
+    bool cfg_mode_permits(void) const;
+    bool cfg_mode_known(uint32_t now_ms) const;
+    bool cfg_validate(const mavlink_sys_icd_gcs_flcc_ecu_energy_cfg_t &cfg,
+                      uint32_t now_ms, uint8_t &why) const;
+    void cfg_begin(const mavlink_sys_icd_gcs_flcc_ecu_energy_cfg_t &cfg, uint32_t now_ms);
+    void cfg_transmit(uint32_t now_ms);
+    void cfg_check_readback(uint32_t now_ms);
+    bool cfg_readback_ready(uint32_t deadline_ms) const;
+    bool cfg_readback_ok(void) const;
+    void cfg_attempt_failed(uint32_t now_ms, const char *why);
+    void cfg_finish(uint8_t result);
+#if HAL_LOGGING_ENABLED
+    void cfg_log_state(void);                   // ECUX, on every state change
+#endif
 
     AP_PMUCAN &_pmu;
 
@@ -174,6 +253,29 @@ private:
     uint32_t _modests_rx    {};
     uint32_t _energysts_rx  {};
     uint32_t _short_frames  {};                 // ECU replies rejected for a short DLC
+
+    // PMU-005a stage 5 : ONE TRANSACTION AT A TIME.  There is no queue and no transaction
+    // id: a TC60 that arrives while _cfg_active is refused out loud and the running
+    // transaction is left exactly as it was.  _cfg_seq_seen matches gcs().ECU_Cfg_Seq at
+    // boot, so nothing is replayed on startup or on reconnect.
+    bool     _cfg_active        {};             // a transaction owns the machine
+    bool     _cfg_awaiting_tx   {};             // accepted or retrying; frame not yet sent
+    uint8_t  _cfg_seq_seen      {};             // last gcs().ECU_Cfg_Seq consumed
+    uint8_t  _cfg_result        {};             // ECU_CFG_NONE
+    uint8_t  _cfg_attempts      {};             // frames actually put on the bus, 0-3
+    uint8_t  _cfg_payload[8]    {};             // the EXACT bytes, kept for the retries
+    uint16_t _cfg_tank          {ECU_CFG_KEEP}; // what was supplied, for the comparison
+    uint16_t _cfg_fuel          {ECU_CFG_KEEP};
+    uint16_t _cfg_batt          {ECU_CFG_KEEP};
+    uint16_t _cfg_soc           {ECU_CFG_KEEP};
+    uint32_t _cfg_tx_ms         {};             // when the last frame reached the bus
+    uint32_t _cfg_arm_ms        {};             // when the current send attempt was armed
+    uint32_t _cfg_accepted      {};             // ECUC: TC60s that started a transaction
+    uint32_t _cfg_busy          {};             // ECUC: TC60s refused for an active one
+#if HAL_LOGGING_ENABLED
+    uint8_t  _cfg_logged_result {255};          // forces the first ECUX record
+    uint8_t  _cfg_logged_att    {255};
+#endif
 
 #if HAL_LOGGING_ENABLED
     uint32_t _next_mode_log_ms  {};

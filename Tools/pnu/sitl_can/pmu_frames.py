@@ -94,14 +94,27 @@ def scaled(value):
 
 
 def build_batsts(model):
-    '''BSTS, TEMP, IBAT, GAGE.  BSTS is unused; battery temperature is not modelled.'''
-    return struct.pack('<Hhhh', 0, 0, scaled(model.battery_current), scaled(GAGE_PERCENT))
+    '''BSTS, TEMP, IBAT, GAGE.  BSTS is unused; battery temperature is not modelled.
+
+       GAGE follows an ENERGYCFG soc correction once one has been accepted, because that
+       is the only readback the ICD defines for ENERGYCFG.soc.  Until then it is the
+       fixed GAGE_PERCENT, exactly as before.'''
+    gage = scaled(GAGE_PERCENT) if model.ecu_soc is None else model.ecu_soc
+    return struct.pack('<Hhhh', 0, 0, scaled(model.battery_current), gage)
 
 
 def build_engsts(model):
-    '''TEMP1, TEMP2, RPM, GAS, PCL.  GAS and PCL are INT8 raw percent, scale 1.0.'''
+    '''TEMP1, TEMP2, RPM, GAS, PCL.  GAS and PCL are INT8 raw percent, scale 1.0.
+
+       GAS follows an ENERGYCFG fuel setting once one has been accepted - floor of the
+       percentage of tank capacity, which is the ICD's own indirect readback for
+       ENERGYCFG.fuel.  Until then it is the fixed FUEL_PERCENT: the aircraft has no
+       fuel sensor and PSTS bit 8 is held clear to match.'''
+    gas = model.ecu_gas_percent()
+    if gas is None:
+        gas = FUEL_PERCENT
     return struct.pack('<hhHbb', scaled(model.head_temp), scaled(model.head_temp),
-                       int(round(model.rpm)), FUEL_PERCENT, model.throttle_position)
+                       int(round(model.rpm)), gas, model.throttle_position)
 
 
 def build_aux1sts(model):
@@ -136,13 +149,31 @@ def build_aux2sts_ecu(model):
 
 
 def build_modests(model):
-    '''fixed ICD example - see MODESTS_EXAMPLE'''
-    return MODESTS_EXAMPLE
+    '''the ICD example, with operation_mode overridden when a test has set one.
+
+       PMU-005a stage 5 needs the fake to be able to report DO_NOTHING or STANDBY,
+       because the ICD example payload reports RUNNING (5) and the ICD forbids accepting
+       ENERGYCFG in that state.  With no override the bytes are the example, unaltered.'''
+    if model.ecu_operation_mode is None:
+        return MODESTS_EXAMPLE
+    data = bytearray(MODESTS_EXAMPLE)
+    data[0] = (data[0] & 0x0F) | ((model.ecu_operation_mode & 0x0F) << 4)
+    return bytes(data)
 
 
 def build_energysts(model):
-    '''fixed ICD example - see ENERGYSTS_EXAMPLE'''
-    return ENERGYSTS_EXAMPLE
+    '''the ICD example, with tank and battery overridden by an accepted ENERGYCFG.
+
+       endurance is NOT modelled and keeps the example's 7200 s: nothing in the
+       ENERGYCFG transaction reads it, and a consumption model would be invention.'''
+    if (model.ecu_tank is None) and (model.ecu_battery is None):
+        return ENERGYSTS_EXAMPLE
+    tank, battery, endurance, reserved = struct.unpack('<HHHH', ENERGYSTS_EXAMPLE)
+    if model.ecu_tank is not None:
+        tank = model.ecu_tank
+    if model.ecu_battery is not None:
+        battery = model.ecu_battery
+    return struct.pack('<HHHH', tank, battery, endurance, reserved)
 
 
 _BUILDERS = {

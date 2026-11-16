@@ -22,6 +22,7 @@
 #include <AP_Frsky_Telem/AP_Frsky_config.h>
 #include <AP_GPS/AP_GPS.h>
 #include <AP_Mount/AP_Mount_config.h>
+#include <AP_PMUCAN/AP_PMUCAN_config.h>     // PMU-005a stage 5 : AP_PMUCAN_ECU_ENABLED
 #include <AP_SerialManager/AP_SerialManager.h>
 #include <AP_RangeFinder/AP_RangeFinder_config.h>
 #include <AP_Winch/AP_Winch_config.h>
@@ -743,6 +744,9 @@ protected:
     void handle_gcs_flcc_pmu_ctrl(const mavlink_message_t &msg);                // PNU : Handle Message of 'gcs_flcc_pmu_cmd'
     void handle_gcs_flcc_object_avoidance_cmd(const mavlink_message_t &msg);    // PNU : Handle Message of 'GCS_FLCC_OBJECT_AVOIDANCE_CMD'
     void handle_gcs_flcc_sar_ctrl(const mavlink_message_t &msg);               // PNU : Handle Message of 'GCS_FLCC_SAR_CTRL' (TC50)
+#if AP_PMUCAN_ECU_ENABLED
+    void handle_gcs_flcc_ecu_energy_cfg(const mavlink_message_t &msg);         // PNU : Handle Message of 'GCS_FLCC_ECU_ENERGY_CFG' (TC60)
+#endif
 
     /*
       handle MAV_CMD_CAN_FORWARD and CAN_FRAME messages for CAN over MAVLink
@@ -1269,6 +1273,15 @@ public:
     mavlink_sys_icd_gcs_flcc_sar_ctrl_t    SAR_Ctrl;                                        // PNU : MAVLINK Message for SAR observation control
     uint8_t SAR_Ctrl_Seq;                                                                   // PNU : Sequence Number of SAR Control Command
     uint32_t SAR_Ctrl_reject_ms;                                                            // PNU : rate limit for the TC50 wrong-source warning
+#if AP_PMUCAN_ECU_ENABLED
+    // PMU-005a stage 5 : TC60 as received, and a sequence number AP_PMUCAN_ECU consumes.
+    // Exactly the shape of PMU_Ctrl / PMU_Ctrl_Seq and SAR_Ctrl / SAR_Ctrl_Seq: the
+    // handler checks the sender and records, and the device-facing library decides what
+    // to do about it.  Nothing here is persistent, so nothing is replayed after a reboot.
+    mavlink_sys_icd_gcs_flcc_ecu_energy_cfg_t    ECU_Cfg;                                   // PNU : MAVLINK Message for ECU energy configuration
+    uint8_t ECU_Cfg_Seq;                                                                    // PNU : Sequence Number of ECU Energy Config Command
+    uint32_t ECU_Cfg_reject_ms;                                                             // PNU : rate limit for the TC60 wrong-source warning
+#endif
     uint8_t prev_Ctrl_OA_Mode = 4;
     bool prev_prx_failed;                                                                   // PNU : latches the proximity healthy/failed edge for the TM5 warning (D12)
 

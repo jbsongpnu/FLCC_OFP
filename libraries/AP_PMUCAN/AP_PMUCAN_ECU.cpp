@@ -64,6 +64,11 @@ void AP_PMUCAN_ECU::update(uint32_t tick)
     // a device that ignores it costs nothing.  That asymmetry is the approved policy.
     ECU_TM_Enabled = (_pmu.protocol_raw() == PROTO_ECU_V2);
 
+    // PMU-005a stage 5 : BEFORE the generation gate below, deliberately.  A TC60 that
+    // arrives on a legacy aircraft must be refused with a reason the operator can see -
+    // PNU-ISSUE(D6) - and that cannot happen inside a branch legacy never enters.
+    service_config();
+
     if (_pmu.protocol() != PROTO_ECU_V2) {
         return;
     }
@@ -290,8 +295,424 @@ void AP_PMUCAN_ECU::publish_energy_tm(void)
                                     ((seen && (age <= ENERGYSTS_FRESH_MS)) ? ECU_VALID_FRESH : 0U) |
                                     (soc_fresh ? ECU_VALID_SOC : 0U);
 
+    // PMU-005a stage 5, in the extension fields.  LATCHED: the last transaction's outcome
+    // stays here until another one is accepted, so a ground station that attached after
+    // the operator pressed the button still learns what happened.  A one-shot statustext
+    // does not survive that, which is the lesson the 2026-10-19 bench session taught.
+    ECU_Energy_Status.Cfg_Result   = _cfg_result;
+    ECU_Energy_Status.Cfg_Attempts = _cfg_attempts;
+
     gcs().send_message(MSG_ECU_ENERGY_STATUS);
 }
+
+
+// =========================================================================
+// PMU-005a stage 5 : the ENERGYCFG transaction
+// =========================================================================
+// ONE AT A TIME, BOUNDED, AND NEVER REPLAYED.  The whole of it is: one operator action
+// produces one accepted command, which produces at most three identical frames, which
+// either read back or do not.  There is no queue, no transaction id and no persistence -
+// _cfg_seq_seen matches gcs().ECU_Cfg_Seq at boot, so a reconnect replays nothing and
+// neither does a reboot.
+//
+// IT IS NOT AN ACKNOWLEDGMENT PROTOCOL.  The ECU defines none and this does not invent
+// one: "verified" here means the FC compared the values it sent against ENERGYSTS,
+// ENGSTS and BATSTS frames that arrived after the command did.  Cfg_Result says which of
+// those two things happened.
+//
+// IT DOES NOT TOUCH THE ENGINE.  Step 2c's state, counters and windows are not read and
+// not written anywhere below; the only MODESTS field consulted is operation_mode, and
+// that is this command's own ICD send condition, not a Start interlock.
+// -------------------------------------------------------------------------
+void AP_PMUCAN_ECU::service_config(void)
+{
+    const uint32_t now_ms = AP_HAL::millis();
+    const uint8_t  seq    = gcs().ECU_Cfg_Seq;
+
+    if (seq != _cfg_seq_seen) {
+        _cfg_seq_seen = seq;
+
+        if (_cfg_active) {
+            // A SECOND COMMAND DURING A TRANSACTION IS REFUSED, NOT QUEUED AND NOT
+            // SWALLOWED.  Overwriting would retry a payload the operator never saw
+            // confirmed; reporting success would be a lie.  The running transaction
+            // keeps its own payload, its attempt count and its deadline.
+            _cfg_busy++;
+            GCS_SEND_TEXT(MAV_SEVERITY_WARNING,
+                          "ECU: ENERGYCFG busy (attempt %u), TC60 ignored",
+                          (unsigned)_cfg_attempts);
+        } else {
+            const mavlink_sys_icd_gcs_flcc_ecu_energy_cfg_t cfg = gcs().ECU_Cfg;
+            uint8_t why = ECU_CFG_NONE;
+            if (cfg_validate(cfg, now_ms, why)) {
+                cfg_begin(cfg, now_ms);
+            } else {
+                // The refused values are recorded before the result, so the ECUX record
+                // below says WHICH command was refused rather than leaving the previous
+                // transaction's numbers beside the new verdict.
+                _cfg_tank     = cfg.Tank;
+                _cfg_fuel     = cfg.Fuel;
+                _cfg_batt     = cfg.Battery;
+                _cfg_soc      = cfg.SOC;
+                _cfg_attempts = 0;
+                cfg_finish(why);
+                switch (why) {
+                case ECU_CFG_REJECTED_NOT_ECU:
+                    GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "ECU: TC60 needs a confirmed ECU v2.00");
+                    break;
+                case ECU_CFG_REJECTED_MODE:
+                    GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "ECU: TC60 refused, mode %u not STANDBY",
+                                  (unsigned)_mode.operation_mode);
+                    break;
+                default:
+                    GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "ECU: TC60 refused, value out of range");
+                    break;
+                }
+            }
+        }
+    }
+
+    if (_cfg_active) {
+        // ICD rule 4 : cancel the moment operation_mode leaves DO_NOTHING or STANDBY.
+        // Only a FRESH MODESTS can cancel - a stale one would abandon the transaction
+        // every time the ECU missed a reply.
+        if (cfg_mode_known(now_ms) && !cfg_mode_permits()) {
+            cfg_finish(ECU_CFG_CANCELLED_MODE_CHANGE);
+            GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "ECU: ENERGYCFG cancelled, mode %u",
+                          (unsigned)_mode.operation_mode);
+        } else if (_cfg_awaiting_tx) {
+            cfg_transmit(now_ms);
+        } else {
+            cfg_check_readback(now_ms);
+        }
+    }
+
+#if HAL_LOGGING_ENABLED
+    cfg_log_state();
+#endif
+}
+
+
+// operation_mode is one of the two the ECU accepts ENERGYCFG in
+bool AP_PMUCAN_ECU::cfg_mode_permits(void) const
+{
+    return (_mode.operation_mode == CFG_OPMODE_DO_NOTHING) ||
+           (_mode.operation_mode == CFG_OPMODE_STANDBY);
+}
+
+
+// is there a MODESTS recent enough to decide that question at all
+bool AP_PMUCAN_ECU::cfg_mode_known(uint32_t now_ms) const
+{
+    return mode_status_valid() && ((now_ms - _last_modests_ms) <= MODESTS_FRESH_MS);
+}
+
+
+// -------------------------------------------------------------------------
+// cfg_validate : every ICD rule that can be decided before transmitting
+// -------------------------------------------------------------------------
+// ATOMIC AND NEVER CLAMPED.  One bad field refuses the whole command, as the ECU itself
+// does, and no value is coerced into range - a silently corrected tank capacity is worse
+// than a refused one.  Same shape as TC50's "values 3 through 255 are undefined".
+//
+// 65535 is checked FIRST in every field, so "keep the current value" is never compared
+// against a range it was never meant to satisfy.  None of the four ranges reaches 65535,
+// so there is no value that is both a setting and a keep.
+//
+// THE MODE GATE IS CONDITIONAL ON MODESTS BEING USABLE.  MODESTS is still under
+// development and a real ECU may not answer it at all; refusing every ENERGYCFG in that
+// case would make the aircraft unconfigurable for a message that is informational by the
+// ICD's own description.  With no fresh MODESTS the frame goes out and the ECU - which
+// is the final authority - applies or ignores it.
+// -------------------------------------------------------------------------
+bool AP_PMUCAN_ECU::cfg_validate(const mavlink_sys_icd_gcs_flcc_ecu_energy_cfg_t &cfg,
+                                 uint32_t now_ms, uint8_t &why) const
+{
+    if (!ECU_TM_Enabled) {
+        // Legacy, and the unconfirmed ECU_V2 fallback, both land here.  The CAN fallback
+        // still polls MODESTS and ENERGYSTS; what it must not do is write to a device
+        // whose generation is a guess.
+        why = ECU_CFG_REJECTED_NOT_ECU;
+        return false;
+    }
+
+    why = ECU_CFG_REJECTED_RANGE;
+
+    if ((cfg.Tank != ECU_CFG_KEEP) &&
+        ((cfg.Tank < CFG_TANK_MIN) || (cfg.Tank > CFG_TANK_MAX))) {
+        return false;
+    }
+    if ((cfg.Battery != ECU_CFG_KEEP) &&
+        ((cfg.Battery < CFG_BATT_MIN) || (cfg.Battery > CFG_BATT_MAX))) {
+        return false;
+    }
+    if ((cfg.SOC != ECU_CFG_KEEP) &&
+        ((cfg.SOC < CFG_SOC_MIN) || (cfg.SOC > CFG_SOC_MAX))) {
+        return false;
+    }
+    if (cfg.Fuel != ECU_CFG_KEEP) {
+        // "fuel may not exceed the supplied or retained tank".  The supplied one if there
+        // is one, otherwise the last ENERGYSTS readback.  If neither is known the FC does
+        // NOT guess a capacity - it sends, and the ECU refuses the whole frame if the
+        // retained tank is smaller.
+        const uint16_t tank = (cfg.Tank != ECU_CFG_KEEP) ? cfg.Tank
+                              : (energy_status_valid() ? _energy.tank : 0U);
+        if ((tank != 0U) && (cfg.Fuel > tank)) {
+            return false;
+        }
+    }
+
+    if (cfg_mode_known(now_ms) && !cfg_mode_permits()) {
+        why = ECU_CFG_REJECTED_MODE;
+        return false;
+    }
+
+    why = ECU_CFG_NONE;
+    return true;
+}
+
+
+// -------------------------------------------------------------------------
+// cfg_begin : accept one command and build the eight bytes once
+// -------------------------------------------------------------------------
+// The payload is built HERE and kept, because every retry must be the IDENTICAL frame
+// (ICD rule 3).  Rebuilding it from gcs().ECU_Cfg on each attempt would silently pick up
+// a TC60 that arrived in between - which is exactly the overwrite the busy refusal above
+// exists to prevent.
+//
+// PNU-ISSUE(D15) : LSB first on both sides, so the four fields are stored byte by byte in
+// little-endian order with no swap.
+// -------------------------------------------------------------------------
+void AP_PMUCAN_ECU::cfg_begin(const mavlink_sys_icd_gcs_flcc_ecu_energy_cfg_t &cfg,
+                              uint32_t now_ms)
+{
+    _cfg_tank = cfg.Tank;
+    _cfg_fuel = cfg.Fuel;
+    _cfg_batt = cfg.Battery;
+    _cfg_soc  = cfg.SOC;
+
+    _cfg_payload[0] = (uint8_t)(cfg.Tank    & 0xFFU);
+    _cfg_payload[1] = (uint8_t)(cfg.Tank    >> 8);
+    _cfg_payload[2] = (uint8_t)(cfg.Fuel    & 0xFFU);
+    _cfg_payload[3] = (uint8_t)(cfg.Fuel    >> 8);
+    _cfg_payload[4] = (uint8_t)(cfg.Battery & 0xFFU);
+    _cfg_payload[5] = (uint8_t)(cfg.Battery >> 8);
+    _cfg_payload[6] = (uint8_t)(cfg.SOC     & 0xFFU);
+    _cfg_payload[7] = (uint8_t)(cfg.SOC     >> 8);
+
+    _cfg_active      = true;
+    _cfg_awaiting_tx = true;
+    _cfg_attempts    = 0;
+    _cfg_result      = ECU_CFG_IN_PROGRESS;
+    _cfg_arm_ms      = now_ms;
+    _cfg_accepted++;
+
+    cfg_transmit(now_ms);
+}
+
+
+// -------------------------------------------------------------------------
+// cfg_transmit : put the frame on the bus, or give up on the bus
+// -------------------------------------------------------------------------
+// A FAILED SUBMISSION IS NOT AN ATTEMPT.  Cfg_Attempts counts frames that reached the
+// interface, because that is what the ICD's "no more than 3 total transmissions" counts;
+// a full mailbox for one tick is a bus condition and is simply retried next tick.  After
+// CFG_TX_RETRY_MS of that the transaction is abandoned with TX_FAIL rather than retried
+// forever against a dead bus.
+// -------------------------------------------------------------------------
+void AP_PMUCAN_ECU::cfg_transmit(uint32_t now_ms)
+{
+    if (_pmu.send_ecu_data(ECU_ENERGYCFG | AP_HAL::CANFrame::FlagEFF,
+                           _cfg_payload, ECU_CFG_DLC)) {
+        _cfg_attempts++;
+        _cfg_tx_ms       = now_ms;
+        _cfg_awaiting_tx = false;
+        return;
+    }
+
+    if ((now_ms - _cfg_arm_ms) >= CFG_TX_RETRY_MS) {
+        cfg_finish(ECU_CFG_TX_FAIL);
+        GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "ECU: ENERGYCFG could not be sent");
+    }
+}
+
+
+// has every readback this command actually needs arrived since @deadline_ms
+bool AP_PMUCAN_ECU::cfg_readback_ready(uint32_t deadline_ms) const
+{
+    // Only the supplied fields are waited for.  A command that sets nothing but the
+    // battery capacity must not hang waiting for an ENGSTS it does not read.
+    if ((_cfg_tank != ECU_CFG_KEEP) || (_cfg_batt != ECU_CFG_KEEP)) {
+        if (!energy_status_valid() ||
+            ((int32_t)(_last_energysts_ms - deadline_ms) < 0)) {
+            return false;
+        }
+    }
+    if (_cfg_fuel != ECU_CFG_KEEP) {
+        if ((int32_t)(_pmu.engsts_ms() - deadline_ms) < 0) {
+            return false;
+        }
+    }
+    if (_cfg_soc != ECU_CFG_KEEP) {
+        if (!_pmu.batsts_gage_seen() ||
+            ((int32_t)(_pmu.batsts_gage_ms() - deadline_ms) < 0)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+
+// -------------------------------------------------------------------------
+// cfg_readback_ok : the ICD's four comparisons, each at its own tolerance
+// -------------------------------------------------------------------------
+//   tank    - ENERGYSTS.tank,    exact
+//   battery - ENERGYSTS.battery, exact
+//   fuel    - ENGSTS.GAS, an INTEGER PERCENT of the tank.  floor(100 * fuel / tank), or
+//             one point less, which the ICD allows for the ECU's own float rounding.
+//             This is NOT a 0.01 L verification and must never be reported as one: a
+//             quarter of a litre in an 8 L tank is three percent, and a litre either way
+//             can hide inside one count on a large tank.
+//   soc     - BATSTS.GAGE, within one raw count, which is 0.1 percentage point.
+// -------------------------------------------------------------------------
+bool AP_PMUCAN_ECU::cfg_readback_ok(void) const
+{
+    if ((_cfg_tank != ECU_CFG_KEEP) && (_energy.tank != _cfg_tank)) {
+        return false;
+    }
+    if ((_cfg_batt != ECU_CFG_KEEP) && (_energy.battery != _cfg_batt)) {
+        return false;
+    }
+    if (_cfg_fuel != ECU_CFG_KEEP) {
+        const uint16_t tank = (_cfg_tank != ECU_CFG_KEEP) ? _cfg_tank
+                              : (energy_status_valid() ? _energy.tank : 0U);
+        if (tank == 0U) {
+            return false;           // no capacity is known, so no percentage can be formed
+        }
+        const int32_t expect = (int32_t)((100UL * (uint32_t)_cfg_fuel) / (uint32_t)tank);
+        const int32_t gas    = (int32_t)PMU_Status.Fuel_Quantity;
+        if ((gas != expect) && (gas != (expect - 1))) {
+            return false;
+        }
+    }
+    if (_cfg_soc != ECU_CFG_KEEP) {
+        const int32_t diff = (int32_t)_pmu.batsts_gage() - (int32_t)_cfg_soc;
+        if ((diff > 1) || (diff < -1)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+
+// -------------------------------------------------------------------------
+// cfg_check_readback : wait at least a second, then compare fresh data only
+// -------------------------------------------------------------------------
+void AP_PMUCAN_ECU::cfg_check_readback(uint32_t now_ms)
+{
+    const uint32_t deadline_ms = _cfg_tx_ms + CFG_READBACK_MIN_MS;
+
+    if ((int32_t)(now_ms - deadline_ms) < 0) {
+        return;                     // the ICD's mandatory one second has not passed
+    }
+
+    if (!cfg_readback_ready(deadline_ms)) {
+        if ((now_ms - _cfg_tx_ms) >= CFG_READBACK_TIMEOUT_MS) {
+            // Nothing to compare against.  That is an unverified attempt, not a silent
+            // success, and it is treated exactly as a mismatch - retry, then report.
+            cfg_attempt_failed(now_ms, "no readback");
+        }
+        return;
+    }
+
+    if (cfg_readback_ok()) {
+        cfg_finish(ECU_CFG_OK);
+        GCS_SEND_TEXT(MAV_SEVERITY_INFO, "ECU: ENERGYCFG verified after %u frame%s",
+                      (unsigned)_cfg_attempts, (_cfg_attempts == 1) ? "" : "s");
+        return;
+    }
+
+    cfg_attempt_failed(now_ms, "readback differs");
+}
+
+
+// -------------------------------------------------------------------------
+// cfg_attempt_failed : resend the identical frame, or stop and say what came back
+// -------------------------------------------------------------------------
+void AP_PMUCAN_ECU::cfg_attempt_failed(uint32_t now_ms, const char *why)
+{
+    if (_cfg_attempts < CFG_MAX_ATTEMPTS) {
+        _cfg_awaiting_tx = true;
+        _cfg_arm_ms      = now_ms;
+        cfg_transmit(now_ms);
+        return;
+    }
+
+    cfg_finish(ECU_CFG_MISMATCH_AFTER_3);
+
+    // The readback values go out WITH the failure, because "it did not take" is not
+    // actionable on its own - the ICD asks for the values that were read back, and the
+    // ECUX record below keeps them whether or not anyone is listening.
+    GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "ECU: ENERGYCFG failed (%s) after 3 frames", why);
+    GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "ECU: read back tank %u batt %u gas %d soc %d",
+                  (unsigned)_energy.tank, (unsigned)_energy.battery,
+                  (int)PMU_Status.Fuel_Quantity, (int)_pmu.batsts_gage());
+}
+
+
+// end the transaction, keeping the attempt count for TM61 and the log
+void AP_PMUCAN_ECU::cfg_finish(uint8_t result)
+{
+    _cfg_result      = result;
+    _cfg_active      = false;
+    _cfg_awaiting_tx = false;
+}
+
+
+#if HAL_LOGGING_ENABLED
+// -------------------------------------------------------------------------
+// cfg_log_state : ECUX, one record per transaction state change
+// -------------------------------------------------------------------------
+// NOT PERIODIC.  Every change of result or attempt count writes one record, so a whole
+// transaction is four or five lines: accepted, one line per frame, then the outcome.
+// That is the permanent record the statustexts above cannot be - a message sent before a
+// ground station attached is gone, and this is a ground procedure that is often run with
+// nobody watching the link.
+//
+// It carries BOTH SIDES: cTank/cFuel/cBatt/cSOC are what was commanded, raw as sent, and
+// rTank/rBatt/rGas/rSOC are what the ECU read back at that moment.  A failure is then
+// diagnosable from the log alone.
+//
+// NO EXISTING RECORD CHANGES.  ECUM, ECUE, ECUC, PMUC, PMUE and TM11-TM13/TM3 keep their
+// columns exactly as they were.
+// -------------------------------------------------------------------------
+void AP_PMUCAN_ECU::cfg_log_state(void)
+{
+    if ((_cfg_result == _cfg_logged_result) && (_cfg_attempts == _cfg_logged_att)) {
+        return;
+    }
+    _cfg_logged_result = _cfg_result;
+    _cfg_logged_att    = _cfg_attempts;
+
+    if (_cfg_result == ECU_CFG_NONE) {
+        return;                     // nothing has ever been commanded; no record to write
+    }
+
+    AP::logger().Write("ECUX", "TimeUS,Res,Att,cTank,cFuel,cBatt,cSOC,rTank,rBatt,rGas,rSOC",
+                       "QBBHHHHHHbh",
+                       AP_HAL::micros64(),
+                       _cfg_result,
+                       _cfg_attempts,
+                       _cfg_tank,
+                       _cfg_fuel,
+                       _cfg_batt,
+                       _cfg_soc,
+                       _energy.tank,
+                       _energy.battery,
+                       PMU_Status.Fuel_Quantity,
+                       _pmu.batsts_gage());
+}
+#endif  // HAL_LOGGING_ENABLED
 
 
 #if HAL_LOGGING_ENABLED
@@ -361,14 +782,22 @@ void AP_PMUCAN_ECU::log(void)
                            _energy.endurance);
     }
 
-    AP::logger().Write("ECUC", "TimeUS,Proto,RtrTx,RtrErr,ModeRx,EnrgRx,Short", "QBIIIII",
+    AP::logger().Write("ECUC", "TimeUS,Proto,RtrTx,RtrErr,ModeRx,EnrgRx,Short,CfgAcc,CfgBsy",
+                       "QBIIIIIII",
                        now_us,
                        (uint8_t)_pmu.protocol_raw(),
                        _rtr_tx,
                        _rtr_err,
                        _modests_rx,
                        _energysts_rx,
-                       _short_frames);
+                       _short_frames,
+                       // PMU-005a stage 5 : TC60s that started a transaction, and TC60s
+                       // refused because one was already running.  Appended to ECUC
+                       // rather than given a record of their own - they are counters of
+                       // this link, like the six beside them, and ECUC is written on both
+                       // generations so a refused TC60 on a legacy aircraft is counted.
+                       _cfg_accepted,
+                       _cfg_busy);
 }
 #endif  // HAL_LOGGING_ENABLED
 

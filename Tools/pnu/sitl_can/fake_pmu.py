@@ -25,7 +25,8 @@ ICD's own example payloads.  It is a PROTOCOL mode, not a second engine model - 
 no ECU operating-mode machine, governor or EMS here.  Legacy is the default.
 
 Console commands on stdin: silent, resume, status, start, stop, choke open|close,
-versts on|off, takeoff, land, help, quit.  SIGUSR1 toggles silence, for scripted tests.
+versts on|off, ecu-mode N|example, takeoff, land, help, quit.  SIGUSR1 toggles silence,
+for scripted tests.
 
 AP_FLAKE8_CLEAN
 '''
@@ -156,10 +157,20 @@ class FakePMU(object):
         handlers[frame_id](value)
 
     def handle_energycfg(self, dlc, data):
-        '''ENERGYCFG, ECU V2.0 only.  DECODED AND REPORTED, NOT APPLIED: Stage 0 verifies
-           the wire format, and a persistent energy configuration is not part of it.  The
-           ICD's acceptance rules - 0xFFFF keeps a field, all-or-nothing validation, the
-           DO_NOTHING/STANDBY restriction - belong to the real ECU.'''
+        '''ENERGYCFG, ECU V2.0 only.
+
+           PMU-005a stage 5 : DECODED, LOGGED AND APPLIED.  Stage 0 only reported it,
+           which was enough to verify the wire format and nothing else; the FC now
+           verifies its command through ENERGYSTS, ENGSTS.GAS and BATSTS.GAGE, so the
+           fake has to actually hold the values for that comparison to mean anything.
+
+           What it still is NOT: an EMS, a governor, or a fuel-consumption model.  It
+           stores what it accepted and answers with it.  The ICD's acceptance rules -
+           0xFFFF keeps a field, all-or-nothing validation, the DO_NOTHING/STANDBY
+           restriction - live in PMUModel.apply_energycfg().
+
+           A rejected frame is NOT acknowledged on CAN, because the ICD defines no
+           acknowledgment.  The FC is supposed to find out from the readback.'''
         if not self.ecu:
             self.log('ENERGYCFG 0x%08X on a legacy PMU - ignored' % icd.ENERGYCFG)
             return
@@ -168,8 +179,9 @@ class FakePMU(object):
             return
         self._energycfg_seen += 1
         fields = icd.decode_energycfg(data)
-        self.log('RX ENERGYCFG tank=%u fuel=%u battery=%u soc=%u (raw, 0xFFFF = keep)'
-                 % (fields['tank'], fields['fuel'], fields['battery'], fields['soc']))
+        self.log('RX ENERGYCFG tank=%u fuel=%u battery=%u soc=%u (raw, 0xFFFF = keep) -> %s'
+                 % (fields['tank'], fields['fuel'], fields['battery'], fields['soc'],
+                    self.model.apply_energycfg(fields)))
 
     # -- console ----------------------------------------------------------------------
 
@@ -207,6 +219,16 @@ class FakePMU(object):
             self.set_silent(False)
         elif cmd == 'toggle-silent':
             self.set_silent(not self.silent)
+        elif cmd in ('ecu-mode', 'mode'):
+            # PMU-005a stage 5 : MODESTS operation_mode, so a scenario can put the fake
+            # into DO_NOTHING (1) or STANDBY (3), the only two states the ICD lets
+            # ENERGYCFG be accepted in.  "example" restores the ICD payload, RUNNING (5).
+            if arg in ('example', 'icd', 'reset'):
+                self.model.set_ecu_operation_mode(None)
+            elif arg.isdigit():
+                self.model.set_ecu_operation_mode(int(arg))
+            else:
+                self.log('usage: ecu-mode <0-15>|example   (1 DO_NOTHING, 3 STANDBY)')
         elif cmd == 'versts':
             if arg in ('on', 'off'):
                 self.answer_versts = (arg == 'on')
@@ -219,6 +241,10 @@ class FakePMU(object):
                      % ('ECU V2.0' if self.ecu else 'legacy PMU V1.05',
                         'on' if self.answer_versts else 'OFF', self.silent,
                         self._rtr_seen, self._rtr_answered, self._cmd_seen, self._energycfg_seen))
+            self.log('ECU energy: opmode=%s tank=%s fuel=%s battery=%s soc=%s gas=%s'
+                     % (self.model.ecu_operation_mode, self.model.ecu_tank,
+                        self.model.ecu_fuel, self.model.ecu_battery, self.model.ecu_soc,
+                        self.model.ecu_gas_percent()))
             # the MAVLink side is reported too: when takeoff is not detected, this is
             # where the answer is, and guessing at it once was enough
             self.log(self.watcher.summary() if self.watcher is not None else 'MAVLink: disabled')
@@ -236,7 +262,7 @@ class FakePMU(object):
             self.running = False
         elif cmd == 'help':
             self.log('silent | resume | status | start | stop | choke open|close | '
-                     'versts on|off | takeoff | land | quit')
+                     'versts on|off | ecu-mode N|example | takeoff | land | quit')
         else:
             self.log('unknown command "%s", try help' % cmd)
 
@@ -525,6 +551,9 @@ def main():
     parser.add_argument('--ecu', action='store_true',
                         help='answer as an ECU V2.0 device (VERSTS 2.00, UINT32 HOURCNT, '
                              'MODESTS and ENERGYSTS) instead of a legacy PMU')
+    parser.add_argument('--ecu-mode', type=int, default=None,
+                        help='MODESTS operation_mode to report (1 DO_NOTHING, 3 STANDBY); '
+                             'the ICD example payload reports RUNNING, which refuses ENERGYCFG')
     parser.add_argument('--no-versts', dest='versts', action='store_false',
                         help='answer every status RTR except VERSTS, for the FC fallback test')
     parser.add_argument('--silent', action='store_true', help='start without answering RTRs')
@@ -545,6 +574,9 @@ def main():
     # once already: a mode nobody can see in the log is a mode nobody checks.
     pmu.log('protocol: %s' % ('ECU V2.0 - VERSTS 2.00, UINT32 HOURCNT, MODESTS + ENERGYSTS'
                               if args.ecu else 'legacy PMU V1.05 (default)'))
+
+    if args.ecu_mode is not None:
+        pmu.model.set_ecu_operation_mode(args.ecu_mode)
 
     if not args.versts:
         pmu.log('VERSTS replies OFF - the FC will see no version at all')

@@ -247,6 +247,13 @@ public:
     // existing PMUC record means.  Counting belongs to the caller.
     bool send_ecu_frame(uint32_t can_id, uint8_t dlc);
 
+    // PMU-005a stage 5 : one ECU DATA frame, which is ENERGYCFG and nothing else.
+    // Separate from send_ecu_frame() above because that one sends an RTR request with a
+    // dummy payload; this one carries eight bytes that must reach the bus unaltered.
+    // It does NOT go through pmucan_cmd(), which serialises a four-byte legacy UINT32
+    // and counts into PMUC's CmdTx.
+    bool send_ecu_data(uint32_t can_id, const uint8_t *data, uint8_t dlc);
+
     // PMU-005a stage 4 : BATSTS GAGE, decoded for the first time.
     //
     // Bytes 6-7 of BATSTS have been received at 10 Hz since the beginning and thrown away

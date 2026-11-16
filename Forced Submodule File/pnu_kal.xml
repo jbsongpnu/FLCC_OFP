@@ -131,6 +131,31 @@
   </message>
 
 <!-- ====================================================== -->
+<!-- ECU V2.0 - TELECOMMAND (TC)                            -->
+<!-- ====================================================== -->
+
+  <!-- PMU-005a stage 5.  ENERGYCFG (CAN 0x10000050), carried as the CAN payload itself:
+       four little-endian UINT16 in the ICD's own raw units, 65535 meaning "keep the
+       current value".  The FC performs NO arithmetic on it - it validates the four
+       numbers and copies the eight bytes onto the bus - which is the only shape that
+       keeps `fuel_raw = round(fuel_litres * 100)` a single rounding, performed once, by
+       the operator's own tooling.  A float payload could not carry 65535 at all.
+
+       OPERATOR ACTION ONLY.  One frame per TC60, never on boot, never on reconnect and
+       never from a stored list; the FC keeps no persistent copy.  The outcome is
+       reported in TM61's Cfg_Result / Cfg_Attempts extension fields.
+
+       ACCEPTED ONLY WHEN VERSTS HAS CONFIRMED ECU SOFTWARE 2.00 OR HIGHER, and only from
+       a sender MAV_GCS_SYSID covers.  See README PMU-005a. -->
+  <message id="50060" name="SYS_ICD_GCS_FLCC_ECU_ENERGY_CFG">
+  <description>TC60 (ECU). Energy configuration from GCS to FLCC, operator action only. The FC sends one ENERGYCFG frame per accepted command and retries the identical frame to a maximum of three transmissions; the result appears in TM61.</description>
+    <field type="uint16_t" name="Tank" units="l">Tank[SF:0.01, MIN:10, MAX:10000]. Tank capacity. 65535 keeps the current value.</field>
+    <field type="uint16_t" name="Fuel" units="l">Fuel[SF:0.01, MIN:0, MAX:Tank]. Current TOTAL fuel in the tank, read from the tank level indication - not an amount added. 65535 keeps the current value.</field>
+    <field type="uint16_t" name="Battery" units="Ah">Battery[SF:0.1, MIN:50, MAX:1000]. Battery capacity. 65535 keeps the current value.</field>
+    <field type="uint16_t" name="SOC" units="%">SOC[SF:0.1, MIN:0, MAX:1000]. Optional state-of-charge correction. 65535 keeps the voltage-derived estimate.</field>
+  </message>
+
+<!-- ====================================================== -->
 <!-- ECU V2.0 - TELEMETRY (TM)                              -->
 <!-- ====================================================== -->
 
