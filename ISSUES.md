@@ -714,6 +714,11 @@ Decided 2026-11-13, no further stage 2 modification.
 - **Stage 3 decoded MODESTS against a draft that is still under development.** The frame
   carries no layout version and VERSTS identifies software, not frame layout, so the field
   order must be re-validated against a real capture before the decoder is trusted.
+  **PNU confirmed 2026-11-17 that the ECU transmits MODESTS at 10 Hz**, which settles its
+  availability and retires the risk that a real ECU might never answer it: the stage 5 mode
+  gate and the KGCS Apply gate can both require a fresh MODESTS without making the aircraft
+  unconfigurable. The field ORDER is still unvalidated and still matters more than it did,
+  because `operation_mode` now gates a transmitted command.
 
 - **The `GAS` fuel readback rule is documented, but the ECU's arithmetic behind it is
   not.** The ICD states the tolerance twice and identically - `floor(100 * fuel / tank)`,
@@ -1327,7 +1332,7 @@ it and the build reads the staged copy.
 
 | Piece | Tracked? | Role |
 |---|:--:|---|
-| `Forced Submodule File/pnu_kal.xml` | yes | the 9 message definitions (7 PNU-KAL, plus the SAR's TC50/TM50 from 5.1.20) |
+| `Forced Submodule File/pnu_kal.xml` | yes | the 12 message definitions (7 PNU-KAL, the SAR's TC50/TM50 from 5.1.20, and the ECU's TC60/TM60/TM61 from 5.1.29) |
 | `Tools/pnu/stage_mavlink_defs.sh` | yes | copies the 19 upstream XMLs + `pnu_kal.xml` into the staging dir, drops `cubepilot.xml`, stamps the source commit |
 | `Tools/pnu/mavlink_defs/` | **no - gitignored** | the staged copy (~944 KB), regenerated, never committed |
 | `wscript` (1 line) | yes | builds from `Tools/pnu/mavlink_defs/all.xml` |

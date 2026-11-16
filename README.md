@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Current version** | `PNU_OFP V5.1.28` (DEV) |
+| **Current version** | `PNU_OFP V5.1.29` (DEV) |
 | **Baseline** | ArduPilot Copter **4.7.1** |
 | **Last official release** | `PNU-KAL-FLCC-5.1.0` (same code as 5.1.0 dev) |
 | **Vehicle** | **ArduCopter only.** Plane, Rover and Sub do not link - by construction |
@@ -117,6 +117,21 @@ recorded in `ISSUES.md`.
 ---
 
 ## 3. Current Development Version
+
+**V5.1.29** puts the ECU on the KGCS link. `PMU-005a` stages 4 and 5 add three messages -
+`TM60 51060` (ECU modes, 10 Hz), `TM61 51061` (ECU energy, 1 Hz) and `TC60 50060`
+(ENERGYCFG, operator action only) - and `pnu_kal.xml` now documents them to the standard a
+ground station can be written from without the CAN ICD. **Not one byte of what a legacy
+aircraft transmits changed**: all three are gated on VERSTS having positively confirmed ECU
+software 2.00 or higher, so a legacy PMU, an unconfirmed fallback and a build with the ECU
+compiled out are all byte-identical on the link to V5.1.28, and no existing message id,
+field or CRC_EXTRA moved. `TC60` runs one bounded transaction at a time: at most three
+identical CAN frames, verified against status frames that arrived after the ICD's mandatory
+one-second wait, with the outcome latched in TM61's two extension fields and recorded as
+`ECUT` and `ECUX`. `BATSTS.GAGE` is decoded for the first time, for the SOC read-back. **The
+entire ECU side is SITL-only against a fake built from the ICD** - no ECU hardware exists on
+this project - and `MODESTS` remains a V2.0 draft carrying no layout version. See
+`CHANGELOG.md`.
 
 **V5.1.28** makes the PMU say what it decided and what it sent. Two dataflash records,
 no behaviour change. `PMUE` is event driven and records the step 2c interlock's own

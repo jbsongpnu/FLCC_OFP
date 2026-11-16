@@ -21,6 +21,101 @@ A feature exercised only in SITL is **not** hardware-verified. Entries say so ex
 
 ---
 
+## V5.1.29 - the ECU reaches the ground station
+
+`PMU-005a` stages 4 and 5.  Stage 3 taught the FC to poll and decode the two ECU-only
+status messages into the flight log; this version puts them on the KGCS link and adds the
+one command that writes back to the device.  Three new messages, and **not one byte of
+change to what a legacy aircraft transmits**.
+
+| | TC60 | TM60 | TM61 |
+|---|---|---|---|
+| Name | `SYS_ICD_GCS_FLCC_ECU_ENERGY_CFG` | `SYS_ICD_FLCC_GCS_ECU_MODE_STATUS` | `SYS_ICD_FLCC_GCS_ECU_ENERGY_STATUS` |
+| Id | **50060** | **51060** | **51061** |
+| CRC_EXTRA | 179 | 0 | 115 |
+| Payload | 8 B | 12 B | 11 B base, 13 B with extensions |
+| Rate | operator action only | 10 Hz | 1 Hz |
+
+### 1. Backward compatibility is a transmission policy, not a dialect change
+
+Every one of the three is gated on `protocol_raw() == PROTO_ECU_V2` - VERSTS must have
+POSITIVELY confirmed ECU software 2.00 or higher.  A legacy PMU, the unconfirmed ECU
+fallback, and a build with `AP_PMUCAN_ECU_ENABLED` off are all byte-identical on the link
+to V5.1.28.  The CAN-side fallback is deliberately untouched: a device that never answers
+VERSTS is still polled as an ECU, because what an older ground station cannot tolerate is
+an unknown MAVLink id, not a CAN poll.
+
+**No existing message definition changed.**  All 306 generated messages compare identical
+before and after, CRC_EXTRA included - TC50 231 and TM50 7 among them.
+
+### 2. What the operator gets
+
+`TM60` carries the ECU's operating modes, RPM target, alert level, start-gate result and
+boot prerequisites, raw, at the 10 Hz the ICD polls them.  `TM61` carries the configured
+tank and battery, the endurance estimate with both its sentinels intact, and the battery
+state of charge from `BATSTS.GAGE` - decoded for the first time, because `ENERGYCFG`'s SOC
+correction is verified against it and nothing else.
+
+`TC60` is the energy configuration: tank capacity, current total fuel, battery capacity and
+an optional SOC correction, carried as the ECU's own CAN payload so the FC performs no
+arithmetic on it.  One operator action starts one bounded transaction - at most three
+identical frames, verified against status frames that arrived after the ICD's mandatory
+one-second wait, bounded at about 10.5 s.  A second command during a transaction is refused
+rather than queued, and the outcome is latched in TM61's two MAVLink2 extension fields so a
+ground station that attached late still learns what happened.
+
+### 3. Nothing here touches the engine
+
+No FC-side start interlock is built on `MODESTS` or `initial_fail`; the ECU enforces those
+itself and the ICD says so.  Step 2c's state, counters and windows are neither read nor
+written by any of it.  Measured unchanged: `stop-start` commanded the engine **1.154 s**
+(legacy) and **1.235 s** (ECU) after the Start burst, `PMUC` `CmdTx`/`RtrTx` 0.800 and
+0.801, and `TM11`/`TM12`/`TM13`/`TM3`/`PMUC`/`PMUE`/`SARS` keep their columns exactly.
+
+### 4. New records, no changed ones
+
+`ECUM`, `ECUE` and `ECUC` arrived in stage 3.  `ECUC` gains `CfgAcc` and `CfgBsy`; `ECUT`
+logs every TC60 at ingress with its sender, including the ones refused for their source;
+`ECUX` writes one line per transaction state change and per accepted or refused command,
+carrying both what was commanded and what was read back.
+
+### 5. The dialect is now the KGCS interface specification
+
+`pnu_kal.xml` documents TC60, TM60 and TM61 to the standard a ground station can be
+implemented from **without the CAN protocol document**: every defined code of
+`System_State`, `Operation_Mode`, `Ctrl_Mode`, `Alert_Level`, `EMS_Mode` and `Start_Gate`
+written out individually, every `Initial_Fail` bit with its mask, all nine `Cfg_Result`
+codes with their operator-facing meaning, the input controls and their raw conversions, and
+a fourteen-state UI guide.  Cross-checked against the ICD by script: 50 value/name pairs and
+4 bitmask bits, nothing invented.
+
+### Verification
+
+| What | Result |
+|---|---|
+| **Build** | SITL **4465526 B** text, CubeOrangePlus **1738660 B**, and SITL with `AP_PMUCAN_ECU_ENABLED=0` at 4459286 B - the whole ECU feature is **6240 B** of text and **32 B** of BSS |
+| **Unit test** | 306 MAVLink messages compared before and after: **0 added, 0 removed, 0 differing** in CRC_EXTRA, name, field order, wire format or payload size |
+| **Unit test** | 10 CubeMars + 12 SAR gtests, 124 Python device tests |
+| **SITL** | TM60 at a 100.9 ms median carrying the ICD's MODESTS example field for field; TM61 at 1012.0 ms carrying the ENERGYSTS example |
+| **SITL** | legacy and unconfirmed-fallback runs: **zero TM60, zero TM61, TC60 refused** - the fallback run while `ECUM` x267 shows the CAN side still decoding |
+| **SITL** | ENERGYCFG verified in one frame at 1.160 s; keep-current, range refusal, mode refusal, busy refusal, mode-change cancellation, and the three-attempt timeout at 10.507 s all exercised |
+| **SITL** | per-field read-back freshness isolated: with the correct value already in hand but no post-deadline frame, verification is withheld three times for `ENGSTS.GAS` and again for `BATSTS.GAGE` |
+| **SITL** | step 2c, PMUC/PMUE, gimbal and SAR regression unchanged |
+| **Lint** | `run_astyle.py --dry-run`, `flake8` |
+
+### Limitations
+
+**The entire ECU side is SITL-only, against a fake built from this project's own reading of
+the ICD.**  No ECU hardware exists here and the source draft has not been verified against a
+device by anyone.  `MODESTS` is a V2.0 draft carrying no layout version - PNU confirmed on
+2026-11-17 that the ECU transmits it at 10 Hz, which settles its availability but not its
+field order.  `ENERGYCFG` has never been sent to an ECU, so the device's acceptance rules,
+its retained fuel quantity and its `GAS` rounding are all unverified.  `TM60`'s CRC_EXTRA is
+**0** - legal, and ArduPilot looks messages up by id, but a tool that treats a zero from
+`mavlink_get_crc_extra()` as "unknown message" would mis-handle it.
+
+---
+
 ## Firmware, 2026-11-16 - TC60, the ENERGYCFG telecommand - PMU-005a stage 5 (no version bump)
 
 The last stage of `PMU-005a`, and the only one that WRITES to the device.  `TC60 50060`
