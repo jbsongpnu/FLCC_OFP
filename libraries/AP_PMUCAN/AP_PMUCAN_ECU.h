@@ -21,8 +21,32 @@
 #include <AP_Common/AP_Common.h>
 #include <AP_HAL/CANIface.h>
 #include <AP_Logger/AP_Logger_config.h>
+#include <GCS_MAVLink/GCS_MAVLink.h>
 
 class AP_PMUCAN;
+
+// PMU-005a STAGE 4 : THE TWO ECU TELEMETRY MESSAGES, AND THE FLAG THAT GATES THEM.
+//
+// Produced here on the CAN thread and sent by GCS_PNU.cpp, which is the same split every
+// other PNU message uses - PMU_Status, SAR_Status, CAM_ATTITUDE_STATUS.  The alternative,
+// building the payload inside the GCS sender, is what V5.1.25 removed from TM11-TM13:
+// it makes the content depend on how many ground stations are attached.
+//
+// ECU_TM_Enabled IS THE COMPATIBILITY GATE, and it is deliberately not a function of
+// protocol().  It follows protocol_raw() == PROTO_ECU_V2, so VERSTS must have POSITIVELY
+// confirmed ECU software 2.00 or higher: a legacy PMU and the unconfirmed ECU_V2 CAN
+// fallback both leave it false and neither message is ever queued.  The CAN fallback
+// itself is unchanged - it still polls MODESTS and ENERGYSTS - because what an old KGCS
+// cannot tolerate is an unknown MAVLink id, not a CAN poll.
+extern mavlink_sys_icd_flcc_gcs_ecu_mode_status_t    ECU_Mode_Status;
+extern mavlink_sys_icd_flcc_gcs_ecu_energy_status_t  ECU_Energy_Status;
+extern bool                                          ECU_TM_Enabled;
+
+// Data_Valid bits, shared by TM60 and TM61 so that bit 0 and bit 1 mean the same thing
+// in both.  Bit 2 exists only in TM61.
+#define ECU_VALID_SEEN      (1U << 0)   // at least one reply of this kind has been decoded
+#define ECU_VALID_FRESH     (1U << 1)   // the last one is inside this message's threshold
+#define ECU_VALID_SOC       (1U << 2)   // TM61 only: BATSTS GAGE is available and fresh
 
 // PMU-005a STAGE 3 : THE TWO MESSAGES THAT EXIST ONLY ON THE ECU.
 //
@@ -59,6 +83,13 @@ public:
 #if HAL_LOGGING_ENABLED
     void log(void);                             // ECUM, ECUE and ECUC, self-paced
 #endif
+
+    // PMU-005a stage 4 : fill the two globals above and queue TM60 / TM61.  Called from
+    // AP_PMUCAN's existing 10 Hz and 1 Hz branches rather than from a timer of their own,
+    // so the ECU telemetry shares TM1's and the state report's cadence exactly.  Both
+    // return without queueing anything unless ECU_TM_Enabled.
+    void publish_mode_tm(void);                 // 10 Hz, TM60
+    void publish_energy_tm(void);               // 1 Hz, TM61
 
     // Decoded MODESTS, raw as received.  Undefined codes are NOT mapped onto the nearest
     // defined state - the ICD requires them to be carried through as the raw value - so
@@ -109,8 +140,30 @@ private:
 
     AP_PMUCAN &_pmu;
 
+    // The freshness thresholds behind Data_Valid bit 1.  MODESTS is polled at 10 Hz, so
+    // 500 ms is five missed replies; ENERGYSTS is polled at 1 Hz, so 2500 ms is two.
+    // Both are deliberately loose enough that ordinary scheduling jitter never clears the
+    // bit and tight enough that a stopped ECU is reported within a GCS display update.
+    static constexpr uint32_t MODESTS_FRESH_MS   = 500U;
+    static constexpr uint32_t ENERGYSTS_FRESH_MS = 2500U;
+
+    // TM61 bit 2 has its own threshold because its source is not ENERGYSTS: BATSTS is a
+    // legacy status message polled at 10 Hz, so it gets the 10 Hz number.
+    static constexpr uint32_t GAGE_FRESH_MS      = 500U;
+
+    // age in ms, saturating at 65535 - the TM field is uint16 and an ECU that answered
+    // 66 seconds ago is no more usable than one that answered 65
+    static uint16_t age_ms(uint32_t now_ms, uint32_t stamp_ms);
+
     ModeStatus   _mode   {};
     EnergyStatus _energy {};
+
+    // When each kind of reply last arrived.  Zero is never read as a timestamp: the
+    // _rx counters below decide whether a reply has ever been seen, and until one has,
+    // the TM reports the maximum age with Data_Valid bit 0 clear rather than a zero age
+    // that would read as perfectly fresh.
+    uint32_t _last_modests_ms   {};
+    uint32_t _last_energysts_ms {};
 
     // ECU-ONLY COUNTERS, deliberately not PMUC's.  PMUC's RtrTx means "the five legacy
     // polls", at a rate anyone reading a log can predict from the ICD; folding the ECU

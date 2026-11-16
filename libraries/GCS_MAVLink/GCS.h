@@ -1143,6 +1143,8 @@ private:
     // Declare extra additional functions
     void send_message_flcc_gcs_object_avoidance_status() const;		// PNU : Send object avoidance status to GCS with Mavlink Message
     void send_message_flcc_gcs_sar_status() const;                  // PNU : Send SAR status to GCS with Mavlink Message (TM50)
+    void send_message_flcc_gcs_ecu_mode_status() const;             // PNU : Send ECU mode status to GCS (TM60)
+    void send_message_flcc_gcs_ecu_energy_status() const;           // PNU : Send ECU energy status to GCS (TM61)
 
 };
 

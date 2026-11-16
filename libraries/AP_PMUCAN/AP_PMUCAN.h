@@ -246,6 +246,25 @@ public:
     // pmucan_rtr() - that would fold ECU traffic into PMUC's RtrTx and change what every
     // existing PMUC record means.  Counting belongs to the caller.
     bool send_ecu_frame(uint32_t can_id, uint8_t dlc);
+
+    // PMU-005a stage 4 : BATSTS GAGE, decoded for the first time.
+    //
+    // Bytes 6-7 of BATSTS have been received at 10 Hz since the beginning and thrown away
+    // - "Battery GAGE - Not Used" - because no PNU-KAL message carried a state of charge.
+    // ENERGYCFG's soc field is verified against this and nothing else (ICD, ENERGYCFG
+    // readback column), so without it the SOC correction would be write-only.
+    //
+    // It changes NO existing record: TM1, TM11, PMUC and PMUE keep their fields exactly
+    // as they are.  The value reaches KGCS only through TM61, which exists only on a
+    // confirmed ECU.
+    int16_t  batsts_gage(void) const    { return _batsts_gage; }
+    uint32_t batsts_gage_ms(void) const { return _batsts_gage_ms; }
+    bool     batsts_gage_seen(void) const { return _batsts_gage_seen; }
+
+    // When ENGSTS last arrived.  ENERGYCFG's fuel field is verified through ENGSTS.GAS -
+    // PMU_Status.Fuel_Quantity - and a readback is only evidence if the frame carrying it
+    // arrived after the command went out, which needs this timestamp.
+    uint32_t engsts_ms(void) const      { return _engsts_ms; }
 #endif
     /**
      * Returns:
@@ -339,6 +358,17 @@ private:
     // failsafe_pmucan_check() would never have fired.  Only the five PMU status ids count.
     uint32_t _pmu_frames_seen;              // recognised status frames since the last check
     uint32_t _last_pmu_frame_ms;
+
+#if AP_PMUCAN_ECU_ENABLED
+    // PMU-005a stage 4 : BATSTS GAGE and the ENGSTS arrival time, both read only by the
+    // ECU module.  Inside the guard because a build with the ECU messages compiled out
+    // has no reader for either, and "ECU off is exactly the V5.1.28 PMU behaviour" is a
+    // property worth keeping literally true.
+    int16_t  _batsts_gage;                  // BATSTS bytes 6-7, INT16, 0.1 % per count
+    uint32_t _batsts_gage_ms;               // when that value arrived
+    bool     _batsts_gage_seen;             // false until the first BATSTS is decoded
+    uint32_t _engsts_ms;                    // when ENGSTS last arrived
+#endif
 
     // PNU : leaky-bucket thresholds.  Both counters step by +-1 per health check
     // (nominal 50 Hz), so 5 is ~100 ms of net failure / success.

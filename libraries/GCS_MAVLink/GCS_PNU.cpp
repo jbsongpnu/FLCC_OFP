@@ -19,6 +19,13 @@
      TM5  51005  SYS_ICD_FLCC_GCS_OBJECT_AVOIDANCE_STATUS  avoidance status to KGCS
      TC50 50050  SYS_ICD_GCS_FLCC_SAR_CTRL                 SAR observation control from KGCS
      TM50 51050  SYS_ICD_FLCC_GCS_SAR_STATUS               SAR status to KGCS, 5 Hz
+     TM60 51060  SYS_ICD_FLCC_GCS_ECU_MODE_STATUS          ECU modes to KGCS, 10 Hz
+     TM61 51061  SYS_ICD_FLCC_GCS_ECU_ENERGY_STATUS        ECU energy to KGCS, 1 Hz
+
+   The two TM60/TM61 senders are the ONLY new PNU messages that are conditional on the
+   device generation rather than on the build: they are suppressed unless VERSTS has
+   confirmed ECU software 2.00 or higher, so a legacy aircraft is byte-identical on the
+   link to the firmware before PMU-005a stage 4.  See README PMU-005a.
  */
 
 #include "GCS_config.h"
@@ -42,6 +49,8 @@
 // exactly this include - TM50 is sent whether or not the CAN driver is in the build.
 #include <AP_PNUSAR/AP_PNUSAR.h>
 #include <AP_PNU_CAN/AP_PNU_CAN.h>
+// PMU-005a stage 4 : AP_PMUCAN_ECU_ENABLED, and the two ECU telemetry payloads it guards.
+#include <AP_PMUCAN/AP_PMUCAN_config.h>
 
 // PNU : incoming-message debug for Viewpro IR pseudo-color/palette commands.
 // Set to 1 to report the Tracking_CMD received by handle_gcs_flcc_cam_cmd() to the GCS.
@@ -376,6 +385,73 @@ void GCS_MAVLINK::handle_gcs_flcc_sar_ctrl(const mavlink_message_t &msg)
     }
 #endif  // AP_PNU_CAN_ENABLED
 }
+
+
+#if AP_PMUCAN_ECU_ENABLED
+// -------------------------------------------------------------------------
+// Send ECU mode status to GCS (TM60 / msg 51060)
+// -------------------------------------------------------------------------
+// The payload is produced by AP_PMUCAN_ECU::publish_mode_tm() on the CAN thread, which is
+// also what queues this message - the same split as TM1 and TM50, and for the same reason
+// V5.1.25 moved the TM11-TM13 records off the GCS thread: content built here would depend
+// on how many ground stations are attached.
+//
+// ECU_TM_Enabled IS CHECKED AGAIN HERE, deliberately.  send_message() only queues; the
+// generation can change between the queue and the send, because a late VERSTS switches it
+// live with no hysteresis.  Returning without sending drops the queued message exactly as
+// TM2 does when no mount is configured, and it makes "never transmitted unless VERSTS
+// confirmed an ECU" true at both ends rather than only at the producer.
+// -------------------------------------------------------------------------
+void GCS_MAVLINK::send_message_flcc_gcs_ecu_mode_status() const
+{
+    if (!ECU_TM_Enabled) {
+        return;
+    }
+
+    mavlink_msg_sys_icd_flcc_gcs_ecu_mode_status_send(
+            chan,
+            ECU_Mode_Status.RPM_Target,
+            ECU_Mode_Status.Mode_Age,
+            ECU_Mode_Status.System_State,
+            ECU_Mode_Status.Operation_Mode,
+            ECU_Mode_Status.Ctrl_Mode,
+            ECU_Mode_Status.Alert_Level,
+            ECU_Mode_Status.EMS_Mode,
+            ECU_Mode_Status.Start_Gate,
+            ECU_Mode_Status.Initial_Fail,
+            ECU_Mode_Status.Data_Valid);
+
+    // The ECUM dataflash record is written by AP_PMUCAN_ECU::log(), on the driver thread
+    // and at its own rate, exactly as TM11-TM13 are.
+}
+
+
+// -------------------------------------------------------------------------
+// Send ECU energy status to GCS (TM61 / msg 51061)
+// -------------------------------------------------------------------------
+// Cfg_Result and Cfg_Attempts are MAVLink2 EXTENSION fields.  They are outside this
+// message's CRC_EXTRA, so the stage 5 ENERGYCFG transaction can fill them without
+// invalidating a KGCS built against stage 4; a receiver that stops at the base fields
+// simply sees a shorter payload.
+// -------------------------------------------------------------------------
+void GCS_MAVLINK::send_message_flcc_gcs_ecu_energy_status() const
+{
+    if (!ECU_TM_Enabled) {
+        return;
+    }
+
+    mavlink_msg_sys_icd_flcc_gcs_ecu_energy_status_send(
+            chan,
+            ECU_Energy_Status.Tank,
+            ECU_Energy_Status.Battery,
+            ECU_Energy_Status.Endurance,
+            ECU_Energy_Status.Energy_Age,
+            ECU_Energy_Status.Battery_SOC,
+            ECU_Energy_Status.Data_Valid,
+            ECU_Energy_Status.Cfg_Result,
+            ECU_Energy_Status.Cfg_Attempts);
+}
+#endif  // AP_PMUCAN_ECU_ENABLED
 
 
 #if HAL_PROXIMITY_ENABLED && AP_AVOIDANCE_ENABLED

@@ -57,6 +57,15 @@ AP_PMUCAN::AP_PMUCAN(AP_PNU_CAN &frontend) :
     _next_log_ms                = 0;
     _next_counter_log_ms        = 0;
 
+#if AP_PMUCAN_ECU_ENABLED
+    // PMU-005a stage 4 : no BATSTS has been decoded yet, so TM61 reports its SOC invalid
+    // rather than a plausible-looking zero percent.
+    _batsts_gage                = 0;
+    _batsts_gage_ms             = 0;
+    _batsts_gage_seen           = false;
+    _engsts_ms                  = 0;
+#endif
+
 
     // PMU-005a stage 1 : nothing has identified itself yet.  protocol() reads this as
     // ECU_V2 until VERSTS says otherwise.
@@ -164,6 +173,11 @@ void AP_PMUCAN::update(uint32_t tick)
         sendchanges();
         report_protocol();                              // PMU-005a stage 1
         report_missing_versts();
+#if AP_PMUCAN_ECU_ENABLED
+        // PMU-005a stage 4 : TM61 at the 1 Hz the ENERGYSTS poll runs at.  Nothing in it
+        // moves at the status rate - two configured capacities and an endurance estimate.
+        _ecu.publish_energy_tm();
+#endif
     }
 
 #if HAL_LOGGING_ENABLED
@@ -354,6 +368,13 @@ void AP_PMUCAN::send2gcs()
     gcs().send_message(MSG_PMU_STATUS);         // Send PMU Status to GCS with Mavlink Message
     gcs().send_message(MSG_PMU_CTRL_ECHO);      // Send PMU Command(Echo) to GCS with Mavlink Message
 
+#if AP_PMUCAN_ECU_ENABLED
+    // PMU-005a stage 4 : TM60, on the same 10 Hz branch as TM1 and TM3 and for the same
+    // reason - the MODESTS poll behind it is also 10 Hz, so a slower TM would discard
+    // alert and start-gate transitions the ECU has already reported.  It queues nothing
+    // unless VERSTS has confirmed an ECU.
+    _ecu.publish_mode_tm();
+#endif
 }
 
 // -------------------------------------------------------------------------
@@ -459,7 +480,24 @@ bool AP_PMUCAN::handle_frame(const AP_HAL::CANFrame& can_rxframe)
             memcpy(&int16_temp, &can_rxframe.data[4], 2);
             PMU_Status.Battery_Current = int16_temp;
 
-            // Battery GAGE - Not Used
+#if AP_PMUCAN_ECU_ENABLED
+            // PMU-005a stage 4 : GAGE, bytes 6-7, INT16 at 0.1 % per count.  Decoded at
+            // last because ENERGYCFG's soc field is verified against it and nothing else.
+            //
+            // INT16 AND SIGN-EXTENDED, which is why this is a memcpy into an int16_t and
+            // not a UINT16 read: the ICD says "Do not decode TEMP, IBAT or GAGE as
+            // UINT16".  The ECU draft's 0-1000 range notation means raw 0-1000 for
+            // physical 0-100 %, not 0-1000 %.
+            //
+            // The decode runs on BOTH generations - it is two bytes of an existing frame
+            // and nothing about it is ECU-specific - but the value leaves the FC only in
+            // TM61, which exists only on a confirmed ECU.  No existing record changes.
+            memcpy(&int16_temp, &can_rxframe.data[6], 2);
+            _batsts_gage      = int16_temp;
+            _batsts_gage_ms   = AP_HAL::millis();
+            _batsts_gage_seen = true;
+#endif
+
             _handleFrame_cnt++;
 
             break;
@@ -485,6 +523,13 @@ bool AP_PMUCAN::handle_frame(const AP_HAL::CANFrame& can_rxframe)
             // Parse Throtle Position(PCL)
             memcpy(&int8_temp, &can_rxframe.data[7], 1);
             PMU_Status.Throttle_Position_Report = int8_temp;
+
+#if AP_PMUCAN_ECU_ENABLED
+            // PMU-005a stage 4 : ENERGYCFG's fuel readback is GAS, which is the field
+            // above.  A readback only proves anything if it arrived AFTER the command,
+            // so the arrival time is kept beside it.
+            _engsts_ms = AP_HAL::millis();
+#endif
 
             _handleFrame_cnt++;
 

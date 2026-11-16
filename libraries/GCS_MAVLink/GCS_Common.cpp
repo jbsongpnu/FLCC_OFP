@@ -69,6 +69,7 @@
 #include <AP_Landing/AP_Landing_config.h>
 #include <AP_Generator/AP_Generator_Loweheiser.h>
 #include <AP_Q30/AP_Q30_config.h>      // PNU-ISSUE(D13) : AP_Q30_ENABLED
+#include <AP_PMUCAN/AP_PMUCAN_config.h>  // PMU-005a stage 4 : AP_PMUCAN_ECU_ENABLED
 
 #include "MissionItemProtocol_Waypoints.h"
 #include "MissionItemProtocol_Rally.h"
@@ -1214,6 +1215,10 @@ ap_message GCS_MAVLINK::mavlink_id_to_ap_message_id(const uint32_t mavlink_id) c
         { MAVLINK_MSG_ID_SYS_ICD_FLCC_GCS_OBJECT_AVOIDANCE_STATUS, MSG_OBJECT_AVOIDANCE_STATUS},
 #endif
         { MAVLINK_MSG_ID_SYS_ICD_FLCC_GCS_SAR_STATUS, MSG_SAR_STATUS},
+#if AP_PMUCAN_ECU_ENABLED
+        { MAVLINK_MSG_ID_SYS_ICD_FLCC_GCS_ECU_MODE_STATUS, MSG_ECU_MODE_STATUS},
+        { MAVLINK_MSG_ID_SYS_ICD_FLCC_GCS_ECU_ENERGY_STATUS, MSG_ECU_ENERGY_STATUS},
+#endif
     };
 
     for (uint8_t i=0; i<ARRAY_SIZE(map); i++) {
@@ -6854,6 +6859,18 @@ bool GCS_MAVLINK::try_send_message(const enum ap_message id)
         CHECK_PAYLOAD_SIZE(SYS_ICD_FLCC_GCS_SAR_STATUS);
         send_message_flcc_gcs_sar_status();
         break;
+
+#if AP_PMUCAN_ECU_ENABLED
+    case MSG_ECU_MODE_STATUS:
+        CHECK_PAYLOAD_SIZE(SYS_ICD_FLCC_GCS_ECU_MODE_STATUS);
+        send_message_flcc_gcs_ecu_mode_status();
+        break;
+
+    case MSG_ECU_ENERGY_STATUS:
+        CHECK_PAYLOAD_SIZE(SYS_ICD_FLCC_GCS_ECU_ENERGY_STATUS);
+        send_message_flcc_gcs_ecu_energy_status();
+        break;
+#endif
 
 #if HAL_PROXIMITY_ENABLED && AP_AVOIDANCE_ENABLED
     case MSG_OBJECT_AVOIDANCE_STATUS:

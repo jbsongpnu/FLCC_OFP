@@ -123,5 +123,7 @@ enum ap_message : uint8_t {
 	MSG_PMU_CTRL_ECHO,              // PNU : Mavlink Message to send PMU_CMD_EGHO
     MSG_OBJECT_AVOIDANCE_STATUS,
     MSG_SAR_STATUS,                 // PNU : Mavlink Message to send TM50 SAR_STATUS
+    MSG_ECU_MODE_STATUS,            // PNU : Mavlink Message to send TM60 ECU_MODE_STATUS
+    MSG_ECU_ENERGY_STATUS,          // PNU : Mavlink Message to send TM61 ECU_ENERGY_STATUS
     MSG_LAST // MSG_LAST must be the last entry in this enum
 };

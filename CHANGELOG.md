@@ -21,6 +21,79 @@ A feature exercised only in SITL is **not** hardware-verified. Entries say so ex
 
 ---
 
+## Firmware, 2026-11-16 - TM60 and TM61, the ECU status messages on the KGCS link - PMU-005a stage 4 (no version bump)
+
+Stage 3 decoded MODESTS and ENERGYSTS into the flight log.  This puts them on the link, as
+two new PNU-KAL messages, **without changing one byte of what a legacy aircraft transmits**.
+
+| | TM60 | TM61 |
+|---|---|---|
+| Name | `SYS_ICD_FLCC_GCS_ECU_MODE_STATUS` | `SYS_ICD_FLCC_GCS_ECU_ENERGY_STATUS` |
+| Id | **51060** | **51061** |
+| Source | MODESTS `0x10000150` | ENERGYSTS `0x10000160`, plus `BATSTS.GAGE` |
+| Payload | 12 B | 11 B base + 2 B extensions = 13 B |
+| CRC_EXTRA | **0** | **115** |
+| Rate | 10 Hz, from `send2gcs()` | 1 Hz, from the existing state-report branch |
+
+**Raw, field for field.**  The ICD requires undefined `system_state`, `operation_mode`,
+`ctrl_mode`, `ems_mode` and `start_gate` codes to be reported as received and never mapped
+onto the nearest defined state, and `endurance`'s `0xFFFE` / `0xFFFF` sentinels override
+their own scale - so nothing is converted in the FC and KGCS applies the scales.  This is
+also the house style: TM1 and TM50 carry raw CAN integers with the factor in the field
+description.
+
+**The compatibility gate is `protocol_raw()`, deliberately not `protocol()`.**  The CAN
+fallback is untouched - a device that has not answered VERSTS is still polled as an ECU -
+but a MAVLink message is only transmitted once VERSTS has POSITIVELY confirmed software
+2.00 or higher.  An old KGCS reports an error on an id it does not know; a CAN poll to a
+device that ignores it costs nothing.  The flag is re-checked in the sender as well as at
+the producer, because a late VERSTS switches the generation live and `send_message()` only
+queues.
+
+**`BATSTS.GAGE` is decoded for the first time.**  Bytes 6-7 have arrived at 10 Hz since the
+beginning and been thrown away - "Battery GAGE - Not Used" - because no PNU-KAL message
+carried a state of charge.  It is INT16 at 0.1 %/count and sign-extended, as the ICD
+requires.  **No existing record gained a column for it**: it reaches KGCS only through
+TM61, which exists only on a confirmed ECU, and stage 5 needs it because `ENERGYCFG.soc` is
+verified against `GAGE` and nothing else.
+
+**`Cfg_Result` and `Cfg_Attempts` are MAVLink2 extension fields**, so they sit outside
+TM61's CRC_EXTRA.  Stage 4 leaves them at `NONE` / 0; stage 5 fills them.  A KGCS built
+against stage 4 therefore cannot be invalidated by stage 5, and the generated C table
+proves the mechanism - `{51061, 115, 11, 13}`, min length 11 and max 13.
+
+| What | Result |
+|---|---|
+| **Build** | SITL, CubeOrangePlus (**1736444 B** text, +648 over stage 3), and SITL with `AP_PMUCAN_ECU_ENABLED=0` - the whole ECU feature is **2464 B** of SITL text and 32 B of BSS |
+| **Build** | MAVLink generation completes for C (waf) and for Python (`mavgen`), 305 messages |
+| **Unit test** | existing CRC_EXTRA re-derived before and after from generated bindings: **303 messages, zero changed, zero removed, two added**.  TC50 231 and TM50 7 as documented |
+| **Unit test** | 10 CubeMars + 12 SAR gtests, 124 Python device tests |
+| **SITL** | **ECU run**: TM60 291 records in 30 s (median interval **100.9 ms**), TM61 30 records (median **1012.0 ms**) |
+| **SITL** | TM60 decoded `SSt 3, OMd 5, CMd 6, Alrt 0, EMd 3, Gate 0, IFl 0, RPMT 4300` - the ICD's own MODESTS example, field for field, on every one of the 291 |
+| **SITL** | TM61 decoded `Tank 800, Batt 220, Endr 7200, Battery_SOC 1000` - the ICD's ENERGYSTS example plus the fake's 100.0 % GAGE |
+| **SITL** | `Data_Valid` **3** on TM60 and **7** on TM61 throughout; `Cfg_Result` 0, `Cfg_Attempts` 0 |
+| **SITL** | **legacy run**: TM60 and TM61 **0 records each**.  `ECUC.Proto` 1, `RtrTx` frozen at 2 - the two boot frames - and no `ECUM`/`ECUE` written |
+| **SITL** | **unconfirmed fallback run** (`--pmu-ecu --pmu-no-versts`): TM60 and TM61 **0 records each**, while the CAN side kept decoding - `ECUC.Proto` **0**, `ECUM` x347, `ECUE` x35.  That is the approved Case D in one log |
+| **SITL** | TM1 and TM3 at 9.68-9.69 Hz with ECU polling and 9.63 Hz without - TM60 shares their branch and displaces neither.  TM2 and TM5 9.96-10.01 Hz, TM50 4.98-5.00 Hz in all three runs |
+| **SITL** | record schemas byte-compared against the legacy run: `TM11`, `TM12`, `TM13`, `TM3`, `PMUC`, `SARS`, `ECUC` identical, 346 records each where applicable |
+| **SITL** | gimbal 3262/3261/3261, 3248 x3 and 3267 x3 feedback frames per axis across the three runs; SAR heartbeats in all three |
+| **Lint** | `Tools/scripts/run_astyle.py --dry-run` |
+
+**Measured and worth knowing.**  `Mode_Age` settles at **77-81 ms** and `Energy_Age` at
+**956-982 ms**.  Both are honest: MODESTS is polled on phase 1 and TM60 published on phase 0
+of the next window, and ENERGYSTS is polled on phase 3 of a 100-tick window published on
+phase 0.  That is why TM61's freshness threshold is **2500 ms** - a 1000 ms threshold would
+have flickered.  Publishing TM61 a few ticks after its own poll would cut `Energy_Age` to
+about 20 ms at the same rate; not done, because it was not in the approved design.
+
+**Limitations.**  Every ECU number still comes from a fake built from the ICD's examples, so
+the decode is verified against the document and not against a device.  MODESTS carries no
+layout version and is still under development.  `TM60`'s CRC_EXTRA is **0** - legal, and
+ArduPilot looks messages up by id, but a tool that treats a zero from
+`mavlink_get_crc_extra()` as "unknown message" would mis-handle it.
+
+---
+
 ## Firmware, 2026-11-13 - MODESTS and ENERGYSTS, the two ECU-only messages - PMU-005a stage 3 (no version bump)
 
 The first stage that adds a message rather than reinterpreting one.  `AP_PMUCAN_ECU`

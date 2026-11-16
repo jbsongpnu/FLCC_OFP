@@ -486,12 +486,13 @@ generations, in **two compatibility classes keyed on `VERSTS`**: below 2.0 is le
 legacy behaviour, 2.0 or higher enables the new set, and a `VERSTS` that cannot be obtained or
 decoded counts as below 2.0.
 
-**Two of the three are implemented as of 2026-11-13.** `PMU-005a` stages 1-3 added the VERSTS
-generation selection, the HOURCNT width branch and `AP_PMUCAN_ECU`, which polls and decodes
-`MODESTS 0x10000150` and `ENERGYSTS 0x10000160` into the `ECUM`/`ECUE`/`ECUC` records.
-`ENERGYCFG 0x10000050` is still unimplemented - it is stage 5, and stage 5 needs approval. None
-of it has met an ECU: every result is against a fake built from this document. This issue exists
-so the decisions behind the ICD are not re-litigated from memory.
+**Two of the three are implemented as of 2026-11-13, and reach KGCS as of 2026-11-16.**
+`PMU-005a` stages 1-3 added the VERSTS generation selection, the HOURCNT width branch and
+`AP_PMUCAN_ECU`, which polls and decodes `MODESTS 0x10000150` and `ENERGYSTS 0x10000160` into the
+`ECUM`/`ECUE`/`ECUC` records; stage 4 put both on the link as `TM60 51060` and `TM61 51061`.
+`ENERGYCFG 0x10000050` is stage 5. None of it has met an ECU: every result is against a fake
+built from this document. This issue exists so the decisions behind the ICD are not re-litigated
+from memory.
 
 **The one thing worth knowing for the FC.** The ECU draft asked for `ENGONOFF` Stop to be repeated
 every 500 ms until confirmed; that was **not adopted** - Start and Stop are each sent once when the
@@ -538,8 +539,8 @@ per-stage record once a stage lands.
 | **1** | VERSTS-based protocol identification in `AP_PMUCAN`: `UNKNOWN` / `LEGACY_PMU` / `ECU_V2` | **DONE 2026-11-13** |
 | **2** | `AUX2STS` HOURCNT width by generation - UINT24 legacy, UINT32 ECU. One branch, no schema change | **DONE 2026-11-13**, bench-verified |
 | **3** | `AP_PMUCAN_ECU.{h,cpp}`: MODESTS at 10 Hz, ENERGYSTS at 1 Hz, on the free scheduling phases, active only in `ECU_V2` | **DONE 2026-11-13** |
-| **4** | MAVLink telemetry for ECU status - **design proposal only, needs approval before implementation** | blocked on approval |
-| **5** | MAVLink telecommand for `ENERGYCFG` - **design proposal only, needs approval before implementation** | blocked on approval |
+| **4** | MAVLink telemetry for ECU status - `TM60 51060` MODESTS at 10 Hz, `TM61 51061` ENERGYSTS at 1 Hz, both suppressed unless VERSTS confirms ECU 2.00+ | **DONE 2026-11-16** |
+| **5** | MAVLink telecommand for `ENERGYCFG` - `TC60 50060` | blocked on approval |
 
 **What stage 3 added, in one place.** `libraries/AP_PMUCAN/AP_PMUCAN_ECU.{h,cpp}` behind
 `AP_PMUCAN_ECU_ENABLED` in a new `AP_PMUCAN_config.h`; polls on phases 1 and 3 of the
@@ -548,6 +549,37 @@ per-stage record once a stage lands.
 on both generations). The ECU polls deliberately bypass `pmucan_rtr()` and the ECU
 replies deliberately do not feed `_pmu_frames_seen`, so PMUC's counters and the health
 bucket keep the meanings they had. No FC logic reads any decoded ECU field.
+
+**What stage 4 added, in one place.** Two messages in `Forced Submodule File/pnu_kal.xml` -
+`TM60 51060 SYS_ICD_FLCC_GCS_ECU_MODE_STATUS` (12 B, 10 Hz) and `TM61 51061
+SYS_ICD_FLCC_GCS_ECU_ENERGY_STATUS` (11 B base + 2 B of MAVLink2 extensions, 1 Hz) - produced by
+`AP_PMUCAN_ECU::publish_mode_tm()` / `publish_energy_tm()` on the CAN thread and sent by
+`GCS_PNU.cpp`, the same producer/sender split TM1 and TM50 use. `BATSTS.GAGE` is decoded for the
+first time, for `TM61.Battery_SOC` and for stage 5's SOC readback; no existing record gains a
+column for it.
+
+**The compatibility gate is `protocol_raw()`, not `protocol()`.** The CAN fallback is unchanged -
+a device that has not answered VERSTS is still polled as an ECU - but MAVLink requires VERSTS to
+have POSITIVELY confirmed 2.00 or higher, so a legacy PMU and an unconfirmed fallback both emit
+nothing new. An old KGCS reports an error on an id it does not know; a CAN poll to a device that
+ignores it costs nothing. That asymmetry is deliberate and approved.
+
+**The ID block is 60.** `TC 50060` / `TM 51060` / `TM 51061`, following the SAR block's "+50"
+precedent rather than claiming single-digit ICD numbers. Verified clear of `pnu_kal.xml`,
+`common.xml`, `ardupilotmega.xml` and every file it includes - `csAirLink.xml`'s `AIRLINK_AUTH`
+at 52000/52001 is the nearest neighbour, and `cubepilot.xml` (50001-50005) is not staged.
+**Every existing message's CRC_EXTRA is unchanged**, re-derived from the generated bindings before
+and after: TC50 231 and TM50 7 among them. `TM60`'s own CRC_EXTRA is **0**, which is a legal value
+- the C parser looks messages up by id in a sorted table and 0 is just a number there - but a tool
+that calls `mavlink_get_crc_extra()` and treats 0 as "unknown message" would get it wrong.
+
+**`Mode_Age` is about 80 ms and `Energy_Age` about 970 ms in steady state, and both are correct.**
+MODESTS is polled on phase 1 of each 10-tick window and TM60 is published on phase 0 of the next,
+so the data is one window old; ENERGYSTS is polled on phase 3 of each 100-tick window and TM61 is
+published on phase 0, so it is nearly a whole window old. That is why TM61's freshness threshold
+is **2500 ms**: a 1000 ms threshold would have flickered on ordinary jitter. Publishing TM61 a few
+ticks after its poll instead would cut `Energy_Age` to about 20 ms without changing the rate - not
+done, because it was not part of the approved design.
 
 **Architecture: hybrid, decided rather than assumed.** One `AP_PMUCAN` backend with a
 latched protocol generation, one version branch in the AUX2STS decode, and a separate
@@ -632,7 +664,12 @@ Decided 2026-11-13, no further stage 2 modification.
 - **CLOSED in stage 3 - the generation is now in the flight log.** `ECUC`'s `Proto` column
   carries the raw latched selection and the record is written on both generations, so a
   flight with no GCS attached keeps the evidence that the statustext used to carry alone.
-  Stage 4 asks the same question for MAVLink and is still open.
+  **Stage 4 answered the MAVLink half by deciding not to answer it** (approved Q3): a
+  legacy or unconfirmed aircraft transmits no new message at all, so the generation
+  reaches KGCS only as the existing boot statustext. The durable record stays `ECUC`.
+  TM3's `Reserved` uint32 remains unwritten and is the obvious carrier if that is ever
+  wanted - it would cost no CRC_EXTRA change, but it would put a non-zero value on a
+  legacy link for the first time.
 - **MEASURED in stage 3, still a bench item - ECU-only RTR polls reach an unidentified
   device** during the fallback window. In SITL it is **exactly two frames at boot**, one
   MODESTS and one ENERGYSTS, before VERSTS answers and selects legacy; the legacy fake
@@ -643,6 +680,10 @@ Decided 2026-11-13, no further stage 2 modification.
 - **Stage 3 decoded MODESTS against a draft that is still under development.** The frame
   carries no layout version and VERSTS identifies software, not frame layout, so the field
   order must be re-validated against a real capture before the decoder is trusted.
+
+- **`TM60`'s CRC_EXTRA is 0.** Legal, and ArduPilot's own parser is unaffected, but KGCS
+  must look the message up by id rather than testing `mavlink_get_crc_extra()` against
+  zero. Renaming a field to avoid it was rejected: the field names are the approved ICD.
 
 **Not in scope at any stage:** FC-side interlocks built on MODESTS or `initial_fail`, changes
 to TM11/TM12/TM13/TM3/TM1/TC1, changes to PMUC's columns or meanings, changes to the health

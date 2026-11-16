@@ -24,7 +24,16 @@
 
 #include <AP_HAL/AP_HAL.h>
 #include <AP_Logger/AP_Logger.h>
+#include <GCS_MAVLink/GCS.h>
 #include <string.h>
+
+
+// PMU-005a stage 4 : the two ECU telemetry payloads and their compatibility gate.
+// Zero-initialised, and ECU_TM_Enabled false, so an aircraft that never identifies an
+// ECU never queues either message - which is the whole of the KGCS compatibility rule.
+mavlink_sys_icd_flcc_gcs_ecu_mode_status_t    ECU_Mode_Status   = {0};
+mavlink_sys_icd_flcc_gcs_ecu_energy_status_t  ECU_Energy_Status = {0};
+bool                                          ECU_TM_Enabled    = false;
 
 
 // -------------------------------------------------------------------------
@@ -44,6 +53,17 @@
 // -------------------------------------------------------------------------
 void AP_PMUCAN_ECU::update(uint32_t tick)
 {
+    // PMU-005a stage 4 : TWO DIFFERENT GENERATION TESTS, ON PURPOSE.
+    //
+    // The CAN polls below use protocol(), which applies the missing-VERSTS fallback, and
+    // that behaviour is unchanged from stage 3 - a device that has not identified itself
+    // is still polled as an ECU.
+    //
+    // MAVLink uses protocol_raw(), which does not.  An old KGCS reports an error on an
+    // id it does not know, so a message must not be transmitted on a guess; a CAN poll to
+    // a device that ignores it costs nothing.  That asymmetry is the approved policy.
+    ECU_TM_Enabled = (_pmu.protocol_raw() == PROTO_ECU_V2);
+
     if (_pmu.protocol() != PROTO_ECU_V2) {
         return;
     }
@@ -151,6 +171,7 @@ bool AP_PMUCAN_ECU::handle_frame(const AP_HAL::CANFrame &frame)
             _mode.rpm_target     = uint16_temp;
 
             _modests_rx++;
+            _last_modests_ms = AP_HAL::millis();
             break;
 
         case ECU_ENERGYSTS:
@@ -170,6 +191,7 @@ bool AP_PMUCAN_ECU::handle_frame(const AP_HAL::CANFrame &frame)
             // bytes 6-7 are reserved and always zero; nothing reads them
 
             _energysts_rx++;
+            _last_energysts_ms = AP_HAL::millis();
             break;
 
         default:
@@ -177,6 +199,98 @@ bool AP_PMUCAN_ECU::handle_frame(const AP_HAL::CANFrame &frame)
     }
 
     return true;
+}
+
+
+// -------------------------------------------------------------------------
+// age_ms : how long ago, saturating
+// -------------------------------------------------------------------------
+uint16_t AP_PMUCAN_ECU::age_ms(uint32_t now_ms, uint32_t stamp_ms)
+{
+    const uint32_t age = now_ms - stamp_ms;
+    return (age > 65535U) ? 65535U : (uint16_t)age;
+}
+
+
+// -------------------------------------------------------------------------
+// publish_mode_tm : TM60, MODESTS as received
+// -------------------------------------------------------------------------
+// RAW, FIELD FOR FIELD.  The ICD requires undefined codes to be reported as received and
+// not mapped onto the nearest defined state, so there is nothing to convert and nothing
+// to interpret here - KGCS applies the scales and the code tables.
+//
+// STALE DATA HOLDS ITS LAST VALUE.  Zero-filling would be worse than useless: zero is a
+// value the ECU itself transmits, and the ICD's own rule is that it means "unknown", so a
+// zeroed field and a genuine one are indistinguishable.  Age and Data_Valid carry the
+// difference instead, and before the first reply the age is reported as its maximum
+// rather than as zero - which would otherwise read as perfectly fresh.
+// -------------------------------------------------------------------------
+void AP_PMUCAN_ECU::publish_mode_tm(void)
+{
+    if (!ECU_TM_Enabled) {
+        return;
+    }
+
+    const bool     seen = mode_status_valid();
+    const uint16_t age  = seen ? age_ms(AP_HAL::millis(), _last_modests_ms) : 65535U;
+
+    ECU_Mode_Status.RPM_Target     = _mode.rpm_target;
+    ECU_Mode_Status.Mode_Age       = age;
+    ECU_Mode_Status.System_State   = _mode.system_state;
+    ECU_Mode_Status.Operation_Mode = _mode.operation_mode;
+    ECU_Mode_Status.Ctrl_Mode      = _mode.ctrl_mode;
+    ECU_Mode_Status.Alert_Level    = _mode.alert_level;
+    ECU_Mode_Status.EMS_Mode       = _mode.ems_mode;
+    ECU_Mode_Status.Start_Gate     = _mode.start_gate;
+    ECU_Mode_Status.Initial_Fail   = _mode.initial_fail;
+    ECU_Mode_Status.Data_Valid     = (seen ? ECU_VALID_SEEN : 0U) |
+                                     ((seen && (age <= MODESTS_FRESH_MS)) ? ECU_VALID_FRESH : 0U);
+
+    gcs().send_message(MSG_ECU_MODE_STATUS);
+}
+
+
+// -------------------------------------------------------------------------
+// publish_energy_tm : TM61, ENERGYSTS as received, plus the SOC readback
+// -------------------------------------------------------------------------
+// endurance keeps its sentinels.  0xFFFF is "unknown - nothing is being burned" and
+// 0xFFFE is "65,534 s or more"; both override the scale, so converting either into a
+// duration here would destroy the distinction the ICD spends a paragraph on.
+//
+// Battery_SOC comes from BATSTS GAGE, which is a LEGACY status message decoded on both
+// generations.  It is carried here rather than added to TM1 because TM1 is the message an
+// existing KGCS parses, and the approved rule is to add messages rather than extend one.
+// Its own validity bit is separate from ENERGYSTS's: BATSTS arrives at 10 Hz and
+// ENERGYSTS at 1 Hz, so one can be fresh while the other is not.
+//
+// Cfg_Result and Cfg_Attempts are the two MAVLink2 extension fields.  Stage 4 leaves them
+// at NONE / 0 - stage 5 is what moves them - and because they are extensions they are
+// outside this message's CRC_EXTRA, so stage 5 cannot invalidate a KGCS built on stage 4.
+// -------------------------------------------------------------------------
+void AP_PMUCAN_ECU::publish_energy_tm(void)
+{
+    if (!ECU_TM_Enabled) {
+        return;
+    }
+
+    const uint32_t now_ms = AP_HAL::millis();
+    const bool     seen   = energy_status_valid();
+    const uint16_t age    = seen ? age_ms(now_ms, _last_energysts_ms) : 65535U;
+
+    const bool soc_seen  = _pmu.batsts_gage_seen();
+    const bool soc_fresh = soc_seen &&
+                           ((now_ms - _pmu.batsts_gage_ms()) <= GAGE_FRESH_MS);
+
+    ECU_Energy_Status.Tank        = _energy.tank;
+    ECU_Energy_Status.Battery     = _energy.battery;
+    ECU_Energy_Status.Endurance   = _energy.endurance;
+    ECU_Energy_Status.Energy_Age  = age;
+    ECU_Energy_Status.Battery_SOC = soc_fresh ? _pmu.batsts_gage() : 0;
+    ECU_Energy_Status.Data_Valid  = (seen ? ECU_VALID_SEEN : 0U) |
+                                    ((seen && (age <= ENERGYSTS_FRESH_MS)) ? ECU_VALID_FRESH : 0U) |
+                                    (soc_fresh ? ECU_VALID_SOC : 0U);
+
+    gcs().send_message(MSG_ECU_ENERGY_STATUS);
 }
 
 

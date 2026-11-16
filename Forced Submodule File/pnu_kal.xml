@@ -129,6 +129,47 @@
     <field type="uint8_t" name="SAR_STATUS">SAR observation status: 0 Disconnected, 1 Ready, 2 Stopped, 3 Started, 4 SAR Not Responding after the FC 2-second response window.</field>
     <field type="uint32_t" name="Live_Counter">FC-maintained valid SAR Heart_Beat reception count. Increment by one per valid CAN 0x510, not per TM transmission. Reset on FC boot during the common single-battery power reset; no persistence or separate SAR reboot detection. No terminal-count handling required in the operating lifetime.</field>
   </message>
+
+<!-- ====================================================== -->
+<!-- ECU V2.0 - TELEMETRY (TM)                              -->
+<!-- ====================================================== -->
+
+  <!-- PMU-005a stage 4.  MODESTS (CAN 0x10000150) and ENERGYSTS (CAN 0x10000160),
+       forwarded RAW.  "PMU CAN Comm Protocol.md" requires undefined codes to be reported
+       as received rather than mapped onto the nearest defined state, and the endurance
+       sentinels override their own scale, so neither message can be converted to physical
+       units here - KGCS applies the scale factors quoted below.
+
+       BOTH ARE TRANSMITTED ONLY WHEN VERSTS HAS CONFIRMED ECU SOFTWARE 2.00 OR HIGHER.
+       A legacy PMU emits neither, and neither does the unconfirmed ECU_V2 CAN fallback;
+       that is what keeps an existing KGCS compatible on a legacy aircraft.  See
+       README PMU-005a. -->
+  <message id="51060" name="SYS_ICD_FLCC_GCS_ECU_MODE_STATUS">
+  <description>TM60 (ECU). ECU operating modes, RPM target and start permission, as received. 10 Hz. Informational only: the ECU enforces its own modes and start permissions.</description>
+    <field type="uint16_t" name="RPM_Target" units="rpm">RPM_Target[SF:1, MIN:0, MAX:65535]. Governor target; zero when RPM is not under governor control and not proof of engine stop.</field>
+    <field type="uint16_t" name="Mode_Age" units="ms">Mode_Age[SF:1, MIN:0, MAX:65535]. Time since the last MODESTS reply, saturating at 65535.</field>
+    <field type="uint8_t" name="System_State" units="N/A">System_State[SF:N/A, MIN:0, MAX:15]. 1 INITIALIZATION, 2 READY, 3 ENGINE_RUN, 4 USER_SHELL; 0 and undefined codes are unknown.</field>
+    <field type="uint8_t" name="Operation_Mode" units="N/A">Operation_Mode[SF:N/A, MIN:0, MAX:15]. 1 DO_NOTHING, 3 STANDBY, 4 STARTUP, 5 RUNNING, 6 STOP; 0, 2 and undefined codes are unknown.</field>
+    <field type="uint8_t" name="Ctrl_Mode" units="N/A">Ctrl_Mode[SF:N/A, MIN:0, MAX:255]. 1 NONE through 10 FAIL_VOLT_SENSOR; undefined codes are unknown.</field>
+    <field type="uint8_t" name="Alert_Level" units="N/A">Alert_Level[SF:N/A, MIN:0, MAX:255]. 0 NONE, 1 ADVISORY, 2 IMMEDIATE.</field>
+    <field type="uint8_t" name="EMS_Mode" units="N/A">EMS_Mode[SF:N/A, MIN:0, MAX:255]. 0 INIT through 9 FORCED_CHARGE; undefined codes are unknown.</field>
+    <field type="uint8_t" name="Start_Gate" units="N/A">Start_Gate[SF:N/A, MIN:0, MAX:255]. Result of the last start attempt; 0 also means no attempt since power-on and is not proof of running.</field>
+    <field type="uint8_t" name="Initial_Fail" units="N/A">Initial_Fail[SF:N/A, MIN:0, MAX:255]. Bitmask 0x01 HEADER_BAD, 0x02 EEPROM_LAYOUT, 0x04 CALIB_MISSING, 0x20 FUEL_LEVEL. Display only; the ECU performs this check itself.</field>
+    <field type="uint8_t" name="Data_Valid" units="N/A">Data_Valid[SF:N/A, MIN:0, MAX:255]. Bit0 at least one MODESTS decoded, Bit1 reception fresh. Fields hold their last decoded values when stale.</field>
+  </message>
+
+  <message id="51061" name="SYS_ICD_FLCC_GCS_ECU_ENERGY_STATUS">
+  <description>TM61 (ECU). ECU energy configuration and endurance, as received, plus the ENERGYCFG transaction result. 1 Hz.</description>
+    <field type="uint16_t" name="Tank" units="l">Tank[SF:0.01, MIN:0, MAX:65535]. Configured tank capacity.</field>
+    <field type="uint16_t" name="Battery" units="Ah">Battery[SF:0.1, MIN:0, MAX:65535]. Configured battery capacity.</field>
+    <field type="uint16_t" name="Endurance" units="s">Endurance[SF:1, MIN:0, MAX:65535]. 65534 means 65534 s or more and 65535 means unknown; both sentinels override the scale and neither may be displayed as a duration or as zero.</field>
+    <field type="uint16_t" name="Energy_Age" units="ms">Energy_Age[SF:1, MIN:0, MAX:65535]. Time since the last ENERGYSTS reply, saturating at 65535.</field>
+    <field type="int16_t" name="Battery_SOC" units="%">Battery_SOC[SF:0.1, MIN:-32768, MAX:32767]. Battery state of charge from BATSTS GAGE; valid only while Data_Valid bit2 is set.</field>
+    <field type="uint8_t" name="Data_Valid" units="N/A">Data_Valid[SF:N/A, MIN:0, MAX:255]. Bit0 at least one ENERGYSTS decoded, Bit1 ENERGYSTS fresh, Bit2 Battery_SOC available and fresh.</field>
+    <extensions/>
+    <field type="uint8_t" name="Cfg_Result" units="N/A">Cfg_Result[SF:N/A, MIN:0, MAX:255]. Last ENERGYCFG outcome: 0 NONE, 1 IN_PROGRESS, 2 OK, 3 MISMATCH_AFTER_3, 4 CANCELLED_MODE_CHANGE, 5 REJECTED_RANGE, 6 REJECTED_MODE, 7 REJECTED_NOT_ECU, 8 TX_FAIL. OK means the FC verified the readback, not that the ECU acknowledged anything.</field>
+    <field type="uint8_t" name="Cfg_Attempts" units="N/A">Cfg_Attempts[SF:1, MIN:0, MAX:3]. ENERGYCFG frames actually submitted to the bus in that transaction.</field>
+  </message>
   <!-- PNU-KAL -->
   </messages>
 </mavlink>
