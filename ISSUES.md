@@ -715,6 +715,17 @@ Decided 2026-11-13, no further stage 2 modification.
   carries no layout version and VERSTS identifies software, not frame layout, so the field
   order must be re-validated against a real capture before the decoder is trusted.
 
+- **The `GAS` fuel readback rule is documented, but the ECU's arithmetic behind it is
+  not.** The ICD states the tolerance twice and identically - `floor(100 * fuel / tank)`,
+  or one percentage point less "due to floating-point rounding" - and the FC implements
+  exactly that, accepting the floor value or one below it and never one above. What is
+  not documented is *why* one below can occur, so the real device's rounding must be
+  confirmed on the bench before the tolerance is trusted in either direction.
+- **`ENGSTS.GAS` is an estimate, not a fuel sensor.** The ICD calls it "a 0-100% estimate
+  derived from RPM/load and its configured tank/fuel inventory". It is usable as an
+  ENERGYCFG readback only because the ICD's own DO_NOTHING/STANDBY gate means nothing is
+  being consumed while the comparison is taken. Confirm on the bench that `GAS` settles to
+  the configured inventory, and how quickly, with the engine stopped.
 - **`ENERGYCFG` has never been sent to an ECU.** The fake applies it and answers with
   it, which is what makes the readback comparison mean anything, but the real device's
   acceptance rules, its retained fuel quantity and its `GAS` rounding are all unverified.

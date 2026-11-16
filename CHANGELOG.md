@@ -53,6 +53,25 @@ absorbs exactly one while bounding an unverifiable transaction at 3 x 3.5 s.
 deadline.  `GAS` is an integer percentage - `floor(100 * fuel / tank)` or one point less -
 and is never reported as a 0.01 L verification.
 
+**The fuel tolerance is the ICD's own rule, not an assumption.**  "PMU CAN Comm Protocol.md"
+states it twice and identically: the ENERGYCFG field table says "Verify through ENGSTS.GAS
+using `floor(100 * fuel / tank)` or one percentage point less due to floating-point
+rounding", and acceptance rule 7 says `GAS` "is an integer percentage of tank capacity
+rounded down and may read one additional percentage point lower".  The implementation is
+exactly that - integer `(100 * fuel) / tank`, accepting that value or one less, and NOT one
+more, which the ICD does not allow.  What the ICD does **not** document is the ECU's own
+arithmetic behind the "one percentage point lower" allowance, and it separately describes
+`GAS` as "a 0-100% estimate derived from RPM/load and its configured tank/fuel inventory",
+not a sensor reading.  Both are recorded as bench items under `PMU-005a`; the second is
+harmless during a transaction only because the ICD's own DO_NOTHING/STANDBY gate means
+nothing is being consumed while the readback is taken.
+
+**Every verified field waits for its own fresh frame.**  `cfg_readback_ready()` requires,
+per supplied field, that the frame carrying its readback arrived after `tx + 1000 ms`:
+ENERGYSTS for `tank` and `battery`, ENGSTS for `fuel`, BATSTS for `soc`.  Each source also
+has an explicit "has ever arrived" guard, so a never-written timestamp cannot pass a signed
+comparison across a `millis()` wrap.
+
 **It does not touch the engine.**  Step 2c's state, counters and windows are neither read
 nor written, and no Start interlock is built on `MODESTS` or `initial_fail`.  The only
 MODESTS field consulted is `operation_mode`, which is this command's own ICD send
@@ -61,7 +80,7 @@ under development and a real ECU that never answers it must not become unconfigu
 
 | What | Result |
 |---|---|
-| **Build** | SITL **4465462 B** text, CubeOrangePlus **1738620 B** (+2176 over stage 4), and SITL with `AP_PMUCAN_ECU_ENABLED=0` at 4459286 B - stages 3-5 together are **6176 B** of SITL text and **32 B** of BSS |
+| **Build** | SITL **4465526 B** text, CubeOrangePlus **1738660 B** (+2216 over stage 4), and SITL with `AP_PMUCAN_ECU_ENABLED=0` at 4459286 B - stages 3-5 together are **6240 B** of SITL text and **32 B** of BSS |
 | **Unit test** | existing CRC_EXTRA re-derived again after TC60: **303 messages, none changed, none removed, three added**.  `TC60` crc 179 / 8 B, `TM60` crc 0 / 12 B, `TM61` crc 115 / 11-13 B |
 | **Unit test** | 10 CubeMars + 12 SAR gtests, 124 Python device tests |
 | **SITL** | **happy path**: TC60 `(1000, 650, 300, 850)` to an ECU in STANDBY - one frame, verified **1.160 s** later.  `ECUX` shows `Res 1 Att 1` with readbacks `800/220/100/1000`, then `Res 2 Att 1` with `1000/300/65/850`.  `GAS 65 = floor(100 x 650 / 1000)` |
@@ -70,6 +89,8 @@ under development and a real ECU that never answers it must not become unconfigu
 | **SITL** | **range refusal**: `tank = 5` refused, `Cfg_Result 5`, `Cfg_Attempts 0`, nothing clamped, nothing transmitted |
 | **SITL** | **busy**: a second TC60 300 ms into a transaction is refused - `ECU: ENERGYCFG busy (attempt 1), TC60 ignored` - the first completes with ITS OWN payload, and the fake records exactly one ENERGYCFG frame.  `ECUC.CfgBsy` 1 |
 | **SITL** | **mode-change cancellation**: `operation_mode` moved to 5 400 ms after the command; cancelled **104 ms** later with `Cfg_Result 4`, and no further frame sent |
+| **SITL** | **ENGSTS.GAS freshness, isolated**: fuel-only command, device silenced 250 ms later.  The ECU had already answered `GAS 81` - the exactly correct `floor(100 x 650 / 800)`, visible in `ECUX.rGas` from attempt 2 on - and the FC still refused to verify it three times, reporting "no readback".  Attempts **3.501 / 3.505 / 3.501 s** apart, failure **10.507 s** after the command |
+| **SITL** | **BATSTS.GAGE freshness, isolated**: SOC-only command, same shape.  `ECUX.rSOC` reads the commanded **750** from attempt 2 on and verification is still withheld.  Three attempts, `MISMATCH_AFTER_3` |
 | **SITL** | **readback timeout**: the device silenced 185 ms after the command.  Three frames at 3.5 s intervals, then `MISMATCH_AFTER_3` **10.528 s** after the TC60, with the readback values in the message.  `Cfg_Attempts 3` |
 | **SITL** | that same run shows stale handling on the wire: `Data_Valid` 7 -> 3 -> 1 as SOC and then ENERGYSTS go stale, with `Tank` and `Battery` **holding their last decoded values**, never zeroed |
 | **SITL** | **source check**: TC60 from sysid 42 refused with `ECU: TC60 sysid 42 not MAV_GCS_SYSID`; both attempts logged as `ECUT` with `SYS 42`, no `ECUX`, `CfgAcc 0`, and the repeat within 10 s not announced again |
@@ -78,6 +99,7 @@ under development and a real ECU that never answers it must not become unconfigu
 | **SITL** | **step 2c unchanged**: `stop-start` commanded the engine **1.154 s** (legacy) and **1.235 s** (ECU) after the Start burst, inside the 1.15-1.29 s band.  One `PMUE` `START_CMD` each, `Mode 1 OnCnt 10 StopAge 6189/6253 ms` |
 | **SITL** | `PMUC` `CmdTx/RtrTx` **0.800** legacy and **0.801** ECU; TM1/TM3/TM60 all 9.66 Hz, TM2/TM5 9.99 Hz, TM50 5.01 Hz |
 | **SITL** | gimbal 4242/3246/2287 feedback frames per axis across the stage 5 runs, equal on all three axes every time; SAR heartbeats throughout |
+| **SITL** | **transaction traceability**: one run covering accept, busy, two consecutive identical-code refusals, retry and cancellation produces `ECUT` for all six arrivals and `ECUX` for all five transactions - `IN_PROGRESS att=1`, `OK att=1`, `REJECTED_RANGE att=0` twice with their own values, `IN_PROGRESS att=1` then `CANCELLED_MODE_CHANGE att=1` |
 | **Lint** | `Tools/scripts/run_astyle.py --dry-run`, `flake8` on the three changed Python files |
 
 **New records, no changed ones.**  `ECUT` logs every TC60 at ingress with its sender,
@@ -85,7 +107,10 @@ component and channel - including the ones refused for their source, which are t
 somebody will be looking for afterwards.  `ECUX` writes one line per transaction state
 change, carrying both the commanded values and the readbacks, so a failure is diagnosable
 from the log alone and a statustext sent before a ground station attached is not the only
-evidence.  `ECUC` gained `CfgAcc` and `CfgBsy`.  `TM11`, `TM12`, `TM13`, `TM3`, `PMUC`,
+evidence.  It additionally writes one line per ACCEPTED OR REFUSED COMMAND whether or not
+the verdict changed: driven by state change alone, two identical refusals in a row - the
+same wrong value typed twice - would have left one record of two operator actions.
+`ECUC` gained `CfgAcc` and `CfgBsy`.  `TM11`, `TM12`, `TM13`, `TM3`, `PMUC`,
 `PMUE`, `ECUM` and `ECUE` are untouched.
 
 **The fake ECU now applies ENERGYCFG** and answers with it - otherwise the readback

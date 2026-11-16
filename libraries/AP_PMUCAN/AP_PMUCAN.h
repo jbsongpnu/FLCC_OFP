@@ -271,7 +271,13 @@ public:
     // When ENGSTS last arrived.  ENERGYCFG's fuel field is verified through ENGSTS.GAS -
     // PMU_Status.Fuel_Quantity - and a readback is only evidence if the frame carrying it
     // arrived after the command went out, which needs this timestamp.
+    //
+    // engsts_seen() is NOT redundant with a zero timestamp.  millis() is legitimately 0
+    // for one millisecond at boot, and a comparison against a deadline is a signed
+    // difference that behaves correctly across the millis() wrap but NOT against a
+    // never-written zero.  The GAGE pair above has the same guard for the same reason.
     uint32_t engsts_ms(void) const      { return _engsts_ms; }
+    bool     engsts_seen(void) const    { return _engsts_seen; }
 #endif
     /**
      * Returns:
@@ -375,6 +381,7 @@ private:
     uint32_t _batsts_gage_ms;               // when that value arrived
     bool     _batsts_gage_seen;             // false until the first BATSTS is decoded
     uint32_t _engsts_ms;                    // when ENGSTS last arrived
+    bool     _engsts_seen;                  // false until the first ENGSTS is decoded
 #endif
 
     // PNU : leaky-bucket thresholds.  Both counters step by +-1 per health check

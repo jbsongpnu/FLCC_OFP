@@ -275,6 +275,7 @@ private:
 #if HAL_LOGGING_ENABLED
     uint8_t  _cfg_logged_result {255};          // forces the first ECUX record
     uint8_t  _cfg_logged_att    {255};
+    bool     _cfg_log_force     {};             // one record per operator action, always
 #endif
 
 #if HAL_LOGGING_ENABLED

@@ -64,6 +64,7 @@ AP_PMUCAN::AP_PMUCAN(AP_PNU_CAN &frontend) :
     _batsts_gage_ms             = 0;
     _batsts_gage_seen           = false;
     _engsts_ms                  = 0;
+    _engsts_seen                = false;
 #endif
 
 
@@ -528,7 +529,8 @@ bool AP_PMUCAN::handle_frame(const AP_HAL::CANFrame& can_rxframe)
             // PMU-005a stage 4 : ENERGYCFG's fuel readback is GAS, which is the field
             // above.  A readback only proves anything if it arrived AFTER the command,
             // so the arrival time is kept beside it.
-            _engsts_ms = AP_HAL::millis();
+            _engsts_ms   = AP_HAL::millis();
+            _engsts_seen = true;
 #endif
 
             _handleFrame_cnt++;

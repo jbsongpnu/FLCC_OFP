@@ -344,6 +344,15 @@ void AP_PMUCAN_ECU::service_config(void)
         } else {
             const mavlink_sys_icd_gcs_flcc_ecu_energy_cfg_t cfg = gcs().ECU_Cfg;
             uint8_t why = ECU_CFG_NONE;
+#if HAL_LOGGING_ENABLED
+            // EVERY accepted or refused command writes an ECUX line, even when its
+            // verdict repeats the one before it.  cfg_log_state() is otherwise driven by
+            // a CHANGE of result and attempt count, and two identical refusals in a row -
+            // the same value typed twice, the same mode refusal twice - would have left
+            // only one record of two operator actions.
+            _cfg_log_force = true;
+#endif
+
             if (cfg_validate(cfg, now_ms, why)) {
                 cfg_begin(cfg, now_ms);
             } else {
@@ -549,7 +558,8 @@ bool AP_PMUCAN_ECU::cfg_readback_ready(uint32_t deadline_ms) const
         }
     }
     if (_cfg_fuel != ECU_CFG_KEEP) {
-        if ((int32_t)(_pmu.engsts_ms() - deadline_ms) < 0) {
+        if (!_pmu.engsts_seen() ||
+            ((int32_t)(_pmu.engsts_ms() - deadline_ms) < 0)) {
             return false;
         }
     }
@@ -688,9 +698,11 @@ void AP_PMUCAN_ECU::cfg_finish(uint8_t result)
 // -------------------------------------------------------------------------
 void AP_PMUCAN_ECU::cfg_log_state(void)
 {
-    if ((_cfg_result == _cfg_logged_result) && (_cfg_attempts == _cfg_logged_att)) {
+    if (!_cfg_log_force &&
+        (_cfg_result == _cfg_logged_result) && (_cfg_attempts == _cfg_logged_att)) {
         return;
     }
+    _cfg_log_force     = false;
     _cfg_logged_result = _cfg_result;
     _cfg_logged_att    = _cfg_attempts;
 
