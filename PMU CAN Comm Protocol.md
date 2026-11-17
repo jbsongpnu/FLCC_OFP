@@ -25,7 +25,6 @@ new protocol version is released.
 
 Version 2.0 adopts a **reference CAN bit rate of 1.0 Mbps** where Version 1.05 quoted 500 kbps, and adds **ENERGYCFG (0x10000050)**, **MODESTS (0x10000150)**, and **ENERGYSTS (0x10000160)** for ECU software **2.00+**. It also defines ECU-specific behavior for existing commands, status flags and fields: the SOC charging setpoint, start/stop permissions, manual-command expiry, HOURCNT as UINT32, ICMD scaling, DATE encoding, and additional PSTS warnings. The prior five status IDs and five command IDs remain allocated unchanged. **ECU 2.00+ and legacy PMU behavior must be distinguished using VERSTS.** Both generations allow their bit rate to be configured, so the rate belongs to the installed bus and is not a version marker: match the bus before anything else, since at the wrong rate nothing is received at all, then read VERSTS to establish the generation.
 
-
 ## Applicability and compatibility
 
 - **Version 1.05 / Legacy PMU:** Preserve the existing five status messages, five control commands, and the legacy command semantics described below where explicitly identified as legacy. Its status RTR DLC and certain source byte positions were not authoritatively specified in the existing document.
@@ -133,7 +132,7 @@ Do not put command values into a status request payload. Responses have no defin
 | GAS | 8 bits | INT8 | 1.0 | % | Remaining fuel |
 | PCL | 8 bits | INT8 | 1.0 | % | **ECU: throttle setpoint**, not a measured position; legacy: throttle position |
 
-**ECU byte offsets:** TEMP1 0-1, TEMP2 2-3, RPM 4-5, GAS 6, PCL 7. The ECU reports GAS as a 0-100% estimate derived from RPM/load and its configured tank/fuel inventory; GAS is not an independent fuel sensor reading. **The ECU retains its estimated remaining fuel level across power cycles**, saving the level as fuel is consumed and restoring it at boot; send ENERGYCFG.fuel with the measured tank quantity after refueling. ECU PCL is a throttle **setpoint**. The declared wire types remain INT8; the ECU states both values are never negative. For the legacy PMU, out-of-range/sentinel behavior remains unspecified.
+**ECU byte offsets:** TEMP1 0-1, TEMP2 2-3, RPM 4-5, GAS 6, PCL 7. The ECU reports GAS as a 0-100% estimate derived from RPM/load and its configured tank/fuel inventory; GAS is not an independent fuel sensor reading. **GAS = 100% does not by itself mean the tank is full.** While `initial_fail` bit `0x20 FUEL_LEVEL` is set the ECU has no valid fuel quantity and substitutes a full tank, so GAS reads 100% as a placeholder rather than an estimate - see the initial_fail bit masks under MODESTS. A Host reading GAS must qualify it with that bit: with `0x20` set, display the reading as not initialised and never as a confirmed full tank; with `0x20` clear, a GAS of 100% is an ordinary estimate and must be displayed as such. **The ECU retains its estimated remaining fuel level across power cycles**, saving the level as fuel is consumed and restoring it at boot; send ENERGYCFG.fuel with the measured tank quantity after refueling. ECU PCL is a throttle **setpoint**. The declared wire types remain INT8; the ECU states both values are never negative. For the legacy PMU, out-of-range/sentinel behavior remains unspecified.
 
 ### AUX1STS - Power and Control Information
 
@@ -330,7 +329,7 @@ These are synthetic examples of defined integer encodings, not actual captures. 
 
 ## Version 2.0 - ECU-Specific Message Map and Timing
 
-The following rules come from **ECU_CAN_Protocol_r2.pdf, draft for review dated 2026-11-12** and apply to **ECU software 2.00+** only. The original command/status IDs, Little-endian encoding and base field widths (except HOURCNT) are retained. **Reference bit rate:** the ECU draft quotes 1.0 Mbps where Version 1.05 quoted 500 kbps, but both are configurable on the device and the operating rate is a property of the bus (see the CAN settings note above). The ECU accepts the reserved ID blocks 0x10000000-0x100000F0 (commands) and 0x10000100-0x100001F0 (status), on 0x10 boundaries; only the allocated IDs below are defined.
+The following rules come from the revised **ECU_CAN_Protocol_r3.pdf, draft for review dated 2026-11-17** and apply to **ECU software 2.00+** only. The original command/status IDs, Little-endian encoding and base field widths (except HOURCNT) are retained. **Bit rate:** the ECU uses 1.0 Mbps by default. It can be set to 500 kbps; the change works after the next power-up. The operating rate is a property of the bus (see the CAN settings note above). The ECU accepts the reserved ID blocks 0x10000000-0x100000F0 (commands) and 0x10000100-0x100001F0 (status), on 0x10 boundaries; only the allocated IDs below are defined.
 
 | ID (29-bit Extended) | Name | Direction | Frame / DLC | ECU host timing |
 |---|---|---|---|---|
@@ -344,11 +343,37 @@ The following rules come from **ECU_CAN_Protocol_r2.pdf, draft for review dated 
 | 0x10000110 | ENGSTS | ECU -> Host | RTR request / 8-byte response | Poll every 100 ms |
 | 0x10000120 | AUX1STS | ECU -> Host | RTR request / 8-byte response | Poll every 100 ms |
 | 0x10000130 | AUX2STS | ECU -> Host | RTR request / 8-byte response | Poll every 100 ms |
-| 0x10000140 | VERSTS | ECU -> Host | RTR request / 8-byte response | Once after connecting |
+| 0x10000140 | VERSTS | ECU -> Host | RTR request / 8-byte response | Poll every 100 ms (used for compatibility-check) |
 | **0x10000150** | **MODESTS (new)** | ECU -> Host | RTR request / 8-byte response | Poll every 100 ms |
 | **0x10000160** | **ENERGYSTS (new)** | ECU -> Host | RTR request / 8-byte response | Poll every 1 s |
 
-ECU status is **request/response only**; the ECU does not spontaneously broadcast these status frames. No application-layer command acknowledgment is defined. ECU 2.00+ specifically uses **RTR DLC 8**. Legacy five-command payloads remain DLC 4 even though ENERGYCFG is DLC 8. The ECU estimates its worst-case bus load as approximately **13.4 kbit/s** using its documented timing assumptions, which is **1.3% of a 1.0 Mbps bus**. The ECU draft quotes that same absolute figure as 2.7% against 500 kbit/s: bus load in bit/s does not change with the configured bit rate, only the percentage does. This is a draft estimate, not a measurement.
+ECU status is **request/response only**; the ECU does not spontaneously broadcast these status frames. No application-layer command acknowledgment is defined. ECU 2.00+ specifically uses **RTR DLC 8**. Legacy five-command payloads remain DLC 4 even though ENERGYCFG is DLC 8. The ECU draft estimates its worst-case bus load as approximately **13.4 kbit/s**, quoted as **1.3% of a 1.0 Mbps bus** and **2.7%** against 500 kbit/s. **That figure predates the VERSTS cadence in the table above** - see the bus-load note below. Bus load in bit/s does not change with the configured bit rate; only the percentage does. Neither the draft figure nor the one below is a measurement.
+
+**Bus-load note (recalculated for this revision).** The draft's 13.4 kbit/s is retained above as
+the ECU author's own number, but it cannot describe the table above: that table now polls VERSTS
+every 100 ms where the earlier draft requested it once at connection. Recalculating the earlier
+table from first principles gives **13.2 kbit/s**, within 1.5% of the published figure and
+rounding to the same 1.3% and 2.7% - which is what identifies VERSTS-once as the assumption
+behind it.
+
+Assumptions, stated because the draft does not publish its own: CAN 2.0B extended frames; one
+RTR request plus one 8-byte response per status poll; the four periodic commands at 2 Hz and
+DLC 4; ENGONOFF and ENERGYCFG excluded as event-driven; 3-bit interframe space counted against
+every frame; no error frames, no retransmission, no other node on the bus. A frame occupies
+`67 + 8N` bits nominally (64 fixed from SOF to EOF, plus 3-bit IFS), and worst-case stuffing adds
+one bit per four in the stuffed region `SOF..CRC` of `54 + 8N` bits - the delimiters, ACK, EOF and
+IFS are fixed-form and are not stuffed. That gives 80 bits per RTR request, 160 per 8-byte
+response and 120 per DLC-4 command, worst case.
+
+| Polling table | Nominal | Worst case, bit-stuffed | 1.0 Mbps | 500 kbps |
+|---|---|---|---|---|
+| Earlier draft, VERSTS once | 10.9 kbit/s | **13.2 kbit/s** | 1.32% | 2.64% |
+| **This revision, VERSTS every 100 ms** | 12.9 kbit/s | **15.6 kbit/s** | **1.56%** | **3.12%** |
+
+Polling VERSTS continuously therefore costs about **2.4 kbit/s** worst case, an 18% increase on
+the earlier total and 0.24 percentage points of a 1.0 Mbps bus. These are estimates from the
+table, not measurements, and they describe the ECU link alone: an installation that shares the
+bus with other devices must add their traffic.
 
 ### MODESTS - ECU Operating Modes, RPM Target, and Start Permission (New)
 
@@ -376,7 +401,7 @@ Decode byte 0 explicitly: `system_state = data[0] & 0x0F`, `operation_mode = (da
 
 **Undefined codes and the ambiguous zero.** `system_state` defines 1-4 and `operation_mode` defines 1 and 3-6: **0 is defined for neither, and 2 is not defined for `operation_mode`**, while the ECU also transmits reserved fields as 0. A decoder cannot distinguish "not yet initialized" from "field not populated". Decode 0 and every undefined code as **unknown**: report the raw value, do not map it onto the nearest defined state, and do not assign it a meaning. The same rule applies to `ctrl_mode`, `ems_mode` and `start_gate` values not listed below.
 
-**rpm_target behavior:** This is the governor's current target, including EMS corrections to align IBAT with ICMD, so the target can change while battery current differs from its target. It is zero when the ECU is not controlling RPM (engine stopped, cranking, MANUAL, and certain fail/stop modes that hold the throttle or regulate bus voltage). During an over-RPM cut, the throttle may be forced to zero while `rpm_target` still reports the target. Temporary missing tachometer pulses can also leave it nonzero; once `FAIL_TACHO` is entered, it reports zero. Do not equate `rpm_target=0` with confirmed engine stop.
+**rpm_target behavior:** This is the governor's current target, including EMS corrections to align IBAT with ICMD, so the target can change while battery current differs from its target. It is zero when the ECU is not controlling RPM (engine stopped, cranking, MANUAL, and certain fail/stop modes that hold the throttle or regulate bus voltage). During an over-RPM cut, the throttle drops to the cut throttle, a low value (8% by default) decided by bench test (stored in ECU), while `rpm_target` still reports the target. Temporary missing tachometer pulses can also leave it nonzero; once `FAIL_TACHO` is entered, it reports zero. Do not equate `rpm_target=0` with confirmed engine stop.
 
 **start_gate (byte 4):**
 
@@ -392,15 +417,16 @@ Decode byte 0 explicitly: `system_state = data[0] & 0x0F`, `operation_mode = (da
 | 10 | BLOCKED_STARTER_UNCALIBRATED |
 | 11 | BLOCKED_SHELL_ACTIVE |
 | 12 | BLOCKED_NOT_STANDBY - mode not STANDBY or DO_NOTHING |
-| 13 | BLOCKED_FUEL_LEVEL - fuel level not initialized, initial_fail 0x20 |
+| 13 | BLOCKED_FUEL_LEVEL - no good fuel level saved in the ECU, initial_fail 0x20 |
 | 15 | ABORTED_TIMEOUT - cranked but engine did not run within permitted start time |
 | 16 | ABORTED_NO_ROTATION - starter driven but no tachometer pulses |
 | 17 | ABORTED_STOPPED_AT_HANDOVER - engine fired but stopped during starter handover |
 | 18 | ABORTED_STOP_REQUESTED - Stop received during cranking |
+| 19 | BLOCKED_CURRENT_FAULT - the load current or battery current reading is bad. Start works again when both readings are good |
 
 `BLOCKED_*` denotes a rejected Start **before cranking**. `ABORTED_*` denotes a Start terminated **after cranking began**. Following an aborted Start, `operation_mode` returns to STANDBY (via STOP for code 18). The last `start_gate` code persists until the next Start attempt. Codes 1-3 and 14 are not defined in this draft; do not assign meanings.
 
-**initial_fail (byte 5) bit masks:** `0x01 HEADER_BAD`, `0x02 EEPROM_LAYOUT`, `0x04 CALIB_MISSING`, `0x20 FUEL_LEVEL`. Any set bit blocks engine start **inside the ECU**, which performs that check itself. Bits `0x08`, `0x10`, `0x40` and `0x80` are **not defined in this draft** and are given no meaning here. The field is **still under development** and is carried as ECU status information: display it, raw value included, but do not evaluate it in the Host or build an additional Start interlock on it.
+**initial_fail (byte 5) bit masks:** `0x01 HEADER_BAD`, `0x02 EEPROM_LAYOUT`, `0x04 CALIB_MISSING`, `0x20 FUEL_LEVEL` (no good fuel level saved in the ECU: it was never set, cannot be read, is below 0, or is more than the tank. Until ENERGYCFG sends the fuel, the ECU uses a full tank as a placeholder, so GAS shows 100%. This 100% is not real). Any set bit blocks engine start **inside the ECU**, which performs that check itself. Bits `0x08`, `0x10`, `0x40` and `0x80` are **not defined in this draft** and are given no meaning here. The field is **still under development** and is carried as ECU status information: display it, raw value included, but do not evaluate it in the Host or build an additional Start interlock on it.
 
 **alert_level:** Level 2 is raised for SOC at landing reserve or SOC-low in combination with low fuel or cylinder temperature above 260 degC; clears to the current level five seconds after the causes clear. Level 1 includes low SOC, EMS THERMAL_HOLD/FORCED_CHARGE, or low fuel/fuel endurance; clears two seconds after all causes clear. Consult the ECU's configured thresholds for actual behavior.
 
@@ -435,7 +461,7 @@ Decode byte 0 explicitly: `system_state = data[0] & 0x0F`, `operation_mode = (da
 | Bytes | Field | Type | Scale | Raw range | Operation / readback |
 |---|---|---|---|---|---|
 | 0-1 | tank | UINT16 | 0.01 L | 10-10000 | Tank capacity; verify exactly using ENERGYSTS.tank |
-| 2-3 | fuel | UINT16 | 0.01 L | 0-tank | **Current total fuel in the tank**, measured directly from the fuel tank level indication; stored across power cycles. Operator enters litres; encode as `fuel_raw = round(fuel_litres * 100)`. Verify through ENGSTS.GAS using `floor(100 * fuel / tank)` or one percentage point less due to floating-point rounding |
+| 2-3 | fuel | UINT16 | 0.01 L | 0-tank | **Current total fuel in the tank**, measured directly from the fuel tank level indication; stored across power cycles. Operator enters litres; encode as `fuel_raw = round(fuel_litres * 100)`. Verify through ENGSTS.GAS using `floor(100 * fuel / tank)` or one percentage point less due to floating-point rounding. **This comparison cannot confirm acceptance when `fuel == tank`** - see acceptance rule 8 |
 | 4-5 | battery | UINT16 | 0.1 Ah | 50-1000 | Battery capacity; verify exactly using ENERGYSTS.battery |
 | 6-7 | soc | UINT16 | 0.1 % | 0-1000 | **Optional SOC correction**; otherwise send `0xFFFF` to leave the voltage-derived estimate unchanged. Check BATSTS.GAGE within 0.1 percentage point, accounting for truncation and ongoing battery current |
 
@@ -449,6 +475,7 @@ Decode byte 0 explicitly: `system_state = data[0] & 0x0F`, `operation_mode = (da
 6. The `soc` field is optional. On power-up the ECU estimates SOC from battery voltage; supply a trusted SOC only when intentionally correcting that estimate, otherwise use `0xFFFF`.
 7. **The protocol has no incremental fuel addition.** The Host shall never compute the field by adding a refueling amount to a previously estimated or read-back quantity; send the measured total only. Readback is in any case indirect and quantized: `GAS` is an integer percentage of tank capacity rounded down and may read **one additional percentage point lower** due to floating-point rounding, so a value derived from it is not an accurate base to build on and may differ slightly from the quantity entered.
 8. A successful fuel setting clears `initial_fail` bit `0x20 FUEL_LEVEL`. Merely observing a retained/estimated fuel quantity does not independently establish that the ECU's fuel-level prerequisite is satisfied.
+   **The `fuel == tank` ambiguity.** An ECU with no valid fuel quantity substitutes a full tank and already reports GAS = 100%. A Host that sends `fuel` equal to `tank` expects exactly 100% back, so the read-back agrees whether the ECU applied the command or ignored it, and a Host performing only that comparison will report success either way. **A GAS of 100% alone never confirms that a fuel setting was accepted.** `0x20` is the only corroborating status the protocol offers, and it is NOT a command acknowledgment: it says a valid quantity exists, not that this command established it, and if it was already clear before the command then its remaining clear proves nothing about that command. A Host may display and interpret both for the operator; it must not turn either into an acceptance test, and nothing here authorises new Host-side decision logic over ECU state.
 
 ### ECU 2.00+ - Error Handling and Field Validity
 
@@ -485,7 +512,7 @@ The following notes distinguish **explicit ECU changes**, **newly defined detail
 1. **Status field positions:** The Version 1.05 Markdown explicitly considered byte positions **unconfirmed**; the ECU draft defines offsets. Treat offsets as confirmed **by the new draft for ECU 2.00+**, not retroactively confirmed on old PMU hardware.
 2. **RTR request DLC:** Version 1.05 source said N/A (no payload), whereas the ECU draft explicitly says **DLC 8**. This is a newly defined requirement, not proof that old PMU request DLC was different.
 3. **VERSTS date and ICMD:** Previously unspecified, now defined for ECU 2.00+ (DATE BCD YYYYMMDD, ICMD UINT16 x 0.1 A). These are **clarifications**, not evidence that old values encoded differently.
-4. **Legacy request/refresh cadence:** The original Markdown said polling rates and retries were not defined. The ECU draft gives 100 ms status polls (except VERSTS on connection, ENERGYSTS 1 s) and specific 500 ms command refresh recommendations. Do not apply these automatically to legacy PMUs.
+4. **Legacy request/refresh cadence:** The original Markdown said polling rates and retries were not defined. The ECU draft gives 100 ms status polls (except ENERGYSTS 1 s) and specific 500 ms command refresh recommendations. Do not apply these automatically to legacy PMUs.
 5. **Observing that a Stop has completed:** ENGONOFF Stop is sent once; the draft's 500 ms repeat is **not adopted** (see ENGONOFF above). The Host therefore needs a status indication that a stop has **completed** rather than merely **started**, and the draft notes that PSTS STOP_SEQUENCE may be too brief to catch and `operation_mode` STOP can pass between polls. Ask the ECU author which field gives a reliable completed-stop indication at a 100 ms poll rate.
 6. **ECU `ENERGYSTS.endurance` encoding:** The example `0x1C20` represents **7200 s (2 hours)** and matches the scale, confirming the little-endian example `20 1C` is self-consistent.
 7. **ECU draft `BATSTS.GAGE` range notation:** It shows `0-1000` even though scale is 0.1%; interpret that as raw 0-1000 corresponding to physical 0-100%, not 0-1000%.
@@ -507,4 +534,4 @@ The following notes distinguish **explicit ECU changes**, **newly defined detail
 | ENERGYCFG command | `20 03 8A 02 DC 00 B6 03` | Tank=8.00 L, fuel=6.50 L, battery=22.0 Ah, SOC=95.0% |
 | ENERGYCFG keep other settings | `FF FF 8A 02 FF FF FF FF` | Update fuel to 6.50 L, retain the other three fields |
 
-**References:** Original `PMU CAN Comm Protocol.md` (Version 1.05 baseline); `ECU_CAN_Protocol_r2.pdf` (9 pages, draft for review dated 2026-11-12). The ECU draft defines the ECU 2.00+ behavior above. No physical ECU communication verification has been performed as part of this document revision. `ECU_CAN_Protocol_r2.pdf` is **not stored in this repository**, so nothing in the ECU sections can be re-checked against its source from a clone alone; keep a copy with the project records and cite that exact file when raising any of the clarifications above with the ECU author.
+**References:** Original `PMU CAN Comm Protocol.md` (Version 1.05 baseline); `ECU_CAN_Protocol_r3.pdf` (draft for review dated 2026-11-17). The ECU draft defines the ECU 2.00+ behavior above. No physical ECU communication verification has been performed as part of this document revision. `ECU_CAN_Protocol_r3.pdf` is **not stored in this repository**, so nothing in the ECU sections can be re-checked against its source from a clone alone; keep a copy with the project records and cite that exact file when raising any of the clarifications above with the ECU author.

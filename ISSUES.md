@@ -474,10 +474,10 @@ interval directly. Items 1 and 3 still need a CAN analyser and `SCHED_DEBUG` res
 
 | | |
 |---|---|
-| **Status** | OPEN. Specification only - no firmware, nothing blocked |
-| **Component** | `PMU CAN Comm Protocol.md` V2.0 (Draft). No code; `AP_PMUCAN` speaks V1.05 only |
-| **Source** | `ECU_CAN_Protocol_r2.pdf`, draft for review 2026-11-12, **not stored in this repository** |
-| **Related** | `PMU-001`, `PMU-003`, `CHANGELOG.md` "Documents, 2026-11-12" |
+| **Status** | **FIRMWARE:** implemented in **V5.1.29** - all three ECU messages decoded, transmitted and commanded. **DOCUMENTATION:** ICD and `pnu_kal.xml` synchronised to ECU draft **r3**, 2026-11-17. **SITL:** covers the stage 0-5 message set against a fake built from the ICD - polling, generation gating, the ENERGYCFG transaction and its refusals, timeouts and cancellation. **The r3 additions have NO SITL coverage** - the fake models neither `start_gate` 19, nor the over-RPM cut throttle, nor the full-tank `GAS` placeholder, so those are documented only. **HARDWARE: none.** No ECU has ever been connected to this project |
+| **Component** | `PMU CAN Comm Protocol.md` V2.0 (Draft); `AP_PMUCAN` + `AP_PMUCAN_ECU` speak both generations; `Forced Submodule File/pnu_kal.xml` carries the KGCS interface |
+| **Source** | `ECU_CAN_Protocol_r3.pdf`, **not stored in this repository**. Its revision date is recorded in `PMU CAN Comm Protocol.md`; the page count is unverified and is deliberately not quoted here |
+| **Related** | `PMU-001`, `PMU-003`, `PMU-005a`, `CHANGELOG.md` "Documents, 2026-11-12" and "V5.1.29" |
 
 **What it is.** The second-generation PMU is an ECU whose software 2.00+ adds three messages -
 `ENERGYCFG 0x10000050`, `MODESTS 0x10000150`, `ENERGYSTS 0x10000160` - and defines ECU-specific
@@ -513,7 +513,10 @@ no work, and a future ECU implementation must not add a retransmission loop.
 3. **Undefined `MODESTS` codes** - `operation_mode` 2, a zero nibble in either half of byte 0,
    `start_gate` 1-3 and 14, `initial_fail` bits `0x08`/`0x10`/`0x40`/`0x80` - and the fact that
    the frame carries **no layout version**. `MODESTS` is still under development, so its field
-   order must be re-validated against a capture before any decoder is frozen.
+   order must be re-validated against a capture before any decoder is frozen. r3 narrowed the
+   gap but did not close it: `start_gate` **19 BLOCKED_CURRENT_FAULT** is now defined, so the
+   undefined set is 1-3, 14 and above 19, and `initial_fail` `0x20` gained a full definition.
+   The four undefined bits and the missing layout version are unchanged.
 
 **Decided, and not to be reopened without a reason:** choke polarity is `0 = open, 1 = close` with
 the ECU's `choke_setpoint < 50%` rule informational only; `ENERGYSTS.endurance` is displayed as
@@ -541,6 +544,7 @@ per-stage record once a stage lands.
 | **3** | `AP_PMUCAN_ECU.{h,cpp}`: MODESTS at 10 Hz, ENERGYSTS at 1 Hz, on the free scheduling phases, active only in `ECU_V2` | **DONE 2026-11-13** |
 | **4** | MAVLink telemetry for ECU status - `TM60 51060` MODESTS at 10 Hz, `TM61 51061` ENERGYSTS at 1 Hz, both suppressed unless VERSTS confirms ECU 2.00+ | **DONE 2026-11-16** |
 | **5** | MAVLink telecommand for `ENERGYCFG` - `TC60 50060`, one bounded transaction at a time, readback-verified, at most three frames | **DONE 2026-11-16** |
+| **Docs** | `pnu_kal.xml` carries the complete KGCS interface - every enum, bitmask, input control and UI state - so a ground station needs no CAN document. Re-synchronised against ECU draft r3 | **DONE 2026-11-17**, SITL-only |
 
 **What stage 3 added, in one place.** `libraries/AP_PMUCAN/AP_PMUCAN_ECU.{h,cpp}` behind
 `AP_PMUCAN_ECU_ENABLED` in a new `AP_PMUCAN_config.h`; polls on phases 1 and 3 of the
@@ -615,6 +619,22 @@ or writes step 2c's state, counters or windows.
 against `floor(100 * fuel / tank)` or one point less, which is all the ICD offers. A quarter of a
 litre in an 8 L tank is three percent; a litre either way hides inside one count on a large tank.
 
+**What ECU draft r3 changed, 2026-11-17, and where each change landed.** Four items, all
+documentation - no firmware, no message definition, no CRC_EXTRA moved, and all 306 generated
+MAVLink messages compare identical to commit `829ef5545f`, the baseline used for the check.
+
+| r3 change | Where it landed |
+|---|---|
+| VERSTS polled every 100 ms, not once at connection | `PMU CAN Comm Protocol.md` message table; the FC already did exactly this, so no code change |
+| Over-RPM cut drops the throttle to a bench-set value stored in the ECU, 8% by default, rather than to zero | ICD `rpm_target` paragraph. Nothing in the FC reads the throttle readback |
+| `start_gate` **19 BLOCKED_CURRENT_FAULT**, self-clearing when both current readings recover | ICD table; `pnu_kal.xml` TM60 `Start_Gate`, whose "undefined above 18" would otherwise have had KGCS display a defined code as Unknown |
+| `initial_fail 0x20` fully defined, and the full-tank `GAS` placeholder it implies | ICD ENGSTS section, `initial_fail` masks and acceptance rule 8; `pnu_kal.xml` TM1 `Fuel_Quantity`, TM60 `Initial_Fail`, TC60 and TM61 `Cfg_Result` |
+
+**Documentation completion is not hardware validation.** Everything above is still exercised
+only against a fake built from this project's reading of the ICD. `ECU_CAN_Protocol_r3.pdf` is
+not in the repository and could not be opened during this work, so the ICD transcription was
+checked for internal consistency, not against its source.
+
 **Architecture: hybrid, decided rather than assumed.** One `AP_PMUCAN` backend with a
 latched protocol generation, one version branch in the AUX2STS decode, and a separate
 compile-guarded module for the two genuinely new messages. No Legacy/ECU backend split, no
@@ -667,10 +687,13 @@ re-litigated:
    the low three bytes still read correctly. **Bench-checked 2026-11-13: the real legacy PMU
    answers VERSTS v1.00 and its `RSV` byte is zero**, so neither half of that risk has an
    instance on this hardware. See the bench items below.
-3. **Existing VERSTS polling - APPROVED.** Slot 4 keeps polling at 10 Hz, the rotation is
-   untouched, and no new polling mechanism was added. "Identify once" means the decision
-   latches, not that the frames stop; the late-switch path exists because the frames keep
-   coming.
+3. **Existing VERSTS polling - APPROVED, and the ICD now asks for exactly it.** Slot 4
+   keeps polling at 10 Hz, the rotation is untouched, and no new polling mechanism was
+   added. The selection latches on the first valid reply; the frames deliberately keep
+   coming, which is what the late-switch path needs. The r2 draft asked for VERSTS once
+   after connecting and the FC polled it continuously anyway; **r3 changed the request to
+   "poll every 100 ms (used for compatibility-check)"**, so what was a deliberate excess
+   is now the specified behaviour and no divergence remains to defend.
 
 **Bench items - BOTH ANSWERED on the real legacy PMU, 2026-11-13.** The two questions below were
 open because the decoder had only ever read three bytes of AUX2STS, so no log from any earlier
@@ -720,6 +743,21 @@ Decided 2026-11-13, no further stage 2 modification.
   unconfigurable. The field ORDER is still unvalidated and still matters more than it did,
   because `operation_mode` now gates a transmitted command.
 
+- **DOCUMENTED IN r3, and it makes the fuel readback weaker than stage 5 assumed.**
+  `initial_fail 0x20` now has a full definition - no good fuel quantity saved, whether it
+  was never set, cannot be read, is below zero, or exceeds the tank - and r3 adds that
+  **while that bit is set the ECU substitutes a full tank and reports `GAS` 100%**. That
+  creates a case stage 5 cannot distinguish: a `fuel == tank` command expects exactly 100%
+  back, which the placeholder already satisfies, so `Cfg_Result` reports **OK** whether the
+  ECU applied the command or ignored it. The implemented algorithm is unchanged and no FC
+  logic was added - `0x20` is not read by the FC and must not be, because the ICD forbids
+  the Host evaluating it. The limitation is documented instead, in the ICD's acceptance
+  rule 8 and in `pnu_kal.xml` under TC60, TM1 `Fuel_Quantity` and TM61 `Cfg_Result`, with
+  the KGCS display rule that `0x20` may corroborate but never acknowledges: it says a valid
+  quantity exists, not that a given command established it, and a bit that was already
+  clear proves nothing by staying clear. **Bench item:** confirm on real hardware that a
+  brim-full setting behaves as described, and that `0x20` clears when it should.
+
 - **The `GAS` fuel readback rule is documented, but the ECU's arithmetic behind it is
   not.** The ICD states the tolerance twice and identically - `floor(100 * fuel / tank)`,
   or one percentage point less "due to floating-point rounding" - and the FC implements
@@ -736,6 +774,16 @@ Decided 2026-11-13, no further stage 2 modification.
   acceptance rules, its retained fuel quantity and its `GAS` rounding are all unverified.
   The `initial_fail` bit `0x20 FUEL_LEVEL` clearing on a successful fuel setting is
   likewise untested - the FC does not read that bit, so nothing here depends on it.
+- **The CAN bus-load estimate was recalculated and is still not a measurement.** r3's
+  VERSTS cadence invalidated the ECU draft's 13.4 kbit/s figure, which a first-principles
+  recalculation identifies as having assumed VERSTS once: the earlier table works out at
+  **13.2 kbit/s** worst case, within 1.5% of the published number and rounding to the same
+  1.3% and 2.7%. The r3 table gives **15.6 kbit/s** worst case - 1.56% of a 1.0 Mbps bus,
+  **3.12% at 500 kbps**, which r3 confirms is a selectable rate. Both are estimates from
+  the message table with stated assumptions, and both describe the ECU link alone. **Bench
+  item:** this aircraft shares one wire with the gimbal and the SAR and that bus has never
+  run on real CAN, so the only figure that settles it is an analyser capture - which
+  `PMU-004` item 1 already needs for its own reasons.
 - **`TM60`'s CRC_EXTRA is 0.** Legal, and ArduPilot's own parser is unaffected, but KGCS
   must look the message up by id rather than testing `mavlink_get_crc_extra()` against
   zero. Renaming a field to avoid it was rejected: the field names are the approved ICD.
