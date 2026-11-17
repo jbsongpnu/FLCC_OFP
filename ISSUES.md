@@ -755,8 +755,36 @@ Decided 2026-11-13, no further stage 2 modification.
   rule 8 and in `pnu_kal.xml` under TC60, TM1 `Fuel_Quantity` and TM61 `Cfg_Result`, with
   the KGCS display rule that `0x20` may corroborate but never acknowledges: it says a valid
   quantity exists, not that a given command established it, and a bit that was already
-  clear proves nothing by staying clear. **Bench item:** confirm on real hardware that a
-  brim-full setting behaves as described, and that `0x20` clears when it should.
+  clear proves nothing by staying clear.
+
+  **REPRODUCED IN SITL 2026-11-17, not merely inferred.** The limitation above was
+  derived from reading the code; it is now measured. The fake PMU gained the r3
+  fuel-initialisation state - `0x20` set while no quantity is stored, `GAS` 100% as the
+  placeholder, both clearing together on an accepted ENERGYCFG - and a silent-ignore
+  fault injection that drops the command while still answering every status request
+  with a mode the FC accepts. That last part is what made the case reachable at all:
+  the fake previously gated acceptance on the same `operation_mode` it reported in
+  MODESTS, so the FC and the fake could never disagree about whether a command was
+  allowed. Four scenarios:
+
+  | Scenario | Measured `Cfg_Result` | Frames | `0x20` after |
+  |---|---|---|---|
+  | accepted, `fuel == tank` | **2 OK** | 1 | cleared |
+  | **ignored, `fuel == tank`** | **2 OK** | 1 | **still set** |
+  | ignored, `fuel < tank` | **3 MISMATCH_AFTER_3** | 3 | still set |
+  | `start_gate` 19 | - | - | `TM60` and `ECUM` both carry 19 raw |
+
+  Row 2 is the false OK: the FC announced "ENERGYCFG verified after 1 frame" while
+  the ECU had dropped the command and its own status still said the fuel level had
+  never been set. Row 3 bounds it - the comparison works whenever it can see a
+  difference, so **only `fuel == tank` is blind**, exactly as documented and no wider.
+  `TM60.Initial_Fail` 0x20 stayed set throughout both ignored runs, which demonstrates
+  the corroboration `pnu_kal.xml` instructs KGCS to use.
+
+  **Bench item, unchanged:** none of this has met an ECU. Confirm on real hardware
+  that the placeholder behaves as r3 describes, that `0x20` clears on an accepted fuel
+  setting, and that a brim-full setting is genuinely indistinguishable - the SITL
+  result proves the FC's behaviour, not the device's.
 
 - **The `GAS` fuel readback rule is documented, but the ECU's arithmetic behind it is
   not.** The ICD states the tolerance twice and identically - `floor(100 * fuel / tank)`,
