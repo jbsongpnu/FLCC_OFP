@@ -192,6 +192,21 @@ def test_a_data_frame_on_an_ecu_status_id_is_not_a_request():
     assert pmu.sent == []
 
 
+def test_the_modests_example_constant_still_matches_the_icd():
+    """The typo guard.  build_modests() now writes bytes 4 and 5 from model state, so
+       the constant is checked on its own - otherwise a typo in the ICD example could
+       hide behind the state-driven bytes."""
+    data = icd.MODESTS_EXAMPLE
+    assert data[0] & 0x0F == 3                                  # system_state ENGINE_RUN
+    assert (data[0] >> 4) & 0x0F == 5                           # operation_mode RUNNING
+    assert data[1] == 6                                         # ctrl_mode EMS
+    assert data[2] == 0                                         # alert_level NONE
+    assert data[3] == 3                                         # ems_mode CHARGE
+    assert data[4] == 0                                         # start_gate
+    assert data[5] == 0                                         # initial_fail, as the ICD prints it
+    assert struct.unpack('<H', data[6:8])[0] == 4300            # rpm_target
+
+
 def test_the_modests_example_decodes_to_the_values_the_icd_states():
     pmu = make_pmu(ecu=True)
     pmu.handle_frame(frame(icd.MODESTS, rtr=True))
@@ -202,8 +217,72 @@ def test_the_modests_example_decodes_to_the_values_the_icd_states():
     assert data[2] == 0                                         # alert_level NONE
     assert data[3] == 3                                         # ems_mode CHARGE
     assert data[4] == 0                                         # start_gate
-    assert data[5] == 0                                         # initial_fail
+    # ECU draft r3 : byte 5 is state-driven and a fresh fake has no fuel quantity, so
+    # 0x20 FUEL_LEVEL is set here where the ICD's example payload prints 0x00.
+    assert data[5] == 0x20                                      # initial_fail FUEL_LEVEL
     assert struct.unpack('<H', data[6:8])[0] == 4300            # rpm_target
+
+
+# -- ECU draft r3 : the fuel-initialisation placeholder --------------------------------
+#
+# These are the only ECU behaviours in this fake that the FC has LOGIC for, so they are
+# the ones worth modelling.  Everything else about MODESTS is a fixed example payload.
+
+def test_a_fresh_ecu_reports_the_fuel_level_bit_and_the_gas_placeholder():
+    pmu = make_pmu(ecu=True)
+    assert pmu.model.ecu_fuel_initialised() is False
+    assert pmu.model.ecu_initial_fail() & 0x20
+    # GAS has no configured quantity behind it, so build_engsts sends the fixed 100
+    assert pmu.model.ecu_gas_percent() is None
+    pmu.handle_frame(frame(icd.ENGSTS, rtr=True))
+    assert struct.unpack('<b', reply(pmu, icd.ENGSTS)[6:7])[0] == 100
+
+
+def test_an_accepted_fuel_quantity_clears_the_bit_and_makes_gas_real():
+    pmu = make_pmu(ecu=True)
+    pmu.model.set_ecu_operation_mode(3)                         # STANDBY
+    pmu.handle_frame(frame(icd.ENERGYCFG, struct.pack('<HHHH', 1000, 650, 0xFFFF, 0xFFFF)))
+    assert pmu.model.ecu_fuel_initialised() is True
+    assert pmu.model.ecu_initial_fail() & 0x20 == 0
+    assert pmu.model.ecu_gas_percent() == 65                    # floor(100 * 650 / 1000)
+
+
+def test_other_initial_fail_bits_survive_the_fuel_logic():
+    pmu = make_pmu(ecu=True)
+    pmu.model.ecu_initial_fail_other = 0x04                     # CALIB_MISSING
+    assert pmu.model.ecu_initial_fail() == 0x24
+    pmu.model.set_ecu_operation_mode(3)
+    pmu.handle_frame(frame(icd.ENERGYCFG, struct.pack('<HHHH', 1000, 650, 0xFFFF, 0xFFFF)))
+    assert pmu.model.ecu_initial_fail() == 0x04
+
+
+def test_silent_ignore_changes_nothing_and_acknowledges_nothing():
+    pmu = make_pmu(ecu=True)
+    pmu.model.set_ecu_operation_mode(3)                         # a mode the FC accepts
+    pmu.model.set_ecu_ignore_energycfg(True)
+    pmu.handle_frame(frame(icd.ENERGYCFG, struct.pack('<HHHH', 1000, 1000, 300, 850)))
+    assert pmu.sent == []                                       # no acknowledgment invented
+    assert pmu.model.ecu_fuel_initialised() is False            # state untouched
+    assert pmu.model.ecu_initial_fail() & 0x20
+    assert pmu.model.ecu_tank is None and pmu.model.ecu_battery is None
+    # and the mode it reports is still one the FC will send to
+    pmu.handle_frame(frame(icd.MODESTS, rtr=True))
+    assert (reply(pmu, icd.MODESTS)[0] >> 4) & 0x0F == 3
+
+
+def test_silent_ignore_is_off_by_default():
+    pmu = make_pmu(ecu=True)
+    assert pmu.model.ecu_ignore_energycfg is False
+    pmu.model.set_ecu_operation_mode(3)
+    pmu.handle_frame(frame(icd.ENERGYCFG, struct.pack('<HHHH', 1000, 650, 0xFFFF, 0xFFFF)))
+    assert pmu.model.ecu_fuel_initialised() is True
+
+
+def test_start_gate_19_is_emitted_raw():
+    pmu = make_pmu(ecu=True)
+    pmu.model.set_ecu_start_gate(19)                            # r3 BLOCKED_CURRENT_FAULT
+    pmu.handle_frame(frame(icd.MODESTS, rtr=True))
+    assert reply(pmu, icd.MODESTS)[4] == 19
 
 
 def test_the_energysts_example_decodes_to_the_values_the_icd_states():

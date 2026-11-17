@@ -179,10 +179,30 @@ class PMUModel(object):
         # an ENERGYCFG answers exactly as it did before this existed - which is what
         # keeps test_fake_pmu.py's ICD-example assertions meaningful.
         self.ecu_tank = None            # raw, 0.01 L
-        self.ecu_fuel = None            # raw, 0.01 L
+        self.ecu_fuel = None            # raw, 0.01 L; None means NEVER CONFIGURED
         self.ecu_battery = None         # raw, 0.1 Ah
         self.ecu_soc = None             # raw, 0.1 %
         self.ecu_operation_mode = None  # MODESTS byte 0 high nibble, None = ICD example
+
+        # ECU draft r3 : MODESTS byte 4 and byte 5.
+        #
+        # initial_fail is STATE-DRIVEN, not an override: bit 0x20 FUEL_LEVEL is set
+        # exactly while no valid fuel quantity is stored, and clears when ENERGYCFG
+        # delivers one.  ecu_initial_fail_other carries any other bits a test wants to
+        # inject, so the 0x20 logic never has to know about them.
+        #
+        # ecu_start_gate is a plain override because start_gate is the result of a start
+        # attempt and this fake models no start sequence for the ECU.
+        self.ecu_initial_fail_other = 0
+        self.ecu_start_gate = None
+
+        # FAULT INJECTION, off by default.  The ECU draft says a frame it will not act on
+        # is "ignored without CAN acknowledgment", and there is no other way to reach that
+        # case here: apply_energycfg() otherwise gates on the same operation_mode the fake
+        # reports in MODESTS, so the FC and the fake always agree about whether a command
+        # is allowed.  With this set the fake reports a mode the FC accepts and then drops
+        # the frame anyway, which is what makes the read-back ambiguity reproducible.
+        self.ecu_ignore_energycfg = False
 
     # -- commands ---------------------------------------------------------------------
 
@@ -220,6 +240,9 @@ class PMUModel(object):
 
     ENERGYCFG_KEEP = 0xFFFF
 
+    # ECU draft r3 : the only initial_fail bit this fake models.
+    INITIAL_FAIL_FUEL_LEVEL = 0x20
+
     # The ICD example ENERGYSTS reports an 8.00 L tank, and that is what build_energysts()
     # answers with until an ENERGYCFG configures one.  GAS is a percentage OF THAT TANK,
     # so the same default has to be used here - otherwise a fuel-only ENERGYCFG, which is
@@ -233,6 +256,22 @@ class PMUModel(object):
         self.ecu_operation_mode = mode
         self._log('ECU operation_mode = %s' % ('ICD example' if mode is None else mode))
 
+    def set_ecu_start_gate(self, code):
+        '''MODESTS start_gate.  A plain override: this fake runs no ECU start sequence,
+           so there is no state for the code to be derived from.  r3 added code 19
+           BLOCKED_CURRENT_FAULT, which is the one worth being able to emit.'''
+        self.ecu_start_gate = code
+        self._log('ECU start_gate = %s' % ('ICD example' if code is None else code))
+
+    def set_ecu_ignore_energycfg(self, ignore):
+        '''Fault injection: drop ENERGYCFG frames while answering every status request
+           normally.  The ECU draft's "ignored without CAN acknowledgment" case.'''
+        if ignore == self.ecu_ignore_energycfg:
+            return
+        self.ecu_ignore_energycfg = ignore
+        self._log('*** ECU %s ENERGYCFG (fault injection) ***'
+                  % ('IS NOW SILENTLY IGNORING' if ignore else 'is accepting'))
+
     def ecu_accepts_energycfg(self):
         '''ICD: DO_NOTHING (1) or STANDBY (3), user shell inactive.  With the mode left
            at the ICD example this is False, which is itself worth being able to test.'''
@@ -240,6 +279,19 @@ class PMUModel(object):
         if mode is None:
             mode = 5                    # the ICD example payload reports RUNNING
         return mode in (1, 3)
+
+    def ecu_fuel_initialised(self):
+        '''r3: has the ECU a fuel quantity it considers valid?'''
+        return self.ecu_fuel is not None
+
+    def ecu_initial_fail(self):
+        '''MODESTS byte 5.  State-driven: bit 0x20 FUEL_LEVEL is set exactly while no
+           valid fuel quantity is stored, which is also when GAS is the placeholder.
+           Any other bits a test injected are preserved untouched.'''
+        bits = self.ecu_initial_fail_other & 0xFF
+        if not self.ecu_fuel_initialised():
+            bits |= self.INITIAL_FAIL_FUEL_LEVEL
+        return bits
 
     def apply_energycfg(self, fields):
         '''ICD acceptance rules, in the order the ICD gives them.  Returns a short
@@ -250,6 +302,12 @@ class PMUModel(object):
            supplied or retained tank.  A rejected frame changes nothing and is NOT
            acknowledged on CAN - the ICD defines no acknowledgment and this fake must
            not invent one for the FC to accidentally depend on.'''
+        if self.ecu_ignore_energycfg:
+            # Fault injection.  Nothing changes: not the fuel, not the tank, not GAS,
+            # not initial_fail.  The FC is left to discover that from the read-back,
+            # which is exactly what it cannot always do.
+            return 'IGNORED by fault injection - no state changed, nothing acknowledged'
+
         if not self.ecu_accepts_energycfg():
             return 'ignored: operation_mode is not DO_NOTHING or STANDBY'
 
@@ -282,8 +340,14 @@ class PMUModel(object):
     def ecu_gas_percent(self):
         '''ENGSTS.GAS once a fuel quantity has been configured: an integer percentage of
            tank capacity, rounded DOWN, which is the only readback the ICD offers for
-           ENERGYCFG.fuel.  None while nothing has been configured, so GAS keeps its
-           fixed 100 %.'''
+           ENERGYCFG.fuel.
+
+           None while nothing has been configured, and build_engsts() then sends the
+           fixed FUEL_PERCENT of 100.  Per ECU draft r3 THAT 100 IS A PLACEHOLDER, not a
+           measurement: with no valid quantity the ECU substitutes a full tank, and says
+           so by setting initial_fail bit 0x20 - see ecu_initial_fail().  The two always
+           move together here, which is the point: a Host that reads GAS without the bit
+           cannot tell a full tank from an uninitialised one.'''
         if self.ecu_fuel is None:
             return None
         tank = self.ecu_tank if self.ecu_tank is not None else self.ECU_DEFAULT_TANK

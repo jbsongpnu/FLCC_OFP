@@ -149,15 +149,24 @@ def build_aux2sts_ecu(model):
 
 
 def build_modests(model):
-    '''the ICD example, with operation_mode overridden when a test has set one.
+    '''the ICD example, with the three bytes the model drives written over it.
 
-       PMU-005a stage 5 needs the fake to be able to report DO_NOTHING or STANDBY,
-       because the ICD example payload reports RUNNING (5) and the ICD forbids accepting
-       ENERGYCFG in that state.  With no override the bytes are the example, unaltered.'''
-    if model.ecu_operation_mode is None:
-        return MODESTS_EXAMPLE
+       byte 0 high nibble - operation_mode.  PMU-005a stage 5 needs the fake to be able
+       to report DO_NOTHING or STANDBY, because the example reports RUNNING (5) and the
+       ICD forbids accepting ENERGYCFG in that state.
+       byte 4 - start_gate, a plain test override; r3 added code 19.
+       byte 5 - initial_fail, STATE-DRIVEN.  The example carries 0x00, which asserts the
+       ECU has a valid fuel quantity; this fake starts with none, so a fresh ECU reports
+       0x20 here and clears it when ENERGYCFG delivers one.  THAT IS A DELIBERATE
+       DEPARTURE FROM THE EXAMPLE PAYLOAD - the example describes a configured engine,
+       not a fresh one, and the 0x20/GAS pair is what PMU-005a needs to exercise.
+       MODESTS_EXAMPLE itself is unchanged and is still checked against the ICD.'''
     data = bytearray(MODESTS_EXAMPLE)
-    data[0] = (data[0] & 0x0F) | ((model.ecu_operation_mode & 0x0F) << 4)
+    if model.ecu_operation_mode is not None:
+        data[0] = (data[0] & 0x0F) | ((model.ecu_operation_mode & 0x0F) << 4)
+    if model.ecu_start_gate is not None:
+        data[4] = model.ecu_start_gate & 0xFF
+    data[5] = model.ecu_initial_fail() & 0xFF
     return bytes(data)
 
 
