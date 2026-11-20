@@ -21,6 +21,106 @@ A feature exercised only in SITL is **not** hardware-verified. Entries say so ex
 
 ---
 
+## V5.1.30 - the logs say what they mean
+
+No flight behaviour changed. One logged value was wrong and is now right, every PNU
+dataflash record is documented field by field for the first time, and the ECU r3 ICD, the
+MAVLink dialect and the fake PMU were brought into line with each other.
+
+**Writing the documentation is what found the defects.** All three below were discovered by
+tracing each logged column back to the code that fills it, not by a test failing.
+
+### 1. `SARN.Seq` logged the counter, not the transmitted byte
+
+`AP_PNUSAR_Nav.cpp` packed `0x404` B6 with a post-increment and called `log_nav()`
+afterwards, inside the same `nav_snapshot()`. The record therefore carried the counter's
+**next** value - one higher than the byte the receiver saw, every row, for the whole life of
+the record.
+
+That is an off-by-one in the single column a disagreement with Lumir over a missing bundle
+would have to be settled on, which is the reason `SARN` exists.
+
+`_att_seq_tx` now mirrors B6 the way `_att_flags` already mirrors B7: assigned where the
+frame is packed, logged unchanged. `_att_seq` keeps its meaning as the next value to use.
+The record's name, fields and format are unchanged, so **an older log still parses - it just
+reads one higher**, and `README.md` 10.3 says so.
+
+### 2. Two fields that can never be anything but zero
+
+| Field | Why |
+|---|---|
+| `TM13.PMRV` | Nothing in the tree assigns `Version_REV_Number`; the PMU reports no revision field |
+| `TM11.BSTS` | The `BATSTS` decode for it is commented out; the ICD calls the field reserved |
+
+Both are now labelled **Always 0** in `README.md` section 9 rather than left looking like
+data that happens to be zero.
+
+### 3. `README.md` sections 9 and 10 - every record, every field
+
+Nothing described the logged fields. A reader with a `.BIN` had to go to the source for
+every column, and for the gimbal there was no source to go to.
+
+- **Section 9**, the twelve PMU and ECU records - `TM11` `TM12` `TM13` `TM3` `PMUC` `PMUE`
+  `TC1` `ECUT` `ECUX` `ECUM` `ECUE` `ECUC` - with each field's CAN source byte, type, scale
+  and meaning, plus the `PSTS` bitfield.
+- **Section 10**, `PNUSAR` and `PNUGimbal` together, since they share the bus and step 3f
+  joins them. `SARS`, `SARN` and `SARC` field by field, and three things that needed tracing
+  rather than assuming:
+
+| Claim | What the code actually does |
+|---|---|
+| `MNT` shows achieved gimbal attitude | **No.** `AP_Mount_PNUGimbal::get_attitude_quaternion()` returns `_angle_bf_output_rad`, the commanded angle. Desired against actual is the stabilisation correction, the lead filter and the operating-limit clamp - **never a motor tracking error**. Retract and neutral skip the clamp in `update_angle_outputs()`; rate mode populates actual while desired stays NaN |
+| A `SARN` row means a bundle was sent | **No.** The row is written on the vehicle thread before `send_bundle()` runs. `TX` counts frames the interface **accepted**, not frames on the wire, and no nav bundle is ever acknowledged. 10.3.1 separates the five stages |
+| A statustext always becomes a `MSG` record | **No**, and the conditions are not the obvious ones. It **is** logged with no GCS attached and is gated by no `LOG_BITMASK` bit, and survives buffer pressure as a critical block - but it needs an open log, keeps only the **first 50 characters**, and can be refused early in boot because every PNU statustext comes from the CAN driver thread |
+
+Both sections state that these records need the vehicle **armed or `LOG_DISARMED` set**,
+which matters more than it sounds: gimbal homing is skipped when armed, so the entire homing
+sequence falls in the window where nothing is logged by default.
+
+### 4. ECU protocol r3, and the read-back blind spot reproduced
+
+`PMU CAN Comm Protocol.md` and `Forced Submodule File/pnu_kal.xml` synchronised to ECU draft
+`ECU_CAN_Protocol_r3.pdf`, and the fake PMU taught the parts of it that are testable.
+
+| r3 change | Effect |
+|---|---|
+| `VERSTS` polled every 100 ms rather than once, and the bit rate configurable to 500 kbps | Bus load recalculated from frame arithmetic: **15.6 kbit/s, 1.56% at 1 Mbps and 3.12% at 500 kbps**. The r2 table's 13.4 figure is reproduced as 13.2 by assuming VERSTS-once, which identifies what changed |
+| `start_gate` 19 `BLOCKED_CURRENT_FAULT`, undefined above 19 | Passed through, not interpreted - the FC is a relay for every MODESTS field |
+| `initial_fail` 0x20 `FUEL_LEVEL`, four causes | While set the ECU substitutes a full tank, so **`TM12.GAS` reads 100 as a placeholder, not as a measurement** |
+| The cut throttle is a bench-determined fixed low value stored in the ECU | Documentation only |
+
+**The `fuel == tank` read-back ambiguity is now reproduced, not merely argued.** Four SITL
+scenarios with an ENERGYCFG the fake silently ignores: with `fuel` equal to `tank` the FC
+announced "ENERGYCFG verified after 1 frame" and latched `Cfg_Result = 2 OK` while the
+command had been dropped and `0x20` was still set; with `fuel < tank` the same injection gave
+`MISMATCH_AFTER_3`. **That bounds the blind spot to `fuel == tank` exactly**, which is what
+makes it a bench item rather than an open design question. See `PMU-005a`.
+
+### Verification
+
+| What | Evidence |
+|---|---|
+| `SARN.Seq` matches the wire | **SITL.** Three fakes on vcan0, `CAN_D1_PNU_SCHK=0`, TC50 Prepare/Start/Stop. An 80-bundle observation gives **80 `SARN` rows, `Seq` 0 through 79 contiguous**; the fake SAR independently reports `ATT_Seq 0` for its first complete bundle and `1` for its second - the values the first two rows now carry. Before the fix row 0 read `Seq 1`. 80 complete, 0 discarded, 0 drops |
+| The one-bundle lag, as documented | Same log: first row `TX=0` beside `Seq=0`, last row `TX=79` beside `Seq=79` |
+| Fake PMU r3 model | **Unit test.** `Tools/pnu/sitl_can`: **131 pass**, `flake8 --max-line-length 127` clean |
+| SAR nav encoding unchanged | **Unit test.** `libraries/AP_PNUSAR/tests`: 12 pass |
+| Version wiring | **Build.** CubeOrangePlus and SITL both build, so the `Copter.cpp` static_asserts tying `OFP_VER_*` to `FW_*` hold; both binaries report `PNU_OFP V5.1.30` |
+| TM1 carries the new revision | **SITL.** `Version_FLCC_Main/Sub/REV` reads **5/1/30** on the KGCS link. The same frame shows `Version_REV_Number` 0, which is the unassigned PMU field `TM13.PMRV` records as always zero |
+| Style | `run_astyle.py --dry-run` clean |
+
+### Not verified
+
+- **No hardware of any kind was involved.** No ECU has ever been connected to this project,
+  no SAR, and no CubeMars motor has ever turned. The `SARN` measurement above is a fake SAR
+  reading a virtual CAN bus.
+- **The `MNT` and `MSG` conditions in section 10 are traced from source, not measured.**
+  Whether `MNT` is in practice absent on a given bench depends on that aircraft's
+  `LOG_DISARMED` setting, which was not inspected.
+- **The r3 additions still have no SITL coverage** beyond the read-back scenarios above: the
+  fake models neither `start_gate` 19 nor the over-RPM cut throttle. They are documented only.
+
+---
+
 ## V5.1.29 - the ECU reaches the ground station
 
 `PMU-005a` stages 4 and 5.  Stage 3 taught the FC to poll and decode the two ECU-only

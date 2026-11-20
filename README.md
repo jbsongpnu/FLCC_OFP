@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Current version** | `PNU_OFP V5.1.29` (DEV) |
+| **Current version** | `PNU_OFP V5.1.30` (DEV) |
 | **Baseline** | ArduPilot Copter **4.7.1** |
 | **Last official release** | `PNU-KAL-FLCC-5.1.0` (same code as 5.1.0 dev) |
 | **Vehicle** | **ArduCopter only.** Plane, Rover and Sub do not link - by construction |
@@ -117,6 +117,19 @@ recorded in `ISSUES.md`.
 ---
 
 ## 3. Current Development Version
+
+**V5.1.30** makes the logs readable and fixes the one column that was wrong. `README.md`
+sections 9 and 10 now document **every PNU dataflash record field by field** - the twelve
+PMU and ECU records, the three SAR records, and what `MNT` and `MSG` do and do not say
+about the gimbal, which writes no record of its own. Writing that down found three defects
+in the records themselves. **`SARN.Seq` logged the sequence counter rather than the byte
+packed into `0x404` B6**, so every row read one higher than the wire - an off-by-one in the
+single column a dispute with Lumir over a missing bundle would be settled on; `_att_seq_tx`
+now mirrors B6 the way `_att_flags` already mirrors B7. `TM13.PMRV` and `TM11.BSTS` are
+recorded as permanently zero rather than left to look like data. The ECU r3 ICD, the MAVLink
+dialect and the fake PMU were also brought into line, including the `fuel == tank` read-back
+blind spot, now reproduced in SITL. **No flight behaviour changed in this version** - one
+logged value, documentation, and a simulator. See `CHANGELOG.md`.
 
 **V5.1.29** puts the ECU on the KGCS link. `PMU-005a` stages 4 and 5 add three messages -
 `TM60 51060` (ECU modes, 10 Hz), `TM61 51061` (ECU energy, 1 Hz) and `TC60 50060`
@@ -557,7 +570,7 @@ only when `AP_PMUCAN_ECU_ENABLED` is built in.
 |---|---|---|
 | `FLMJ` | `OFP_VER_MAIN` | FLCC firmware major - 5 |
 | `FLMN` | `OFP_VER_SUB` | FLCC firmware minor - 1 |
-| `FLRV` | `OFP_VER_REV` | FLCC firmware revision - **29 as of V5.1.29**, and the value `TM1` reports to KGCS |
+| `FLRV` | `OFP_VER_REV` | FLCC firmware revision - **30 as of V5.1.30**, and the value `TM1` reports to KGCS |
 | `PMRV` | - | **Always 0.** Nothing in the tree writes `Version_REV_Number`; the PMU reports no revision field |
 
 **`TM3`** - the command echo and link health, 10 Hz. The five command columns carry `TC1`'s own
