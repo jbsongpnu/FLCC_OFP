@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Current version** | `PNU_OFP V5.1.30` (DEV) |
+| **Current version** | `PNU_OFP V5.1.31` (DEV) |
 | **Baseline** | ArduPilot Copter **4.7.1** |
 | **Last official release** | `PNU-KAL-FLCC-5.1.0` (same code as 5.1.0 dev) |
 | **Vehicle** | **ArduCopter only.** Plane, Rover and Sub do not link - by construction |
@@ -123,6 +123,23 @@ Engine commands, ECU telemetry, the MAVLink path and a `TC60`/`ENERGYCFG` Tank/F
 transaction all worked, against a **development** ground station built to exercise
 `pnu_kal.xml` - not the production KGCS. That was integration, not protocol conformance:
 section 6 lists what it established and `PMU-005` lists what it did not.
+
+**V5.1.31** adds one parameter, `PNU_GCS_COMPAT`, and nothing else. A ground station built
+against the FC V5.1.0 interface cannot parse an unknown MAVLink message id, and three
+FC-to-GCS messages have been added since then - `TM50` (SAR status), `TM60` and `TM61` (ECU).
+**That limitation was demonstrated on the aircraft on 2026-11-20, and so was the fix**:
+a flight with the old KGCS and the three suppressed, and ECU fuel entry through `TC60` from
+PNU-GCS `V1.0.0-rc` with all three transmitting. `PNU_GCS_COMPAT = 0` is the default and
+**changes nothing** - every message this firmware defines is transmitted, exactly as in
+V5.1.30. `1` suppresses those three. `TM1`, `TM2`, `TM3` and `TM5` are never affected; their
+field sets have not changed since V5.1.0. **It gates transmission only** - CAN polling, ECU
+decoding, engine commands, the step 2c interlock, the `ENERGYCFG` transaction and every
+dataflash record are identical at either setting. **The log is not a substitute for the
+messages, though**: `ECUM` and `ECUE` carry the decoded ECU fields, not the `TM60`/`TM61`
+payloads, and `Mode_Age`, `Energy_Age`, both `Data_Valid` bytes and `Battery_SOC` are in
+neither record - section 9.3 and `GCS-005` say which fields survive. The field tests above
+used a temporary compile-time macro; the parameter reproduces it at runtime and **has not
+itself flown**. See `CHANGELOG.md` and `GCS-005`.
 
 **V5.1.30** makes the logs readable and fixes the one column that was wrong. `README.md`
 sections 9 and 10 now document **every PNU dataflash record field by field** - the twelve
@@ -250,8 +267,8 @@ refused out loud and no CAN frame is sent.
 interlock, ECU telemetry reception and decode, `TM1`/`TM3`/`TM60`/`TM61` on the link, and a
 `TC60`/`ENERGYCFG` transaction whose Tank and Fuel changes came back in the reported values.
 VERSTS reported **2.00** from the device, so `PROTO_ECU_V2` was selected by a real ECU rather
-than reached through the fallback. The ground station was a **development build, V1.0.1
-Pre-release, not the production KGCS**. `AP_PMUCAN` is unchanged between V5.1.29 and V5.1.30,
+than reached through the fallback. The ground station was a **development build, V1.0.0-rc,
+not the production KGCS**. `AP_PMUCAN` is unchanged between V5.1.29 and V5.1.30,
 so that evidence applies to this build as it stands.
 
 **That was integration, not conformance.** `MODESTS` is still a draft with no layout version
@@ -316,13 +333,15 @@ evidence.**
 
 | What | When |
 |---|---|
+| **A V5.1.0-era KGCS cannot parse an unknown MAVLink id, and suppressing the three added messages fixes it.** Flown with `TM50`/`TM60`/`TM61` suppressed. **On a temporary compile-time macro build, NOT on V5.1.31** - the parameter did not exist yet | flight 2026-11-20 |
+| ECU fuel quantity entered through `TC60` from **PNU-GCS `V1.0.0-rc`** with all messages transmitting - a *second* independent implementation written from `pnu_kal.xml`. Same macro build. **`TM50`/`TM60`/`TM61` have now flown with a ground station displaying them** | bench + flight 2026-11-20 |
 | **ECU V2.0 end to end.** GCS -> FC -> ECU engine commands - Start, Stop, `Engine_CHK_CMD`, `Battery_Control_CMD`, `Engine_Manual`, `Engine_Throttle_CMD` - and the ECU -> FC -> GCS telemetry path, both directions, on the ground and then in the air | bench + flight 2026-11-19 |
 | **VERSTS reports 2.00 from a real device**, so `PROTO_ECU_V2` is selected by an ECU rather than reached through the unconfirmed fallback | bench 2026-11-19 |
 | `TM1`, `TM3`, `TM60` and `TM61` received and displayed - existing PMU fields and the new ECU fields alike. **Reception and display only**, not calibration or per-field accuracy | bench + flight 2026-11-19 |
 | Step 2c **permit** path on real hardware: Start accepted about 5 s after Stop, inside the 10 s window. The refusal paths were **not** exercised; this project's record for them is SITL - 2026-10-29 and 2026-11-11 - and no hardware run of them is recorded here | bench 2026-11-19 |
 | `TC60`/`ENERGYCFG` transmitted to a real ECU, with Tank and Fuel changes reflected in the reported values. **Battery and SOC were sent as `0xFFFF` (keep) only**, deliberately, because a wrong value there could make the ECU misbehave | bench 2026-11-19 |
 | Fuel estimate over **one** 15-minute flight: 3 L initial, 2 L actual remaining, 2 L ECU-estimated - agreement at the reported resolution. One observation, one condition, 1 L of resolution | flight 2026-11-19 |
-| Conditions for every 2026-11-19 row above: FC **V5.1.29**, development GCS **V1.0.1 Pre-release**, `CAN_Dn_PNU_OPTS = 1`, **1 Mbps**, dataflash BIN logs saved and reviewed | 2026-11-19 |
+| Conditions for every 2026-11-19 row above: FC **V5.1.29**, development GCS **V1.0.0-rc**, `CAN_Dn_PNU_OPTS = 1`, **1 Mbps**, dataflash BIN logs saved and reviewed | 2026-11-19 |
 | PMU telemetry, KGCS and FC command paths, prearm with the PMU absent | bench 2026-10-19 |
 | **In-flight PMU failsafe** - CAN connector pulled while armed, RTL taken immediately, clean recovery on reconnect. **Legacy PMU**, not an ECU; not retested on 2026-11-19 | bench 2026-10-19 |
 | `ARMING_SKIPCHK` bit 13 bypass and the one-shot startup report, both after the 5.1.16 fixes | bench 2026-10-19 |
@@ -335,6 +354,8 @@ evidence.**
 
 | What | When |
 |---|---|
+| **`PNU_GCS_COMPAT` in V5.1.31 is SITL-verified only and has never flown.** Default 0 on fresh storage; 1 suppresses `TM50`/`TM60`/`TM61` and 0 restores them, live, with no reboot; the value survives a reboot; suppression holds on **both** MAVLink channels at once; `TM1`/`TM2`/`TM3`/`TM5` unaffected throughout | 2026-11-20 |
+| A `TC60` ENERGYCFG transaction **completes normally while `TM61` is suppressed** - `ECUT` logged, `ECUX` `Res=1` then `Res=2 OK` with `Att=1`, the ECU's Tank read back as commanded, and the latched `Cfg_Result` readable the moment transmission is re-enabled | 2026-11-20 |
 | The whole PMU engine sequence including takeoff, RTL and the D9 failsafe via the silent trigger | 2026-10-29 |
 | **Step 2c's two windows, with the original defect reproduced** when guard 1 was disabled | 2026-10-29 |
 | SAR connection layer, TM50 at 5.01 Hz, `Live_Counter` semantics | 2026-10-30 |
@@ -369,7 +390,7 @@ evidence.**
 - **No CubeMars motor has ever turned.** No SAR hardware has ever been connected. No KGCS has
   driven TC50. The shared bus has never run on real CAN.
 - **No production KGCS has driven anything.** The 2026-11-19 ECU validation used a development
-  ground station, V1.0.1 Pre-release, built to exercise the `pnu_kal.xml` interface. That an
+  ground station, V1.0.0-rc, built to exercise the `pnu_kal.xml` interface. That an
   independent implementation parsed and displayed every message is evidence about the interface
   definition - `TM60`'s zero CRC_EXTRA included - and not about the production KGCS.
 
@@ -442,6 +463,7 @@ last month's upstream definitions. **The staging directory must never be committ
 | Devices fitted | `CAN_D1_PNU_OPTS` - bit 0 PMU, bit 1 gimbal, bit 2 SAR. **Default 1** (PMU only) |
 | SAR Start interlock | `CAN_D1_PNU_SCHK` - bit 0 RTK Fixed, bit 1 GPS fix age, bit 2 gimbal attitude age, bit 3 navigation health. **Default 11** |
 | Gimbal | `MNT1_TYPE = 15`; operating limits in `MNT1_*_MIN/MAX`; mechanical limits in `CAN_D1_PNU_MRLL/MPIT/MYAW`; `CAN_D1_PNU_HOME` **0** |
+| GCS compatibility | `PNU_GCS_COMPAT` - **0** transmits every message this firmware defines, **1** suppresses `TM50`/`TM60`/`TM61` for a V5.1.0-era KGCS. **Global: it applies to every MAVLink channel at once**, not per link. Transmission only, and no reboot needed. `GCS-005` |
 | KGCS telemetry port | `SERIALx_PROTOCOL = 2` (MAVLink2) - **never 1.** Every PNU-KAL ICD message is id >= 50001, which MAVLink1 cannot encode. See D2 |
 | Viewpro mount | `MNT1_TYPE = 11`, `CAM1_TYPE = 4`, `SERIALx_BAUD = 115`, `SERIALx_PROTOCOL = 8` |
 | Gremsy mount | `MNT1_TYPE = 6`, `CAM1_TYPE = 6`, `SERIALx_BAUD = 115`, `SERIALx_PROTOCOL = 2`. **Set the VIO's camera component to 100**, not its default 101. **Set `MNT1_YAW_MIN/MAX` explicitly** - `GCS-003` |
@@ -529,7 +551,10 @@ path wins** and the KGCS-specific behaviour moves into `AP_Q30`.
    capability** - the D8a `suppress_gimbal_device_attitude_status()` precedent.
 3. A TC2 function with no FC path goes **GCS to payload direct**, not into new FC code.
 4. Check return values and report (D10 Stage 1) rather than diverging silently.
-5. Anything new on the wire must be additive and ignorable by a standard GCS.
+5. Anything new on the wire must be additive and ignorable by a standard GCS. **A V5.1.0-era
+   KGCS is not such a GCS** - 2026-11-20 showed it rejects unknown ids rather than ignoring
+   them - which is why `PNU_GCS_COMPAT` exists. The rule stands for standard ground stations;
+   `GCS-005` records the exception.
 
 ### Testing against the fake CAN devices
 
@@ -604,7 +629,7 @@ only when `AP_PMUCAN_ECU_ENABLED` is built in.
 |---|---|---|
 | `FLMJ` | `OFP_VER_MAIN` | FLCC firmware major - 5 |
 | `FLMN` | `OFP_VER_SUB` | FLCC firmware minor - 1 |
-| `FLRV` | `OFP_VER_REV` | FLCC firmware revision - **30 as of V5.1.30**, and the value `TM1` reports to KGCS |
+| `FLRV` | `OFP_VER_REV` | FLCC firmware revision - **31 as of V5.1.31**, and the value `TM1` reports to KGCS |
 | `PMRV` | - | **Always 0.** Nothing in the tree writes `Version_REV_Number`; the PMU reports no revision field |
 
 **`TM3`** - the command echo and link health, 10 Hz. The five command columns carry `TC1`'s own
@@ -708,6 +733,20 @@ attached to hear the boot statustext.
 | `ModeRx` `EnrgRx` | MODESTS and ENERGYSTS replies decoded |
 | `Short` | ECU replies dropped for a DLC below 8 |
 | `CfgAcc` `CfgBsy` | `TC60`s that started a transaction, and ones refused because one was already running |
+
+**What these records do NOT hold: the `TM60` and `TM61` payloads.** They carry the decoded ECU
+fields, and no record anywhere stores either message serialized. That matters when
+`PNU_GCS_COMPAT = 1` suppresses them - `GCS-005` - because the log is then the only copy, and
+it is not a complete one.
+
+| Message field | In the log? |
+|---|---|
+| `TM60` `System_State` `Operation_Mode` `Ctrl_Mode` `Alert_Level` `EMS_Mode` `Start_Gate` `Initial_Fail` `RPM_Target` | **Yes** - `ECUM` `SSt` `OMd` `CMd` `Alrt` `EMd` `Gate` `IFl` `RPMT` |
+| `TM61` `Tank` `Battery` `Endurance` | **Yes** - `ECUE` `Tank` `Batt` `Endr` |
+| `TM61` `Cfg_Result` `Cfg_Attempts` | **Yes, at a transaction only** - `ECUX` `Res` `Att`, latched between times |
+| `TM60.Mode_Age`, `TM61.Energy_Age` | **No.** Record spacing bounds staleness - 100 ms for `ECUM`, 1 s for `ECUE` - but the age at send time is not stored |
+| `TM60.Data_Valid`, `TM61.Data_Valid` | **No.** SEEN is inferable (neither record is written before a reply decodes); FRESH only from cadence; the SOC bit not at all |
+| **`TM61.Battery_SOC`** | **No, and not reconstructable.** It is `BATSTS.GAGE`, which no periodic record carries - `TM11.BSTS` is `Battery_Status` and is permanently zero. It appears only as `ECUX.rSOC`, at a `TC60` transaction |
 
 ### 9.4 `PSTS` bits - `TM12.PSTS`, from AUX2STS
 

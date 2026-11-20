@@ -21,6 +21,111 @@ A feature exercised only in SITL is **not** hardware-verified. Entries say so ex
 
 ---
 
+## V5.1.31 - one parameter, so the old ground station can fly
+
+`PNU_GCS_COMPAT`. No other behaviour changed, and at its default nothing changes at all.
+
+**This version is SITL-verified and nothing more.** The field tests below were flown on a
+temporary compile-time macro, before the parameter existed; **V5.1.31 itself has never been
+on an aircraft.**
+
+**The problem was measured, not predicted.** The design rule for this dialect has always been
+that anything new on the wire is additive and ignorable by a standard GCS. Three FC-to-GCS
+messages have been added since FC V5.1.0 - `TM50 51050` SAR status, `TM60 51060` ECU mode and
+`TM61 51061` ECU energy - and on **2026-11-20** a V5.1.0-era KGCS was shown not to ignore them.
+MAVLink2 already makes them skippable, with a correct length and CRC, so the receiver is not
+following the protocol; but nothing the FC sends can make an unknown id parseable by a parser
+that refuses unknown ids. The only lever on this side is not to send them.
+
+### What was flown, 2026-11-20
+
+| Configuration | Result | Evidence |
+|---|---|---|
+| Old KGCS, the three messages suppressed | Flew | **Flight** |
+| PNU-GCS `V1.0.0-rc`, everything transmitting | ECU fuel quantity entered through `TC60` and read back | **Bench**, then **Flight** |
+
+**Both were run on a temporary compile-time macro**, not on this version's parameter. The
+parameter gates the same three call sites and SITL shows the behaviour matches, but no
+evidence below is flight evidence for V5.1.31.
+
+Together those bound the problem from both sides: the old station works once the three are
+gone, and a station written from the current `pnu_kal.xml` uses them. **Both configurations
+flew**, so the three added messages have now been exercised in the air both absent and
+present, each with the ground station that expects them that way. PNU-GCS `V1.0.0-rc` is a
+release candidate and a **second independent implementation** of the dialect, not the
+production KGCS - `GCS-004` stays open.
+
+### The parameter
+
+| Value | Effect |
+|---|---|
+| **0** (default) | Every message this firmware defines is transmitted. **Byte-identical to V5.1.30** |
+| **1** | `TM50`, `TM60` and `TM61` are not transmitted |
+| 2+ | Undefined, and behaves as 0 |
+
+An enum, not a bitmask: the two values are the two ground stations this aircraft is flown
+from, and per-message control has never been wanted. **Bits would have been worse** in one
+specific way - a future message would have had to be added to a saved bitmask to transmit at
+all, whereas an undefined enum value falls through to transmitting everything, which is the
+setting that loses no data.
+
+**It is global, and that is measured, not assumed.** The gate reads one singleton, so it
+cannot differ between links: with `1` set, `TM50`/`TM60`/`TM61` were absent from **two
+MAVLink channels simultaneously** while `TM1`/`TM2`/`TM3`/`TM5` continued on both.
+
+**It gates transmission only.** Three early returns in the senders in `GCS_PNU.cpp`, placed
+after the producers have run. All three functions are `const` and contain no assignment and
+no logging, so there is no state update or record for the gate to pre-empt. CAN polling, ECU decoding, the `ECU_Mode_Status` and
+`ECU_Energy_Status` structs, engine commands, the step 2c interlock, the `ENERGYCFG`
+transaction and **every dataflash record** are identical at either setting. `TM1`, `TM2`, `TM3`
+and `TM5` are never affected - their field sets were compared field by field against
+`ccf1f0f60a` and are unchanged.
+
+**A new `PNU_` parameter group**, `libraries/AP_PNU_GCS/`, holding one parameter and no state,
+no thread and no I/O. It is not in `CAN_Dn_PNU_` because `TM50` is transmitted by an
+unconditional scheduler task whose sender sits outside every `AP_PNU_CAN_ENABLED` guard, so a
+parameter inside the CAN driver could not gate it in a build with the driver compiled out -
+and a core path must not depend on an optional component. It is not in the `GCS` group because
+that prefix is `MAV`, which would have made the name 18 characters.
+
+### Verification
+
+| What | Evidence |
+|---|---|
+| The parameter exists under exactly that name, and defaults to 0 | **SITL.** A `PARAM_SET` for `PNU_GCS_COMPAT` is accepted and echoed back in `PARAM_VALUE` |
+| `0` transmits everything | **SITL.** `TM1` 8.38, `TM2` 10.07, `TM3` 8.38, `TM5` 10.07, **`TM50` 5.09, `TM60` 8.38, `TM61` 0.80 Hz** |
+| `1` suppresses exactly three | **SITL.** `TM50`, `TM60`, `TM61` all **0 frames in 10 s**; `TM1`/`TM2`/`TM3`/`TM5` unchanged at 8.69/9.99/8.69/9.99 Hz |
+| `0` restores them, **with no reboot** | **SITL.** Same run, third phase: `TM50` 4.98, `TM60` 8.46, `TM61` 0.80 Hz. The value was changed twice in flight-time by `PARAM_SET` |
+| Dataflash is untouched by the suppression | **SITL.** Across a whole 49 s run, including the suppressed window: `ECUM` 469 rows, max gap **0.15 s** at 10 Hz; `ECUE`, `ECUC`, `SARS` 47 rows each, max gap ~1.0 s at 1 Hz. No interruption |
+| The value **persists across a reboot** | **SITL.** Set to 1, SITL restarted against the existing parameter storage, read back **1.0**, and the three messages were still absent |
+| The default is 0 on **fresh** storage | **SITL.** A wiped parameter file reads back **0.0** and every message is transmitted |
+| Suppression covers **every channel** | **SITL.** `TM50`/`TM60`/`TM61` 0 frames on SERIAL0 *and* SERIAL1 at the same time; `TM1`/`TM2`/`TM3`/`TM5` 8.6-9.9 Hz on both |
+| `TC60` is unaffected by `TM61` suppression | **SITL.** With `PNU_GCS_COMPAT = 1`, a `TC60` Tank=900 gave `ECUT`, then `ECUX` `Res=1 IN_PROGRESS` and `Res=2 OK` with `Att=1`, the fake ECU logged `RX ENERGYCFG tank=900 -> applied`, and the FC said "ENERGYCFG verified after 1 frame". Setting the parameter back to 0 showed the latched `Cfg_Result=2`, `Cfg_Attempts=1`, `Tank=900` on the wire |
+| A refused `TC60` is equally unaffected | **SITL.** In the other run, with the ECU not in STANDBY, `ECUT` and `ECUX` `Res=6 REJECTED_MODE`, `Att=0` were both written while suppressed |
+| No existing parameter moved | **Build.** `param_parse.py` output compared against `922f00fdf5`: across 44,440 lines the only difference is the new `PNU_` group. No index, default, range or group of any existing parameter changed |
+| Builds | **Build.** CubeOrangePlus 1,743,528 B flash and SITL both build; `run_astyle.py --dry-run` clean |
+
+The SITL runs were three fakes on `vcan0` at `PNU_OPTS = 7` with the fake PMU in ECU V2.0 mode,
+so `VERSTS` selected `ECU_V2` and `TM60`/`TM61` were genuinely eligible to transmit.
+
+### Not verified
+
+- **The V5.1.31 build has not flown.** The 2026-11-20 field tests used a temporary
+  compile-time macro at the same three call sites; this parameter reproduces it at runtime and
+  SITL confirms the equivalence, but that is not the same as having flown it. Repeat one
+  ground run with `PNU_GCS_COMPAT = 1` against the old KGCS first - `GCS-005`.
+- **No production KGCS was involved**, on either side of the test. `GCS-004` is unchanged.
+- **The setting is global, not per-channel.** KGCS and PNU-GCS attached simultaneously has
+  never been flown and this parameter was not built for it.
+- Nothing here bears on any ECU protocol edge case. The `PMU-005` open items are untouched.
+- **The dataflash is not a substitute for the suppressed messages.** `ECUM` and `ECUE` hold
+  the decoded ECU fields, not the `TM60`/`TM61` payloads, and nothing in this version adds
+  such logging. `Mode_Age`, `Energy_Age`, both `Data_Valid` bytes and `Battery_SOC` are in
+  no record - README section 9.3 and `GCS-005` list exactly which fields survive. Flying
+  with `PNU_GCS_COMPAT = 1` loses those from the flight record as well as from the link.
+
+---
+
 ## V5.1.30 - the logs say what they mean
 
 No flight behaviour changed. One logged value was wrong and is now right, every PNU
@@ -131,7 +236,7 @@ The first time any of the ECU work met a device. Ground tests and then a flight,
 firmware V5.1.29**, against a real ECU reporting **VERSTS 2.00**. **No firmware, MAVLink or
 documentation change was made for this run** - it is a record of what the shipped build did.
 
-**The ground station was a development build, `V1.0.1 Pre-release`**, written to exercise the
+**The ground station was a development build, `V1.0.0-rc`**, written to exercise the
 `pnu_kal.xml` interface. **It is not the production KGCS**, and nothing here is evidence about
 KGCS - see `GCS-004`.
 

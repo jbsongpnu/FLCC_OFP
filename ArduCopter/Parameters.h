@@ -387,6 +387,9 @@ public:
         k_param_throw_altitude_descend,
         k_param_throw_altitude_ascend,
 
+        // PNU : appended, never renumbered - existing keys are in saved parameter files
+        k_param_pnu_gcs,
+
         // the k_param_* space is 9-bits in size
         // 511: reserved
     };

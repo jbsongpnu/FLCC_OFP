@@ -127,6 +127,7 @@
 
 #include <AP_Mount/AP_Mount.h>
 #include <AP_Q30/AP_Q30.h>
+#include <AP_PNU_GCS/AP_PNU_GCS.h>      // PNU : PNU_GCS_COMPAT
 
 #include <AP_Camera/AP_Camera.h>
 
@@ -512,6 +513,10 @@ private:
 #if AP_Q30_ENABLED
     AP_Q30 q30;
 #endif
+
+    // PNU : PNU_ parameter group - the GCS link compatibility setting.  Not guarded:
+    // it gates TM50, which is transmitted whether or not the PNU CAN driver is built.
+    AP_PNU_GCS pnu_gcs;
 
 #if AP_AVOIDANCE_ENABLED
     AC_Avoid avoid;

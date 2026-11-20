@@ -50,6 +50,9 @@
 // exactly this include - TM50 is sent whether or not the CAN driver is in the build.
 #include <AP_PNUSAR/AP_PNUSAR.h>
 #include <AP_PNU_CAN/AP_PNU_CAN.h>
+// PNU : PNU_GCS_COMPAT, which gates the three TMs added since FC V5.1.0.  Unguarded on
+// purpose - TM50 is transmitted whether or not AP_PNU_CAN is in the build.
+#include <AP_PNU_GCS/AP_PNU_GCS.h>
 // PMU-005a stage 4 : AP_PMUCAN_ECU_ENABLED, and the two ECU telemetry payloads it guards.
 #include <AP_PMUCAN/AP_PMUCAN_config.h>
 
@@ -296,6 +299,15 @@ void GCS_MAVLINK::handle_gcs_flcc_pmu_ctrl(const mavlink_message_t &msg)
 // -------------------------------------------------------------------------
 void GCS_MAVLINK::send_message_flcc_gcs_sar_status() const
 {
+    // PNU_GCS_COMPAT 1 : this message did not exist in FC V5.1.0 and a ground station
+    // built against that interface cannot parse an unknown id.  Transmission only - the
+    // producer above has already run, so the decode, the structs and every dataflash
+    // record are identical at either setting.  nullptr transmits, which is the default.
+    const AP_PNU_GCS *pnu_compat = AP_PNU_GCS::get_singleton();
+    if ((pnu_compat != nullptr) && pnu_compat->suppress_post_v510_tm()) {
+        return;
+    }
+
     mavlink_msg_sys_icd_flcc_gcs_sar_status_send(
             chan,
             SAR_Status.status,
@@ -409,6 +421,15 @@ void GCS_MAVLINK::handle_gcs_flcc_sar_ctrl(const mavlink_message_t &msg)
 // -------------------------------------------------------------------------
 void GCS_MAVLINK::send_message_flcc_gcs_ecu_mode_status() const
 {
+    // PNU_GCS_COMPAT 1 : this message did not exist in FC V5.1.0 and a ground station
+    // built against that interface cannot parse an unknown id.  Transmission only - the
+    // producer above has already run, so the decode, the structs and every dataflash
+    // record are identical at either setting.  nullptr transmits, which is the default.
+    const AP_PNU_GCS *pnu_compat = AP_PNU_GCS::get_singleton();
+    if ((pnu_compat != nullptr) && pnu_compat->suppress_post_v510_tm()) {
+        return;
+    }
+
     if (!ECU_TM_Enabled) {
         return;
     }
@@ -441,6 +462,15 @@ void GCS_MAVLINK::send_message_flcc_gcs_ecu_mode_status() const
 // -------------------------------------------------------------------------
 void GCS_MAVLINK::send_message_flcc_gcs_ecu_energy_status() const
 {
+    // PNU_GCS_COMPAT 1 : this message did not exist in FC V5.1.0 and a ground station
+    // built against that interface cannot parse an unknown id.  Transmission only - the
+    // producer above has already run, so the decode, the structs and every dataflash
+    // record are identical at either setting.  nullptr transmits, which is the default.
+    const AP_PNU_GCS *pnu_compat = AP_PNU_GCS::get_singleton();
+    if ((pnu_compat != nullptr) && pnu_compat->suppress_post_v510_tm()) {
+        return;
+    }
+
     if (!ECU_TM_Enabled) {
         return;
     }

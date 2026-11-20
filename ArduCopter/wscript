@@ -33,6 +33,7 @@ def build(bld):
             'AP_PNU_CAN',
             'AP_PNUGimbal',
             'AP_PNUSAR',
+            'AP_PNU_GCS',
         ],
     )
 

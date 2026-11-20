@@ -590,6 +590,12 @@ const AP_Param::Info Copter::var_info[] = {
     GOBJECT(_gcs,           "MAV",  GCS),
 #endif
 
+    // PNU : PNU_ group - GCS link settings.  See AP_PNU_GCS.h for why this is not in
+    // AP_PNU_CAN's CAN_Dn_PNU_ group and not in GCS's MAV_ group.
+    // @Group: PNU_
+    // @Path: ../libraries/AP_PNU_GCS/AP_PNU_GCS.cpp
+    GOBJECT(pnu_gcs,        "PNU_", AP_PNU_GCS),
+
     AP_VAREND
 };
 
