@@ -507,3 +507,426 @@ feedback trigger is the fake's assumption, and no PMU, SAR or motor firmware is 
    Gremsy bench session did not exercise it.
 5. **Any AUTO mission with a gimbal pitch item**, since the relocation silently changes its
    behaviour.
+
+---
+
+## 9. PMU Log Records
+
+Every PMU and ECU dataflash record the firmware writes, with what each column holds and
+where it comes from. **Raw counts, as received** - the scale column is what to multiply by,
+and the FC applies none of it. Field names are what appears in the log, so this table is the
+only thing needed to read one.
+
+Written from the CAN driver thread, not from the telemetry path: the log does not depend on
+whether a ground station is attached, which is what `V5.1.25` fixed. The ECU records exist
+only when `AP_PMUCAN_ECU_ENABLED` is built in.
+
+### 9.1 Legacy and shared - written on both PMU generations
+
+**`TM11`** - battery, engine and hours, 10 Hz.
+
+| Field | Source | Type | Scale | Meaning |
+|---|---|---|---|---|
+| `HOURCNT` | AUX2STS 0-2 legacy, 0-3 ECU | UINT24 / UINT32 | 1 s | Accumulated engine running time. **Seconds, despite the name** |
+| `DATE` | VERSTS 0-3 | UINT32 | BCD | PMU software date, BCD `YYYYMMDD` |
+| `IBAT` | BATSTS 4-5 | INT16 | 0.1 A | Battery current. **Positive charging, negative discharging** |
+| `TEMP` | BATSTS 2-3 | INT16 | 0.1 degC | Battery temperature |
+| `BSTS` | - | - | - | **Always 0.** The BATSTS decode is commented out; the ICD calls the field reserved |
+| `RPM` | ENGSTS 4-5 | UINT16 | 1 rpm | Engine speed |
+| `TEMP1` | ENGSTS 0-1 | INT16 | 0.1 degC | Cylinder head 1 temperature |
+| `TEMP2` | ENGSTS 2-3 | INT16 | 0.1 degC | Cylinder head 2 temperature |
+| `GCMD` | AUX1STS 6-7 | INT16 | 0.1 % | ECU: accepted `BATCTRL` SOC setpoint, 84% = raw 840. **Not a copy of the command integer** |
+
+**`TM12`** - power, status word and versions, 10 Hz.
+
+| Field | Source | Type | Scale | Meaning |
+|---|---|---|---|---|
+| `VBUS` | AUX1STS 4-5 | INT16 | 0.1 V | System voltage |
+| `ILD` | AUX1STS 2-3 | INT16 | 0.1 A | Load current, described as always positive |
+| `ICMD` | AUX1STS 0-1 | ECU UINT16, legacy TBD | ECU 0.1 A | ECU: EMS charge-current target. **Legacy type and scale are undefined in the ICD** |
+| `PTEMP` | AUX2STS 6-7 | INT16 | 0.1 degC | PMU temperature |
+| `PSTS` | AUX2STS 4-5 | UINT16 | bitfield | PMU status and warnings - see 7.4 |
+| `PCL` | ENGSTS 7 | INT8 | 1 % | ECU: throttle **setpoint**, not a measured position. Legacy: throttle position |
+| `GAS` | ENGSTS 6 | INT8 | 1 % | Remaining fuel. **ECU: an estimate from RPM/load and the configured inventory, and 100 may be the uninitialised placeholder** - see 7.3 `ECUM.IFl` bit 0x20 |
+| `MN` | VERSTS 4 | UINT8 | BCD | PMU software minor version |
+| `MJ` | VERSTS 5 | UINT8 | BCD | PMU software major version. **`MJ` 2 or higher selects the ECU message set** |
+
+**`TM13`** - version identity, 10 Hz.
+
+| Field | Source | Meaning |
+|---|---|---|
+| `FLMJ` | `OFP_VER_MAIN` | FLCC firmware major - 5 |
+| `FLMN` | `OFP_VER_SUB` | FLCC firmware minor - 1 |
+| `FLRV` | `OFP_VER_REV` | FLCC firmware revision - **29 as of V5.1.29**, and the value `TM1` reports to KGCS |
+| `PMRV` | - | **Always 0.** Nothing in the tree writes `Version_REV_Number`; the PMU reports no revision field |
+
+**`TM3`** - the command echo and link health, 10 Hz. The five command columns carry `TC1`'s own
+names so commanded and echoed values line up.
+
+| Field | Meaning |
+|---|---|
+| `EGOF` | `Engine_OnOff` as committed by the step 2c interlock |
+| `BCTC` | `Battery_Control_CMD`, the SOC setpoint |
+| `EGM` | `Engine_Manual`, 1 manual / 0 automatic |
+| `ETRC` | `Engine_Throttle_CMD`, percent, manual only |
+| `ECHK` | `Engine_CHK_CMD`, choke: 1 close / 0 open |
+| `FAIL` | PMU link health: **0 CONNECTED, 1 COMMUNICATION_ERROR, 2 CONNECTION_FAILURE** |
+
+**`PMUC`** - cumulative communication counters, 1 Hz. **Totals since boot**, so the useful
+reading is a difference between two records.
+
+| Field | Meaning |
+|---|---|
+| `RxSts` | Recognised status frames decoded |
+| `RtrTx` | RTR polls sent - **the five legacy slots only**; ECU polls are counted in `ECUC` |
+| `RtrErr` | RTR polls that could not be sent |
+| `CmdTx` | Command frames sent. `CmdTx`/`RtrTx` is **0.800** in steady state: four of five slots carry a command |
+| `CmdErr` | Command frames that could not be sent |
+| `Short` | Status frames dropped for a DLC below 8 |
+
+**`PMUE`** - one record per engine-interlock decision, event driven. Not periodic.
+
+| Field | Meaning |
+|---|---|
+| `Mode` | Engine state the FC holds **after** this event: 0 OFF, 1 ON |
+| `OnCnt` | `_engineoncnt` as it stood **before** the event reset it |
+| `OffCnt` | `_engineoffcnt`, likewise |
+| `Armed` | 1 once a valid Stop pair has been seen this boot |
+| `StopAge` | ms between the last valid Stop pair and the instant this attempt began - the quantity guard 2 tests - or **-1** when `Armed` is 0 or the event is not a Start decision |
+| `Evt` | **Append-only** event code: 1 START_CMD, 2 STOP_CMD, 3 START_NO_STOP, 4 START_STALE_STOP, 5 TC1_STALE, 6 START_TX_FAIL, 7 STOP_TX_FAIL |
+
+**`TC1`** - every PMU command from KGCS, as received, one record per message. Columns match
+`TM3`'s five.
+
+### 9.2 Commanding - written when a command arrives
+
+**`ECUT`** - every `TC60` at ingress, **including ones refused for their source**, which are
+the ones somebody will be looking for afterwards.
+
+| Field | Scale | Meaning |
+|---|---|---|
+| `Tank` `Fuel` | 0.01 L | As received. **65535 means keep the current value** |
+| `Batt` | 0.1 Ah | As received, or 65535 |
+| `SOC` | 0.1 % | As received, or 65535 |
+| `SYS` `COMP` `CHAN` | - | Sender system and component id, and the MAVLink channel it arrived on |
+
+**`ECUX`** - one record per `ENERGYCFG` transaction state change, and one per accepted or
+refused command. **The `c` columns are what was commanded, the `r` columns what the ECU read
+back** at that moment, so a failure is diagnosable from the log alone.
+
+| Field | Scale | Meaning |
+|---|---|---|
+| `Res` | - | `Cfg_Result`: 0 NONE, 1 IN_PROGRESS, 2 OK, 3 MISMATCH_AFTER_3, 4 CANCELLED_MODE_CHANGE, 5 REJECTED_RANGE, 6 REJECTED_MODE, 7 REJECTED_NOT_ECU, 8 TX_FAIL |
+| `Att` | - | ENERGYCFG frames actually put on the bus, 0-3. **0 for anything refused before transmission** |
+| `cTank` `cFuel` | 0.01 L | Commanded, 65535 = keep |
+| `cBatt` | 0.1 Ah | Commanded, 65535 = keep |
+| `cSOC` | 0.1 % | Commanded, 65535 = keep |
+| `rTank` | 0.01 L | Read back from ENERGYSTS |
+| `rBatt` | 0.1 Ah | Read back from ENERGYSTS |
+| `rGas` | 1 % | Read back from ENGSTS - an **integer percent**, which is why `Res` 2 cannot confirm 0.01 L |
+| `rSOC` | 0.1 % | Read back from BATSTS `GAGE` |
+
+### 9.3 ECU only - written when `VERSTS` selects the ECU generation
+
+**`ECUM`** - MODESTS as received, 10 Hz. **Raw codes; an unlisted value is unknown and is not
+mapped onto the nearest defined one.** Written only once a reply has been decoded.
+
+| Field | Meaning |
+|---|---|
+| `SSt` | `system_state`: 1 INITIALIZATION, 2 READY, 3 ENGINE_RUN, 4 USER_SHELL |
+| `OMd` | `operation_mode`: 1 DO_NOTHING, 3 STANDBY, 4 STARTUP, 5 RUNNING, 6 STOP. **0 and 2 undefined.** The two that accept `ENERGYCFG` are 1 and 3 |
+| `CMd` | `ctrl_mode`: 1 NONE, 2 MANUAL, 3 STARTUP, 4 STOP, 5 FIXED_RPM, 6 EMS, 7 INACTIVE, 8 FAIL_TACHO, 9 FAIL_CURR_SENSOR, 10 FAIL_VOLT_SENSOR |
+| `Alrt` | `alert_level`: 0 NONE, 1 ADVISORY (plan to land), 2 IMMEDIATE (land now) |
+| `EMd` | `ems_mode`: 0 INIT, 1 START, 2 WARMUP, 3 CHARGE, 4 IDLE, 5 DISCHARGE, 6 EMERGENCY, 7 STOPPING, 8 THERMAL_HOLD, 9 FORCED_CHARGE |
+| `Gate` | `start_gate`, result of the last start attempt: 0 OK **or no attempt since power-on**, 4-13 BLOCKED_*, 15-18 ABORTED_*, 19 BLOCKED_CURRENT_FAULT. **1-3 and 14 undefined.** Full names in `pnu_kal.xml` |
+| `IFl` | `initial_fail` bitmask: 0x01 HEADER_BAD, 0x02 EEPROM_LAYOUT, 0x04 CALIB_MISSING, **0x20 FUEL_LEVEL - while set the ECU substitutes a full tank and `TM12.GAS` reads 100 as a placeholder**. 0x08/0x10/0x40/0x80 undefined |
+| `RPMT` | `rpm_target`, 1 rpm. **Zero means not governing RPM, not a confirmed engine stop** |
+
+**`ECUE`** - ENERGYSTS as received, 1 Hz. Written only once a reply has been decoded.
+
+| Field | Scale | Meaning |
+|---|---|---|
+| `Tank` | 0.01 L | Configured tank capacity |
+| `Batt` | 0.1 Ah | Configured battery capacity |
+| `Endr` | 1 s | Remaining endurance, **with two sentinels that override the scale: 65534 means 65534 s or more, 65535 means unknown**. The ECU reports 65535 whenever no fuel is burning |
+
+**`ECUC`** - the ECU link's own counters and the selected generation, 1 Hz. **Written on both
+generations**, which is what keeps the selection in the log when no ground station is
+attached to hear the boot statustext.
+
+| Field | Meaning |
+|---|---|
+| `Proto` | Raw latched selection: **0 UNKNOWN (fallback in use), 1 LEGACY_PMU, 2 ECU_V2** |
+| `RtrTx` `RtrErr` | ECU-only polls sent and failed. **Separate from `PMUC` by design** - on a legacy aircraft this stops at 2, the boot frames sent before VERSTS answered |
+| `ModeRx` `EnrgRx` | MODESTS and ENERGYSTS replies decoded |
+| `Short` | ECU replies dropped for a DLC below 8 |
+| `CfgAcc` `CfgBsy` | `TC60`s that started a transaction, and ones refused because one was already running |
+
+### 9.4 `PSTS` bits - `TM12.PSTS`, from AUX2STS
+
+| Bit | Set means | Bit | Set means |
+|---:|---|---:|---|
+| 15 | Battery overvoltage | 7 | ECU STALL_UNDER_LOAD; legacy unintended stop |
+| 14 | Battery undervoltage | 6 | Engine RPM above threshold |
+| 13 | Battery over-discharge | 5 | Reserved |
+| 12 | ECU CRITICAL_FUEL, below 5% | 4 | Cooling fan running |
+| 11 | ECU GENERATOR_OVERLOAD | 3 | Choke closed |
+| 10 | Cylinder head over-temperature | 2 | Stop sequence in progress |
+| 9 | Running-time limit | 1 | Start sequence in progress |
+| 8 | Low fuel | 0 | Manual operation |
+
+Thresholds are ECU parameter defaults and are listed in `PMU CAN Comm Protocol.md`. Bits 12,
+11 and 7 are reserved on the legacy PMU.
+
+---
+
+## 10. PNUGimbal and PNUSAR Log Records
+
+The two are documented together because they are one subsystem in everything but the class
+name: both ride the same `AP_PNU_CAN` bus, both are enabled by `CAN_Dn_PNU_OPTS` bits, both
+share the 40 ms slot budget, and **step 3f joins them outright** - the gimbal's encoder
+feedback is what is supposed to fill the SAR attitude frame `0x404`. A log question about
+one is usually a log question about both.
+
+**This subsystem logs far less than the PMU does, and the asymmetry is deliberate reading
+material, not an oversight to gloss over.** SAR writes three records; **PNUGimbal writes
+none at all**. What that means in practice is set out in 10.5 to 10.7.
+
+**Every record below needs an open log, which disarmed means `LOG_DISARMED`.**
+`AP_Logger::should_log()` refuses unless the vehicle is armed or `log_while_disarmed()` is
+set, and a `Write()` that reaches no backend is discarded. This bites harder here than on
+the PMU: gimbal homing is **skipped when the vehicle is armed**, so the entire homing
+sequence falls in the window where nothing is logged by default.
+
+The three SAR records use `AP::logger().Write()`, which applies **no `LOG_BITMASK` gate at
+all** - unlike `MNT`, which needs `MASK_LOG_CAMERA` (bit 15). The trade is criticality:
+`WriteV()` defaults `is_critical` to false, so `SARS`, `SARN` and `SARC` are **dropped first
+when the log buffer runs short**, whereas `MNT` and `MSG` are written with
+`WriteCriticalBlock()` and keep a reserved share of it.
+
+### 10.1 What the subsystem actually writes
+
+| Record | Written by | Rate | Thread | Gated on |
+|---|---|---|---|---|
+| `SARS` | `AP_PNUSAR::log_status()` | 1 Hz **and on every status change** | CAN driver | open log only |
+| `SARN` | `AP_PNUSAR::log_nav()` | 10 Hz, **only while a session is transmitting** | vehicle (`sar_nav_snapshot`) | open log only |
+| `SARC` | `handle_gcs_flcc_sar_ctrl()` | one per `TC50`, **including refused ones** | MAVLink receive | open log only |
+| `MNT` | `AP_Mount_Backend::write_log()` | 10 Hz | vehicle (`ten_hz_logging_loop`) | **`MASK_LOG_CAMERA` and `should_log()`** |
+| `MSG` | `GCS::send_textv()` | per statustext | caller's thread | open log only, **first 50 characters** |
+| *(none)* | `AP_PNUGimbal_*` | - | - | - |
+
+"Open log only" still means armed, or `LOG_DISARMED` set. All five are compiled out without
+`HAL_LOGGING_ENABLED`.
+
+### 10.2 `SARS` - connection state
+
+Written from the driver's own tick since `V5.1.25`. It used to be a side effect of the `TM50`
+telemetry sender, which duplicated it once per attached ground station - **440 of 662 records
+in one SITL run were duplicates under 5 ms apart** - and omitted it entirely when none was
+attached, so an aircraft flying on a dead link kept no SAR history at all.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `STAT` | UINT8 | ICD `SAR_STATUS`, section 14.1: **0 Disconnected, 1 Ready, 2 Stopped, 3 Started, 4 SAR Not Responding.** The internal `START_PENDING` / `STOP_PENDING` states are not MAVLink states and never appear here |
+| `LIVE` | UINT32 | FC-maintained count of **valid** `Heart_Beat` receptions since boot |
+
+A status change resets the periodic slot, so a transition is never followed a millisecond
+later by the record that was already due. **`STAT` 3 with a frozen `LIVE` is the diagnosis
+to look for**: a session nominally running over a link that has stopped answering.
+
+### 10.3 `SARN` - navigation bundle accounting
+
+One record per 10 Hz snapshot, and **the absence of `SARN` is itself the finding** - nothing
+is written unless navigation transmit is on, so a gap means no session was running.
+
+**A `SARN` row means a bundle was built, not that one was sent.** `log_nav()` is called from
+`nav_snapshot()` on the vehicle thread (`AP_PNUSAR_Nav.cpp:372`), after the nine frames are
+encoded and `_bundle.ready` is set, and **before the CAN thread has touched them**. Read 10.3.1
+before drawing any conclusion from this record about what reached the bus.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `TX` | UINT32 | Bundles whose **nine frames were all accepted by the CAN driver**, cumulative since boot. Submission, not confirmed transmission - see 10.3.1 |
+| `Drop` | UINT32 | **The sum of the three below**, not a separate cause |
+| `Ovr` | UINT32 | Vehicle thread overwrote a snapshot the CAN thread had not sent. **The overwritten bundle had already consumed its `ATT_Seq`** |
+| `Stale` | UINT32 | CAN thread reached the snapshot later than `AP_PNUSAR_SNAPSHOT_MAX_AGE_MS`, **100 ms - widened to absorb PMU-004, see PNUSAR-003** |
+| `TxF` | UINT32 | **Bundles** abandoned because the interface refused a frame. One per bundle, however many of the nine had already gone |
+| `Seq` | UINT8 | **The `ATT_Seq` actually packed into `0x404` B6**, wrapping 0-255, so it lines up directly with a receiver log. It is `_att_seq_tx`, the same byte the frame carries - not the counter, which by then holds the next value |
+| `AFlg` | UINT8 | `ATT_Flags` **as transmitted**, `0x404` B7: bit 0 roll valid, bit 1 pitch valid, bit 2 yaw valid, bit 3 fresh. **All four are zero until step 3f** - see SAR-001 |
+| `TxErr` | INT16 | **This backend's** last refused frame, not the bus-wide value the PMU and gimbal also write. **1 means no SAR frame has ever been refused**; 0 is a genuine "TX queue full" |
+
+#### 10.3.1 What `SARN` proves, and what it does not
+
+The record sits at the first of five distinct stages, and conflating them is the easiest way
+to misread a SAR log.
+
+| Stage | Where | Observable in the log? |
+|---|---|---|
+| 1. Snapshot encoded, `ATT_Seq` consumed | `nav_snapshot()`, vehicle thread | **Yes - this is the `SARN` row itself** |
+| 2. Transmission attempted | `send_bundle()`, CAN thread | Only afterwards, via the next row's `TX` / `Drop` |
+| 3. All nine frames accepted by the interface | `send_frame()` returning true nine times | Next row's `TX`, which increments only after frame 9 |
+| 4. Frames physically on the wire | CAN peripheral | **No. Nothing in the FC observes this** |
+| 5. SAR received the bundle | Lumir's equipment | **No. A nav bundle is never acknowledged** |
+
+Consequences, in order of how often they are got wrong:
+
+1. **`TX`, `Drop` and `TxErr` describe the state before this snapshot**, because the row is
+   written before the CAN thread runs. They lag `Seq` by one bundle.
+2. **A `SARN` row with a given `Seq` does not mean that bundle was transmitted.**
+   `send_bundle()` re-checks the age and drops a bundle older than 100 ms
+   (`AP_PNUSAR_Nav.cpp:439`), and abandons the remaining frames the moment one is refused
+   (`:446`). Either way `ATT_Seq` has already been consumed, so **the sequence number exists
+   in the log and never existed on the bus.** The ICD comment at `:283` says exactly this: the
+   counter advances so a dropped bundle "leaves a visible gap rather than vanishing".
+3. **`TX` is submission, not transmission.** `AP_PNU_CAN::send_frame()` counts success as
+   `CANIface::send()` returning 1 (`AP_PNU_CAN.cpp:627`), which means the frame was accepted
+   into the driver's TX queue against a deadline, with `AbortOnError`. A frame that then
+   expires, loses arbitration or dies to a bus-off **is not reported back**, and `TX` has
+   already counted it.
+4. **Nothing here speaks for the receiver.** The only evidence the SAR is alive is
+   `SARS.LIVE`, the `Heart_Beat` count, and that is a link-level fact about the device, not an
+   acknowledgement of any particular bundle.
+
+So when Lumir says "we did not receive it", `SARN` narrows the question: **`Seq` against
+their stream** identifies which bundle, and the next row's `TX` and `Drop` say whether the FC
+got as far as handing it to the CAN peripheral. It cannot settle whether the bits left the
+connector.
+
+Builds up to and including `V5.1.29` logged the counter rather than the transmitted byte, so
+**a log from one of those reads one higher than the wire** - subtract 1 before comparing it
+with a receiver's stream.
+
+### 10.4 `SARC` - every `TC50` from KGCS
+
+Written **before** both the source check and the value test, so a command refused for its
+sender is still in the log. It is the only record of who sent one.
+
+| Field | Meaning |
+|---|---|
+| `CTL` | `Observation_Control`: **0 Prepare, 1 Start, 2 Stop.** 3-255 undefined |
+| `MODE` | `Observation_Mode`: all 256 values allowed, **detailed mapping is TBD in the ICD** |
+| `SYS` `COMP` | Sender system and component id |
+| `CHAN` | MAVLink channel it arrived on |
+
+**`COMP` is logged and deliberately not enforced.** The ICD names no permitted component id
+and ground stations differ - Mission Planner is 190, KGCS need not be - so a filter would be
+invented rather than specified. `SYS` *is* enforced, against `MAV_GCS_SYSID`: see GCS-002.
+
+### 10.5 The gimbal writes no record of its own
+
+`AP_PNUGimbal_Backend`, `AP_PNUGimbal_CubeMars` and `AP_PNUGimbal_Homing` contain **no call
+to `AP::logger()` anywhere**. The only dataflash record touching the gimbal is the standard
+ArduPilot `MNT`, written by the mount front end, and **both halves of it come from the same
+command chain**. The CubeMars encoder feedback reaches it nowhere.
+
+| `MNT` field | What it holds for this mount | Frame |
+|---|---|---|
+| `I` | Mount instance | - |
+| `Mode` | `MAV_MOUNT_MODE` from `get_mode()` | - |
+| `DRoll` `DPitch` | `mnt_target.angle_rad.roll` / `.pitch`, **unclamped**, and **only when the target type is `ANGLE`** - NaN in rate, retract, neutral and location modes | earth (`roll_is_ef` / `pitch_is_ef` default true) |
+| `DYawB` *xor* `DYawE` | The target yaw, written to **whichever column matches `yaw_is_ef`**; the other is always NaN | per `yaw_is_ef` |
+| `Roll` `Pitch` `YawB` | **NOT measured.** `AP_Mount_PNUGimbal::get_attitude_quaternion()` builds these from `_angle_bf_output_rad`, the angle the FC decided to command | body |
+| `YawE` | `YawB` + the AHRS yaw, wrapped to +-180 | earth |
+| `Dist` | Rangefinder distance, unused here | - |
+
+**`DRoll` against `Roll` is not a tracking error and must never be read as one.** Both are
+derived from the same demand; no motor measurement is involved. Four things, and only these
+four, separate the two columns (`AP_Mount_PNUGimbal.cpp:117-182`):
+
+1. **The earth-to-body rotation.** The AHRS lean, rotated into the gimbal's yaw frame, is
+   subtracted from the target when `roll_is_ef` / `pitch_is_ef` - the stabilisation itself.
+2. **The lead filter**, `MNT1_LEAD_RLL` and `MNT1_LEAD_PTCH`, zero by default.
+3. **The operating-limit clamp**, `MNT1_ROLL_MIN/MAX` and the pitch pair. The desired columns
+   are logged *before* it and the actual columns *after*, so a saturated axis shows as a
+   difference that is a clamp, not a lag.
+4. **A yaw frame change**, for `YawE` only.
+
+Two cases need care. In **retract and neutral**, `update_angle_outputs()` returns early
+(`:133-136`), so no stabilisation and no clamp are applied there - the only clamp those
+targets ever see is the one `get_attitude_quaternion()` applies when the record is written.
+In **rate mode**, the base class integrates the rate into an angle target and still calls
+`send_target_angles()`, so the actual columns are populated while **the desired columns stay
+NaN** - the target type is still `RATE`.
+
+Read correctly, `DRoll` against `Roll` is what makes step 1b provable from a log with no
+motors connected: the difference **is** the AHRS stabilisation correction the FC computed.
+What no `MNT` row can show is whether a motor went anywhere near it.
+
+### 10.6 Statustext is the gimbal's real log
+
+Everything the gimbal knows about itself reaches the log as `GCS_SEND_TEXT()`, which
+`GCS::send_textv()` passes to `AP_Logger::Write_Message()` and thence to the standard `MSG`
+record. Searching `MSG.Message` for `PNUGimbal:` is how a gimbal session is reconstructed
+today.
+
+| Family | Severity | Carries |
+|---|---|---|
+| `PNUGimbal: <from> -> <to> (<why>)` | varies | **Lifecycle transitions: 0 INIT, 1 HOMING, 2 ALIGN, 3 RUN, 4 MAINTENANCE, 5 FAULT** |
+| `PNUGimbal: <axis> axis <fault> (status 0x..)` | CRITICAL | Per-axis fault with the raw protocol status byte |
+| `PNUGimbal: homing <axis> ...`, `... travel ... deg, mid ...`, `... homed` | CRITICAL / INFO | The Appendix 1 endpoint search, per axis |
+| `PNUGimbal: <axis> feedback lost after N frames` | WARNING | Feedback timeout, with the count that preceded it |
+| `PNUGimbal: feedback from motor id ?N (M dropped)` | WARNING | Frames from an unexpected motor id |
+| `PNUGimbal: zero refused in <state>`, `PNU_HOME=0, zero not found` | WARNING | Homing refused or never performed |
+| `PNUGimbal: no gimbal on CAN, check CAN_Dn_PNU_OPTS bit 1` | WARNING | Mount selected but no backend on the bus |
+
+#### 10.6.1 When a statustext does and does not become a `MSG` record
+
+**Sending a statustext does not guarantee a `MSG` record.** Four conditions, verified in
+`GCS_Common.cpp:2539-2613`, `AP_Logger_Backend.cpp:471-514` and `LogFile.cpp:341-374`:
+
+| | Behaviour |
+|---|---|
+| **No ground station attached** | **Still logged.** The `Write_Message()` call sits *outside* the block that gives up when the destination mask is empty, so a statustext with nowhere to send is written to the log anyway. This is the opposite of the `TM50` problem `V5.1.25` fixed |
+| **No `LOG_BITMASK` bit** | **Not gated at all.** `Write_Message()` applies no mask - but it still needs an open log, so disarmed it needs `LOG_DISARMED` |
+| **Log buffer under pressure** | **Survives longer than most records.** `MSG` is written with `WriteCriticalBlock()`, which keeps a reserved share of the buffer. It is still dropped if the buffer has no room for the packet at all |
+| **Early boot, from the CAN thread** | **Can be lost.** `ShouldLog()` refuses any non-main-thread write until the startup message writer has finished, and every `AP_PNUGimbal` and `AP_PNUSAR` statustext originates on the CAN driver thread |
+
+And one that always applies:
+
+**Only the first 50 characters are logged.** `GCS::send_textv()` copies the formatted text
+into a `MAVLINK_MSG_STATUSTEXT_FIELD_TEXT_LEN`-sized buffer before handing it to the logger,
+so the link gets the whole string in chunks while `MSG` keeps 50 bytes. Two existing messages
+already exceed it - `PNUGimbal: no gimbal on CAN, check CAN_Dn_PNU_OPTS bit 1` (56) and
+`PNUGimbal: PNU_HOME=0, zero not found - limits are relative` (59) - and both lose their tail
+in the log.
+
+Rate limiting, where it exists, is in the **callers**, not in the GCS or logger layer:
+`report_tx_error()`, `report_short_frame()` and `report_bundle_drop()` each hold their own
+timer, and several gimbal notices are one-shot per boot.
+
+This is adequate for a bench session and **inadequate for flight analysis**: the messages
+carry no numbers that can be plotted, lose anything past 50 characters, and depend on a log
+being open at the moment they are emitted - which, for homing, means `LOG_DISARMED`. It is
+the same gap that `V5.1.25` closed for `SARS` and the PMU records, still open on the gimbal.
+
+### 10.7 Decoded, timestamped, and never logged
+
+`AP_PNUGimbal_Feedback` is populated per axis on every accepted CAN frame and **nothing
+consumes it**. Each of the three axes already holds:
+
+| Member | Meaning |
+|---|---|
+| `position_rad` `velocity_rads` | Measured angle and rate from the encoder |
+| `torque_nm` | Measured torque |
+| `driver_temp_c` `motor_temp_c` | Drive and motor temperature, degC |
+| `status` | Raw protocol status code, **not normalised** |
+| `last_update_ms` `frame_cnt` `valid` | Freshness, accepted-frame count, and whether the axis has ever reported |
+
+This is the same data step 3f needs for `SARN.AFlg` and `0x404`, and it is why GIMBAL-001
+blocks that step: **if the motors answer only when commanded rather than streaming, the
+driver needs a keep-alive and step 3f's 40 ms budget has to be re-derived.** Until that is
+measured on real hardware, neither a gimbal record nor a populated `AFlg` can be specified
+honestly - no CubeMars motor has ever turned.
+
+### 10.8 Records that look like gimbal records and are not
+
+`TC_R`, `TC_C` and `CM_C` belong to the **Q30 / Viewpro camera gimbal** (`AP_Q30`), a serial
+device on a different bus with its own ICD messages `TC2` and `TM2`. They have nothing to
+do with `AP_PNUGimbal` or the CubeMars drives, and confusing the two when reading a log is an
+easy mistake to make given that both are "the gimbal".
+
+| Record | Device | Content |
+|---|---|---|
+| `TC_C` | Q30 camera | Every `TC2` from KGCS as received: roll/pitch/yaw speed and angle demands, control mode, zoom, shutter, tracking |
+| `CM_C` | Q30 camera | What the FC decided to send the camera: **gimbal command type 0 none, 1 rate, 2 angle, 3 fix/hold**, plus zoom, focus, record, track and IR actions |
+| `TC_R` | Q30 camera | Camera attitude readback: relative, IMU and RC-target angles per axis, and zoom position |
