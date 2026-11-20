@@ -110,14 +110,96 @@ makes it a bench item rather than an open design question. See `PMU-005a`.
 
 ### Not verified
 
-- **No hardware of any kind was involved.** No ECU has ever been connected to this project,
-  no SAR, and no CubeMars motor has ever turned. The `SARN` measurement above is a fake SAR
-  reading a virtual CAN bus.
+- **No hardware of any kind was involved.** No SAR, and no CubeMars motor has ever turned.
+  The `SARN` measurement above is a fake SAR reading a virtual CAN bus.
+
+  *Added 2026-11-20, after this entry was written: an ECU **has** been connected to this
+  project, on 2026-11-19, the day before this version was recorded - see the entry below.
+  Nothing in V5.1.30 touches `AP_PMUCAN`, so that hardware evidence applies to this build as
+  it stands. The SAR and gimbal statements are unaffected.*
 - **The `MNT` and `MSG` conditions in section 10 are traced from source, not measured.**
   Whether `MNT` is in practice absent on a given bench depends on that aircraft's
   `LOG_DISARMED` setting, which was not inspected.
 - **The r3 additions still have no SITL coverage** beyond the read-back scenarios above: the
   fake models neither `start_gate` 19 nor the over-RPM cut throttle. They are documented only.
+
+---
+
+## Bench and flight, 2026-11-19 - PMU V2.0 runs end to end on a real ECU (no version bump)
+
+The first time any of the ECU work met a device. Ground tests and then a flight, on **FC
+firmware V5.1.29**, against a real ECU reporting **VERSTS 2.00**. **No firmware, MAVLink or
+documentation change was made for this run** - it is a record of what the shipped build did.
+
+**The ground station was a development build, `V1.0.1 Pre-release`**, written to exercise the
+`pnu_kal.xml` interface. **It is not the production KGCS**, and nothing here is evidence about
+KGCS - see `GCS-004`.
+
+**Conditions.** `CAN_Dn_PNU_OPTS = 1`, so the PMU was alone on the wire with no gimbal and no
+SAR. Bus at **1 Mbps**. Dataflash BIN logs saved and reviewed. No CAN analyser.
+
+### What ran
+
+| Path | What was exercised | Evidence |
+|---|---|---|
+| GCS -> FC -> ECU | Engine Start, Engine Stop, `Engine_CHK_CMD` choke servo open and close, `Battery_Control_CMD`, `Engine_Manual`, `Engine_Throttle_CMD` | **Bench** |
+| Step 2c interlock | The **permit** path: Start accepted about 5 s after Stop, inside `PMUCAN_STOP_WINDOW_MS` of 10 s | **Bench** |
+| ECU -> FC | ECU telemetry received and decoded per PMU V2.0. VERSTS answered **2.00**, so `PROTO_ECU_V2` was selected by a device rather than reached through the unconfirmed fallback | **Bench** |
+| FC -> GCS | `TM1`, `TM3`, `TM60` and `TM61` on the link and displayed - existing PMU fields and the new ECU fields alike | **Bench**, then **Flight** |
+| GCS -> FC -> ECU | `TC60`/`ENERGYCFG` transmitted to the device. Tank and Fuel changes were reflected in the reported values | **Bench** |
+| Whole loop | Command path and telemetry path together, on the ground and then in the air | **Bench**, then **Flight** |
+
+### The fuel observation
+
+| | |
+|---|---|
+| Initial fuel | **3 L** |
+| Flight duration | **15 minutes** |
+| Actual remaining after flight | **2 L** |
+| ECU-estimated remaining | **2 L** |
+
+The two agreed **at the reported resolution**. This is one observation, at one condition, with
+1 L of granularity - it is not a characterisation of the estimator and it does not bear on the
+`GAS` settling question in `PMU-005a`.
+
+### What this run did NOT establish
+
+Recorded so that nothing here is read as more than it is.
+
+- **`TC60` Battery and SOC were sent as `0xFFFF` only**, the keep sentinel, deliberately,
+  because a wrong value in those two fields could make the ECU misbehave. Nothing is known
+  about how the device accepts an actual Battery or SOC setting.
+- **The `fuel == tank` read-back blind spot was not provoked.** No such command was reported,
+  no silent-ignore case arose, and `initial_fail 0x20` was not seen setting or clearing. That
+  issue is unchanged - see `PMU-005a`.
+- **`GAS` rounding was not characterised at its edges**, and the engine-stopped settling
+  measurement was not taken.
+- **The step 2c refusal paths were not exercised.** Only the permit path ran. This
+  project's record for the refusals is SITL - 2026-10-29 and 2026-11-11 - and no hardware
+  run of them is recorded here. The bench figure of 2026-10-19 is the duration of a
+  *permitted* Start on a legacy PMU, not a refusal.
+- **Communication fault and recovery was not retested.** Its evidence remains bench
+  2026-10-19 - CAN connector pulled while armed, RTL taken, clean recovery - which was a
+  **legacy PMU**, not an ECU, and predates every ECU message.
+- **`MODESTS` field order still has no capture behind it.** The values read plausibly for a
+  whole session and one of them gated a `TC60` transaction, which is strong circumstantial
+  evidence and not a bit-level check against the author's definition. No undefined code was
+  provoked.
+- **No sensor field was calibrated or accuracy-checked.** Reception and correct display are
+  not accuracy verification.
+- **The r3 additions were not provoked**: no `start_gate` 19, no over-RPM cut throttle, no
+  full-tank `GAS` placeholder.
+- **The shared bus is untouched.** `PNU_OPTS = 1` at 1 Mbps, no analyser, so neither the
+  three-device wire nor 500 kbps has any hardware evidence, and the bus-load figures in
+  `PMU-005a` are still estimates.
+- **No production KGCS was involved**, and no `TC50` was sent by either ground station, so
+  `GCS-002` is unexercised.
+
+### Why this applies to V5.1.30 as well
+
+`AP_PMUCAN` and `AP_PMUCAN_ECU` are unchanged between V5.1.29 and V5.1.30 - that version
+carried one `AP_PNUSAR` fix and documentation. The ECU paths exercised here are the same
+object code in the current build.
 
 ---
 

@@ -470,11 +470,11 @@ achieved. **Neither replaces the measurement.** `RtrTx` counts frames handed to 
 interface, not frames on the wire, and nothing in either record measures the driver loop
 interval directly. Items 1 and 3 still need a CAN analyser and `SCHED_DEBUG` respectively.
 
-## PMU-005 - the ECU (2nd-generation PMU) protocol is specified, not implemented
+## PMU-005 - the ECU (2nd-generation PMU) protocol, implemented and hardware-validated in part
 
 | | |
 |---|---|
-| **Status** | **FIRMWARE:** implemented in **V5.1.29** - all three ECU messages decoded, transmitted and commanded. **DOCUMENTATION:** ICD and `pnu_kal.xml` synchronised to ECU draft **r3**, 2026-11-17. **SITL:** covers the stage 0-5 message set against a fake built from the ICD - polling, generation gating, the ENERGYCFG transaction and its refusals, timeouts and cancellation. **The r3 additions have NO SITL coverage** - the fake models neither `start_gate` 19, nor the over-RPM cut throttle, nor the full-tank `GAS` placeholder, so those are documented only. **HARDWARE: none.** No ECU has ever been connected to this project |
+| **Status** | **FIRMWARE:** implemented in **V5.1.29** - all three ECU messages decoded, transmitted and commanded. **DOCUMENTATION:** ICD and `pnu_kal.xml` synchronised to ECU draft **r3**, 2026-11-17. **SITL:** covers the stage 0-5 message set against a fake built from the ICD - polling, generation gating, the ENERGYCFG transaction and its refusals, timeouts and cancellation. **The r3 additions have PARTIAL SITL coverage** - the fake now models the full-tank `GAS` placeholder and its four read-back scenarios, but neither `start_gate` 19 nor the over-RPM cut throttle, so those two are documented only. **HARDWARE: validated end to end 2026-11-19** - ground and flight on a real ECU reporting VERSTS 2.00, FC V5.1.29, `CAN_Dn_PNU_OPTS = 1`, 1 Mbps, against a *development* GCS V1.0.1 Pre-release and not the production KGCS. **Integration, not conformance:** every edge case below is untouched by it |
 | **Component** | `PMU CAN Comm Protocol.md` V2.0 (Draft); `AP_PMUCAN` + `AP_PMUCAN_ECU` speak both generations; `Forced Submodule File/pnu_kal.xml` carries the KGCS interface |
 | **Source** | `ECU_CAN_Protocol_r3.pdf`, **not stored in this repository**. Its revision date is recorded in `PMU CAN Comm Protocol.md`; the page count is unverified and is deliberately not quoted here |
 | **Related** | `PMU-001`, `PMU-003`, `PMU-005a`, `CHANGELOG.md` "Documents, 2026-11-12" and "V5.1.29" |
@@ -490,9 +490,33 @@ decoded counts as below 2.0.
 `PMU-005a` stages 1-3 added the VERSTS generation selection, the HOURCNT width branch and
 `AP_PMUCAN_ECU`, which polls and decodes `MODESTS 0x10000150` and `ENERGYSTS 0x10000160` into the
 `ECUM`/`ECUE`/`ECUC` records; stage 4 put both on the link as `TM60 51060` and `TM61 51061`.
-`ENERGYCFG 0x10000050` landed in stage 5 as `TC60 50060`. None of it has met an ECU: every result is against a fake
-built from this document. This issue exists so the decisions behind the ICD are not re-litigated
-from memory.
+`ENERGYCFG 0x10000050` landed in stage 5 as `TC60 50060`. **All three met a real ECU on
+2026-11-19**, along the paths that run in normal operation - see the next paragraph. Every
+edge case recorded in this issue is still SITL-only, against a fake built from this document.
+This issue exists so the decisions behind the ICD are not re-litigated from memory.
+
+**What the 2026-11-19 hardware run established, and what it did not.** Ground and flight tests
+on a real ECU. FC firmware **V5.1.29**, `CAN_Dn_PNU_OPTS = 1`, **1 Mbps**, dataflash BIN logs
+saved and reviewed. The ground station was a **development build, V1.0.1 Pre-release, written
+to exercise `pnu_kal.xml`** - it is not the production KGCS, and nothing below is evidence
+about KGCS. See `GCS-004`.
+
+| Established | Not established by this run |
+|---|---|
+| VERSTS reports **2.00** from a device, so `PROTO_ECU_V2` is selected rather than fallen back to | That any undefined `MODESTS` code behaves as guessed, or that the field ORDER is right. The values read plausibly for a whole session, which is inference, not a capture |
+| Engine Start, Stop, `Engine_CHK_CMD`, `Battery_Control_CMD`, `Engine_Manual` and `Engine_Throttle_CMD` all reach the ECU and act | That the step 2c refusals still refuse. Only the **permit** path ran - Start about 5 s after Stop, inside the 10 s window. The refusal cases were not repeated; this project's record for them is SITL (2026-10-29, 2026-11-11) and no hardware run of them is recorded here |
+| ECU telemetry is received and decoded, and `TM1`/`TM3`/`TM60`/`TM61` reach a ground station and display | That any field is **calibrated or accurate**. Reception and correct display are not accuracy verification of the sensor behind the field |
+| `TC60`/`ENERGYCFG` reaches a real ECU, and Tank and Fuel changes come back in the reported values | That arbitrary **Battery and SOC** values are accepted. Both were deliberately sent as `0xFFFF` (keep), because a wrong value there could make the ECU misbehave |
+| A 15-minute flight from 3 L initial fuel ended with 2 L actual and 2 L estimated, agreeing at the reported resolution | That fuel estimation is accurate in general. **One flight, one condition, 1 L of resolution** |
+| An independent implementation parses and displays the `pnu_kal.xml` definitions, `TM60`'s zero CRC_EXTRA included | That the production KGCS will do the same |
+
+**Communication fault and recovery was not retested on 2026-11-19.** Its evidence remains the
+bench run of **2026-10-19** - CAN connector pulled while armed, RTL taken immediately, clean
+recovery on reconnect - which was a **legacy PMU**, not an ECU, and predates every ECU message.
+Do not read it as ECU evidence.
+
+**The shared bus is no closer.** That run was the PMU alone on the wire, with no gimbal and no
+SAR, at 1 Mbps and with no analyser attached.
 
 **The one thing worth knowing for the FC.** The ECU draft asked for `ENGONOFF` Stop to be repeated
 every 500 ms until confirmed; that was **not adopted** - Start and Stop are each sent once when the
@@ -505,18 +529,27 @@ no work, and a future ECU implementation must not add a retransmission loop.
 1. **A reliable completed-stop indication.** With Stop sent once, the Host needs a status field
    that distinguishes a stop that *completed* from one that *started*. The draft itself says
    `PSTS` STOP_SEQUENCE may be too brief to catch and `operation_mode` STOP can pass between
-   100 ms polls. Until this is answered, confirming a stop is best-effort.
+   100 ms polls. Until this is answered, confirming a stop is best-effort. **Open after
+   2026-11-19:** Stop was commanded and the engine stopped, but nothing in that run
+   distinguishes a stop that completed from one that merely started, which is the question.
 2. **`AUX1STS.GCMD`, requested or effective.** The scale is settled - 0.1 % per raw count, raw
    100 is 10.0%, confirmed against `BATSTS.GAGE`'s own example. What is open is whether `GCMD`
    reports the setpoint as requested or as clamped into the EMS's internal 54-90% range. Until
    answered, `GCMD` cannot be used to confirm that a `BATCTRL` value was accepted unchanged.
+   **Open after 2026-11-19:** `Battery_Control_CMD` was exercised against a real ECU, but no
+   requested-versus-reported comparison across the clamp was reported, which is what would
+   settle it.
 3. **Undefined `MODESTS` codes** - `operation_mode` 2, a zero nibble in either half of byte 0,
    `start_gate` 1-3 and 14, `initial_fail` bits `0x08`/`0x10`/`0x40`/`0x80` - and the fact that
    the frame carries **no layout version**. `MODESTS` is still under development, so its field
    order must be re-validated against a capture before any decoder is frozen. r3 narrowed the
    gap but did not close it: `start_gate` **19 BLOCKED_CURRENT_FAULT** is now defined, so the
    undefined set is 1-3, 14 and above 19, and `initial_fail` `0x20` gained a full definition.
-   The four undefined bits and the missing layout version are unchanged.
+   The four undefined bits and the missing layout version are unchanged. **2026-11-19 narrowed
+   the field-order risk without closing it** - a real ECU's `MODESTS` gated a `TC60`
+   transaction and displayed sensibly through ground and flight, so `operation_mode` at least
+   is very likely where the decoder expects it. That is circumstantial. No undefined code was
+   provoked and no field-by-field capture was taken.
 
 **Decided, and not to be reopened without a reason:** choke polarity is `0 = open, 1 = close` with
 the ECU's `choke_setpoint < 50%` rule informational only; `ENERGYSTS.endurance` is displayed as
@@ -527,9 +560,12 @@ informational while under development, with the ECU enforcing its own start perm
 `ENERGYCFG.fuel` is the current **total measured** tank quantity, `round(litres * 100)`, with no
 incremental-addition path.
 
-**Remaining limitation.** No ECU hardware exists on this project and the source draft has not been
-verified against a device by anyone, here or at the vendor. The source PDF is not in the repository,
-so the ECU sections cannot be re-checked from a clone alone - keep a copy with the project records.
+**Remaining limitation.** ECU hardware now exists on this project and the normal-operation paths
+were exercised against it on 2026-11-19, but **the draft as a whole has not been
+conformance-tested** against a device, here or at the vendor: the undefined codes, the edge cases
+and the three questions above are all still open, and no field-by-field capture has been taken.
+The source PDF is not in the repository, so the ECU sections cannot be re-checked from a clone
+alone - keep a copy with the project records.
 
 ### PMU-005a - the approved implementation plan, Stages 0-5
 
@@ -539,12 +575,12 @@ per-stage record once a stage lands.
 | Stage | Content | Status |
 |---|---|---|
 | **0** | Minimal fake ECU in `Tools/pnu/sitl_can/` - VERSTS 2.00, the new ids and DLCs, fixed ICD-example MODESTS/ENERGYSTS payloads, a 32-bit HOURCNT payload. Legacy stays the default. Protocol encode/decode only, no ECU behaviour model | **DONE 2026-11-13** |
-| **1** | VERSTS-based protocol identification in `AP_PMUCAN`: `UNKNOWN` / `LEGACY_PMU` / `ECU_V2` | **DONE 2026-11-13** |
+| **1** | VERSTS-based protocol identification in `AP_PMUCAN`: `UNKNOWN` / `LEGACY_PMU` / `ECU_V2` | **DONE 2026-11-13**, hardware 2026-11-19 - a real ECU answers VERSTS **2.00** and selects `ECU_V2` |
 | **2** | `AUX2STS` HOURCNT width by generation - UINT24 legacy, UINT32 ECU. One branch, no schema change | **DONE 2026-11-13**, bench-verified |
-| **3** | `AP_PMUCAN_ECU.{h,cpp}`: MODESTS at 10 Hz, ENERGYSTS at 1 Hz, on the free scheduling phases, active only in `ECU_V2` | **DONE 2026-11-13** |
-| **4** | MAVLink telemetry for ECU status - `TM60 51060` MODESTS at 10 Hz, `TM61 51061` ENERGYSTS at 1 Hz, both suppressed unless VERSTS confirms ECU 2.00+ | **DONE 2026-11-16** |
-| **5** | MAVLink telecommand for `ENERGYCFG` - `TC60 50060`, one bounded transaction at a time, readback-verified, at most three frames | **DONE 2026-11-16** |
-| **Docs** | `pnu_kal.xml` carries the complete KGCS interface - every enum, bitmask, input control and UI state - so a ground station needs no CAN document. Re-synchronised against ECU draft r3 | **DONE 2026-11-17**, SITL-only |
+| **3** | `AP_PMUCAN_ECU.{h,cpp}`: MODESTS at 10 Hz, ENERGYSTS at 1 Hz, on the free scheduling phases, active only in `ECU_V2` | **DONE 2026-11-13**, hardware 2026-11-19 - polled and decoded from a real ECU |
+| **4** | MAVLink telemetry for ECU status - `TM60 51060` MODESTS at 10 Hz, `TM61 51061` ENERGYSTS at 1 Hz, both suppressed unless VERSTS confirms ECU 2.00+ | **DONE 2026-11-16**, hardware 2026-11-19 - both received and displayed by a development GCS |
+| **5** | MAVLink telecommand for `ENERGYCFG` - `TC60 50060`, one bounded transaction at a time, readback-verified, at most three frames | **DONE 2026-11-16**, hardware 2026-11-19 - **Tank and Fuel only**; Battery and SOC were sent as `0xFFFF` (keep) |
+| **Docs** | `pnu_kal.xml` carries the complete KGCS interface - every enum, bitmask, input control and UI state - so a ground station needs no CAN document. Re-synchronised against ECU draft r3 | **DONE 2026-11-17.** An independent *development* GCS was written from it and exercised the ECU messages on 2026-11-19; the production KGCS has not been integrated - `GCS-004` |
 
 **What stage 3 added, in one place.** `libraries/AP_PMUCAN/AP_PMUCAN_ECU.{h,cpp}` behind
 `AP_PMUCAN_ECU_ENABLED` in a new `AP_PMUCAN_config.h`; polls on phases 1 and 3 of the
@@ -630,9 +666,12 @@ MAVLink messages compare identical to commit `829ef5545f`, the baseline used for
 | `start_gate` **19 BLOCKED_CURRENT_FAULT**, self-clearing when both current readings recover | ICD table; `pnu_kal.xml` TM60 `Start_Gate`, whose "undefined above 18" would otherwise have had KGCS display a defined code as Unknown |
 | `initial_fail 0x20` fully defined, and the full-tank `GAS` placeholder it implies | ICD ENGSTS section, `initial_fail` masks and acceptance rule 8; `pnu_kal.xml` TM1 `Fuel_Quantity`, TM60 `Initial_Fail`, TC60 and TM61 `Cfg_Result` |
 
-**Documentation completion is not hardware validation.** Everything above is still exercised
-only against a fake built from this project's reading of the ICD. `ECU_CAN_Protocol_r3.pdf` is
-not in the repository and could not be opened during this work, so the ICD transcription was
+**Documentation completion is not hardware validation.** Of the four r3 changes above, the
+2026-11-19 ECU run bears on the first only - VERSTS was polled throughout and answered 2.00.
+`start_gate` 19, the over-RPM cut throttle and the `initial_fail 0x20` full-tank placeholder
+were not provoked on hardware, and the first two are still not modelled by the fake either, so
+they remain documentation against this project's reading of the ICD. `ECU_CAN_Protocol_r3.pdf`
+is not in the repository and could not be opened during this work, so the ICD transcription was
 checked for internal consistency, not against its source.
 
 **Architecture: hybrid, decided rather than assumed.** One `AP_PMUCAN` backend with a
@@ -733,7 +772,9 @@ Decided 2026-11-13, no further stage 2 modification.
   ignores both and nothing else changes. The ECU draft says the ECU ignores unexpected
   frames and the real legacy PMU's behaviour is still unspecified, so confirm on the bench
   that those two frames are harmless - now that VERSTS is known to answer at v1.00, the
-  window is the boot gap and nothing more.
+  window is the boot gap and nothing more. **2026-11-19 does not cover this:** that run
+  was an ECU, which is supposed to answer those polls, and the question is what a real
+  *legacy* PMU does with them.
 - **Stage 3 decoded MODESTS against a draft that is still under development.** The frame
   carries no layout version and VERSTS identifies software, not frame layout, so the field
   order must be re-validated against a real capture before the decoder is trusted.
@@ -741,7 +782,11 @@ Decided 2026-11-13, no further stage 2 modification.
   availability and retires the risk that a real ECU might never answer it: the stage 5 mode
   gate and the KGCS Apply gate can both require a fresh MODESTS without making the aircraft
   unconfigurable. The field ORDER is still unvalidated and still matters more than it did,
-  because `operation_mode` now gates a transmitted command.
+  because `operation_mode` now gates a transmitted command. **2026-11-19 weakened this and did
+  not close it:** a real ECU's MODESTS drove that mode gate through a `TC60` transaction and
+  displayed sensibly on the development GCS across ground and flight, so `operation_mode` is
+  very likely where the decoder puts it. That is circumstantial evidence from plausible values,
+  not a bit-level capture checked field by field, and it says nothing about the undefined codes.
 
 - **DOCUMENTED IN r3, and it makes the fuel readback weaker than stage 5 assumed.**
   `initial_fail 0x20` now has a full definition - no good fuel quantity saved, whether it
@@ -781,27 +826,39 @@ Decided 2026-11-13, no further stage 2 modification.
   `TM60.Initial_Fail` 0x20 stayed set throughout both ignored runs, which demonstrates
   the corroboration `pnu_kal.xml` instructs KGCS to use.
 
-  **Bench item, unchanged:** none of this has met an ECU. Confirm on real hardware
-  that the placeholder behaves as r3 describes, that `0x20` clears on an accepted fuel
-  setting, and that a brim-full setting is genuinely indistinguishable - the SITL
-  result proves the FC's behaviour, not the device's.
+  **Bench item, still open after 2026-11-19.** `ENERGYCFG` has now met a real ECU, and
+  Tank and Fuel changes were reflected in the reported values, so the normal path works
+  on hardware. **The blind spot itself was not provoked:** no `fuel == tank` command was
+  reported, no silent-ignore case arose, and `0x20` was not observed setting or clearing.
+  Confirm on real hardware that the placeholder behaves as r3 describes, that `0x20`
+  clears on an accepted fuel setting, and that a brim-full setting is genuinely
+  indistinguishable - the SITL result proves the FC's behaviour, not the device's.
 
 - **The `GAS` fuel readback rule is documented, but the ECU's arithmetic behind it is
   not.** The ICD states the tolerance twice and identically - `floor(100 * fuel / tank)`,
   or one percentage point less "due to floating-point rounding" - and the FC implements
   exactly that, accepting the floor value or one below it and never one above. What is
   not documented is *why* one below can occur, so the real device's rounding must be
-  confirmed on the bench before the tolerance is trusted in either direction.
+  confirmed on the bench before the tolerance is trusted in either direction. **2026-11-19
+  does not settle it:** Fuel changes came back in the reported values, which says the
+  tolerance held for the values used, not that the rounding was characterised at its edges.
 - **`ENGSTS.GAS` is an estimate, not a fuel sensor.** The ICD calls it "a 0-100% estimate
   derived from RPM/load and its configured tank/fuel inventory". It is usable as an
   ENERGYCFG readback only because the ICD's own DO_NOTHING/STANDBY gate means nothing is
   being consumed while the comparison is taken. Confirm on the bench that `GAS` settles to
-  the configured inventory, and how quickly, with the engine stopped.
-- **`ENERGYCFG` has never been sent to an ECU.** The fake applies it and answers with
-  it, which is what makes the readback comparison mean anything, but the real device's
-  acceptance rules, its retained fuel quantity and its `GAS` rounding are all unverified.
-  The `initial_fail` bit `0x20 FUEL_LEVEL` clearing on a successful fuel setting is
-  likewise untested - the FC does not read that bit, so nothing here depends on it.
+  the configured inventory, and how quickly, with the engine stopped. **The 2026-11-19 flight
+  is not that measurement:** 3 L initial, 15 minutes, 2 L actual and 2 L estimated agreed at
+  the reported resolution - one observation at one condition with 1 L of granularity, which
+  says nothing about settling time or about the estimator across its range.
+- **`ENERGYCFG` HAS been sent to an ECU as of 2026-11-19, in part.** Tank and Fuel
+  changes went to a real device and came back in the reported values, so the bounded
+  transaction, the mandatory one-second wait and the read-back comparison all work against
+  real hardware. **Battery and SOC were deliberately sent as `0xFFFF` (keep) only**, because
+  a wrong value there could make the ECU misbehave, so nothing is known about how the device
+  accepts those two fields. Still unverified: the real device's `GAS` rounding at the edges,
+  its retained fuel quantity across a power cycle, and the `initial_fail` bit
+  `0x20 FUEL_LEVEL` clearing on a successful fuel setting - the FC does not read that bit,
+  so nothing here depends on it.
 - **The CAN bus-load estimate was recalculated and is still not a measurement.** r3's
   VERSTS cadence invalidated the ECU draft's 13.4 kbit/s figure, which a first-principles
   recalculation identifies as having assumed VERSTS once: the earlier table works out at
@@ -811,7 +868,10 @@ Decided 2026-11-13, no further stage 2 modification.
   the message table with stated assumptions, and both describe the ECU link alone. **Bench
   item:** this aircraft shares one wire with the gimbal and the SAR and that bus has never
   run on real CAN, so the only figure that settles it is an analyser capture - which
-  `PMU-004` item 1 already needs for its own reasons.
+  `PMU-004` item 1 already needs for its own reasons. **2026-11-19 does not touch this.**
+  That run was `CAN_Dn_PNU_OPTS = 1` at **1 Mbps** - the PMU alone on the wire, no gimbal, no
+  SAR - and no analyser was attached, so neither the shared bus nor 500 kbps has any hardware
+  evidence and both figures above are still estimates.
 - **`TM60`'s CRC_EXTRA is 0.** Legal, and ArduPilot's own parser is unaffected, but KGCS
   must look the message up by id rather than testing `mavlink_get_crc_extra()` against
   zero. Renaming a field to avoid it was rejected: the field names are the approved ICD.
@@ -899,6 +959,39 @@ on that parameter being right. Both endpoints must also agree on **CRC_EXTRA 231
 
 The component id is deliberately **not** filtered - the ICD names no permitted value - and is
 logged instead.
+
+## GCS-004 - the ECU interface is validated against a development GCS, not the production KGCS
+
+| | |
+|---|---|
+| **Status** | OPEN - needs PNU-GCS/KGCS work. The FC side has nothing outstanding |
+| **Component** | `Forced Submodule File/pnu_kal.xml`; `TM1`, `TM3`, `TM60`, `TM61`, `TC1`, `TC60` |
+| **Versions** | since 5.1.29 |
+| **Related** | `PMU-005`, `PMU-005a`, `GCS-002` |
+
+The 2026-11-19 ground and flight tests put every ECU message on a real link and a ground
+station displayed them correctly. **That ground station was a development build, V1.0.1
+Pre-release**, written specifically to exercise `pnu_kal.xml`. It is not the production KGCS.
+
+**What it does prove, and it is not nothing.** An implementation written from `pnu_kal.xml`
+alone, without the CAN ICD, parsed and displayed `TM1`, `TM3`, `TM60` and `TM61` and sent the
+engine commands and `TC60`. That is the dialect file doing the job it was written for, and it
+is the first evidence that `TM60`'s **CRC_EXTRA of 0** is navigable by a receiver that looks
+the message up by id rather than testing `mavlink_get_crc_extra()` against zero.
+
+**What it does not prove.** Nothing about KGCS. Two implementations written from the same XML
+can still differ on the parts the XML describes in prose rather than in structure - the
+`Start_Gate` 19 display rule, the `Initial_Fail` corroboration rule, `endurance` `0xFFFF`
+shown as Unknown, the `0xFFFF`-means-keep convention on `TC60`, and the Apply gate that
+requires a fresh `MODESTS`. None of those are enforced by the wire format.
+
+**`GCS-002` still applies and was not exercised.** `TC50` must come from a sysid that
+`MAV_GCS_SYSID` covers, and both endpoints must agree on CRC_EXTRA 231 and 7. The 2026-11-19
+run was PMU and ECU only; no `TC50` was sent, by either ground station.
+
+**To close this**, integrate the production KGCS against the same firmware and repeat the
+message set, or record in writing that KGCS is built from `pnu_kal.xml` and which of the prose
+rules above it implements.
 
 ## CAM-001 - the Viewpro tracking freeze can strand the operator
 
@@ -1083,8 +1176,9 @@ appearing to stop tracking.
 
 ## RISK - the shared bus has never been exercised on hardware
 
-Every PMU bench run had `CAN_Dn_PNU_OPTS = 1`. The id-based health rewrite of 5.1.15 - the thing
-step 2 exists for - has only ever run in SITL. The 2026-10-30 and 2026-11-03 SITL runs with
+Every PMU bench run had `CAN_Dn_PNU_OPTS = 1`, the ECU ground and flight tests of 2026-11-19
+included. The id-based health rewrite of 5.1.15 - the thing step 2 exists for - has only ever
+run in SITL. The 2026-10-30 and 2026-11-03 SITL runs with
 `OPTS = 5` and `OPTS = 7` are real executions of the demultiplexing logic and are **not**
 hardware.
 
@@ -1137,8 +1231,12 @@ about 5 s after either is pressed, so a 5 s FC window would have expired before 
 available again) and stay short enough that a comms outage spanning more than one button cycle
 invalidates the sequence.
 
-**A real PMU, a real engine, a real KGCS and the LTE link are all unsimulated.** The injector
-sends what the KGCS protocol specifies, not what KGCS actually emits.
+**A real KGCS and the LTE link are still unsimulated.** The injector sends what the KGCS
+protocol specifies, not what KGCS actually emits. A real engine and a real ECU are no longer on
+that list: on **2026-11-19** a Start about 5 s after a Stop was accepted on hardware, which is
+the case the 10 s window exists to allow, so the window does accommodate the ~5 s button lockout
+from the permitting side. **The refusing side was not retested**, and the ground station was a
+development build, not KGCS, so what KGCS actually emits remains open.
 
 ## ASSUMPTION - `CAMERA_SETTINGS.zoomLevel` means zoom times
 

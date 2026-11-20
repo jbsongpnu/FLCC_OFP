@@ -118,6 +118,12 @@ recorded in `ISSUES.md`.
 
 ## 3. Current Development Version
 
+**PMU V2.0 ran end to end on a real ECU on 2026-11-19**, ground and then flight, on V5.1.29.
+Engine commands, ECU telemetry, the MAVLink path and a `TC60`/`ENERGYCFG` Tank/Fuel
+transaction all worked, against a **development** ground station built to exercise
+`pnu_kal.xml` - not the production KGCS. That was integration, not protocol conformance:
+section 6 lists what it established and `PMU-005` lists what it did not.
+
 **V5.1.30** makes the logs readable and fixes the one column that was wrong. `README.md`
 sections 9 and 10 now document **every PNU dataflash record field by field** - the twelve
 PMU and ECU records, the three SAR records, and what `MNT` and `MSG` do and do not say
@@ -141,9 +147,10 @@ compiled out are all byte-identical on the link to V5.1.28, and no existing mess
 field or CRC_EXTRA moved. `TC60` runs one bounded transaction at a time: at most three
 identical CAN frames, verified against status frames that arrived after the ICD's mandatory
 one-second wait, with the outcome latched in TM61's two extension fields and recorded as
-`ECUT` and `ECUX`. `BATSTS.GAGE` is decoded for the first time, for the SOC read-back. **The
-entire ECU side is SITL-only against a fake built from the ICD** - no ECU hardware exists on
-this project - and `MODESTS` remains a V2.0 draft carrying no layout version. See
+`ECUT` and `ECUX`. `BATSTS.GAGE` is decoded for the first time, for the SOC read-back. **When this version was
+recorded the entire ECU side was SITL-only against a fake built from the ICD.** It is not
+any more - this is the firmware that was run against a real ECU on 2026-11-19, ground and
+flight. `MODESTS` remains a V2.0 draft carrying no layout version. See section 6 and
 `CHANGELOG.md`.
 
 **V5.1.28** makes the PMU say what it decided and what it sent. Two dataflash records,
@@ -200,11 +207,11 @@ no message to say why. Wrong since 5.1.13. See `CHANGELOG.md`.
 
 | Area | State |
 |---|---|
-| PMU | Full telemetry, commands, prearm, in-flight failsafe, engine-start interlock with two guards. **Bench-verified** except the shared bus and Stop-command timing. Both generations are decoded as of `PMU-005a` stages 1-3 - VERSTS selects, HOURCNT follows the sender's width, MODESTS and ENERGYSTS are polled and logged - and stage 4 sends them to KGCS as `TM60`/`TM61`, only once VERSTS has confirmed ECU 2.00+. `ENERGYCFG` is stage 5's `TC60`, one readback-verified transaction at a time. **The ECU side is SITL only against a fake built from the ICD** |
+| PMU | Full telemetry, commands, prearm, in-flight failsafe, engine-start interlock with two guards. **Bench-verified** except the shared bus and Stop-command timing. Both generations are decoded as of `PMU-005a` stages 1-3 - VERSTS selects, HOURCNT follows the sender's width, MODESTS and ENERGYSTS are polled and logged - and stage 4 sends them to KGCS as `TM60`/`TM61`, only once VERSTS has confirmed ECU 2.00+. `ENERGYCFG` is stage 5's `TC60`, one readback-verified transaction at a time. **The ECU side is hardware-validated end to end** - ground and flight on a real ECU, 2026-11-19, against a *development* GCS. Integration, not protocol conformance: see section 6 |
 | Gimbal | Mount backend, lifecycle state machine, Appendix 1 homing, per-axis direction parameters. **SITL only - no motor has ever turned** |
 | SAR | Connection layer, both MAVLink messages, the command layer with the Start interlock, the 10 Hz navigation bundle with automatic termination, and `SARN` bundle accounting. **SITL only - no SAR hardware** |
 | Camera | Viewpro via the KGCS TC2/TM2 interface; Gremsy VIO via standard MAVLink with four functions GCS-direct. **Bench-verified on both**, though the TM2 producer moved to `AP_Q30::update()` in 5.1.25 and that move is SITL-verified only |
-| Logging | Every PNU telemetry record is written by the subsystem that produces it, at a rate independent of how many ground stations are attached. **SITL only** |
+| Logging | Every PNU telemetry record is written by the subsystem that produces it, at a rate independent of how many ground stations are attached. **The rate-independence measurement is SITL only.** Dataflash BIN logs were saved and reviewed from the 2026-11-19 ECU tests, but a ground station was attached throughout, so that run does not test the property |
 
 ---
 
@@ -213,8 +220,9 @@ no message to say why. Wrong since 5.1.13. See `CHANGELOG.md`.
 **ECU V2.0 support, Stages 0-5**, approved 2026-11-13 and recorded as `PMU-005a` in
 `ISSUES.md`. One `AP_PMUCAN` backend with a latched protocol generation, one version branch in
 the AUX2STS decode and a separate module for the two new ECU messages - no Legacy/ECU backend
-split. Stage 0 is the minimal fake ECU in `Tools/pnu/sitl_can/`, because no ECU hardware
-exists and nothing downstream is testable without a device that speaks V2.0.
+split. Stage 0 is the minimal fake ECU in `Tools/pnu/sitl_can/`, because no ECU hardware was
+available when the plan was approved and nothing downstream was testable without a device
+that speaks V2.0.
 
 **Stages 0-5 are done.** The fake ECU, the VERSTS generation selection, the HOURCNT width
 branch and `AP_PMUCAN_ECU` - MODESTS at 10 Hz and ENERGYSTS at 1 Hz on the scheduling phases
@@ -237,9 +245,20 @@ mandatory one-second wait, with the outcome in TM61's two extension fields and i
 allowed to overwrite the first. On a legacy PMU and during the unconfirmed fallback, TC60 is
 refused out loud and no CAN frame is sent.
 
-**PMU-005a is complete, in SITL only.** No ECU hardware exists, so every ECU result is against
-a fake built from the ICD, and `MODESTS` is still a draft with no layout version. The remaining
-work is bench time with a real ECU.
+**PMU-005a is complete, and validated end to end on a real ECU.** Ground and flight tests on
+**2026-11-19**, on V5.1.29, exercised the GCS -> FC -> ECU command path including the step 2c
+interlock, ECU telemetry reception and decode, `TM1`/`TM3`/`TM60`/`TM61` on the link, and a
+`TC60`/`ENERGYCFG` transaction whose Tank and Fuel changes came back in the reported values.
+VERSTS reported **2.00** from the device, so `PROTO_ECU_V2` was selected by a real ECU rather
+than reached through the fallback. The ground station was a **development build, V1.0.1
+Pre-release, not the production KGCS**. `AP_PMUCAN` is unchanged between V5.1.29 and V5.1.30,
+so that evidence applies to this build as it stands.
+
+**That was integration, not conformance.** `MODESTS` is still a draft with no layout version
+and its field order still has no bit-level capture behind it; the r3 edge cases, the
+`fuel == tank` read-back blind spot, `GAS` rounding, arbitrary Battery/SOC settings and the
+three questions for the ECU author are all untouched by it. The run was `PNU_OPTS = 1` at
+1 Mbps, so the shared bus is no closer to being verified. See section 6 and `PMU-005`.
 
 Everything else is at a clean point: every applied step is recorded, and step 3f remains
 blocked on measurements only PNU can make.
@@ -270,12 +289,15 @@ terminates every observation, because a constant has no age.
   press, and a Stop burst cut off mid-way no longer completes either.
 - **Tell Lumir in writing that `0x404` is unpopulated and what the sentinel values are** -
   `SAR-001`. This is the mitigation that actually matters and it is still outstanding.
-- **Bench the shared bus.** Every PMU bench run so far had `PNU_OPTS = 1`; the id-based health
-  rewrite has only ever run in SITL.
+- **Bench the shared bus.** Every PMU bench run so far had `PNU_OPTS = 1`, the 2026-11-19 ECU
+  ground and flight tests included; the id-based health rewrite has only ever run in SITL.
 - **Put three questions to the ECU author** - `PMU-005`. A reliable completed-stop indication,
   whether `GCMD` reports the requested or the clamped setpoint, and the undefined `MODESTS`
   codes. The third one now has a decoder behind it: stage 3 logs `MODESTS` raw, and the frame
-  carries no layout version, so the field order needs a real capture before it is trusted.
+  carries no layout version. **2026-11-19 weakened the field-order doubt without closing it:**
+  a real ECU's `MODESTS` gated a `TC60` transaction and displayed sensibly across a whole
+  ground and flight session, which is inference from plausible values, not a bit-level capture
+  checked against the author's definition. The undefined codes are untouched by it.
 - **KGCS/PNU-GCS side:** TC50 must be sent from a sysid `MAV_GCS_SYSID` covers (default 255), and
   both endpoints must use CRC_EXTRA **231** (TC50) and **7** (TM50) - `GCS-002`.
 
@@ -294,10 +316,17 @@ evidence.**
 
 | What | When |
 |---|---|
+| **ECU V2.0 end to end.** GCS -> FC -> ECU engine commands - Start, Stop, `Engine_CHK_CMD`, `Battery_Control_CMD`, `Engine_Manual`, `Engine_Throttle_CMD` - and the ECU -> FC -> GCS telemetry path, both directions, on the ground and then in the air | bench + flight 2026-11-19 |
+| **VERSTS reports 2.00 from a real device**, so `PROTO_ECU_V2` is selected by an ECU rather than reached through the unconfirmed fallback | bench 2026-11-19 |
+| `TM1`, `TM3`, `TM60` and `TM61` received and displayed - existing PMU fields and the new ECU fields alike. **Reception and display only**, not calibration or per-field accuracy | bench + flight 2026-11-19 |
+| Step 2c **permit** path on real hardware: Start accepted about 5 s after Stop, inside the 10 s window. The refusal paths were **not** exercised; this project's record for them is SITL - 2026-10-29 and 2026-11-11 - and no hardware run of them is recorded here | bench 2026-11-19 |
+| `TC60`/`ENERGYCFG` transmitted to a real ECU, with Tank and Fuel changes reflected in the reported values. **Battery and SOC were sent as `0xFFFF` (keep) only**, deliberately, because a wrong value there could make the ECU misbehave | bench 2026-11-19 |
+| Fuel estimate over **one** 15-minute flight: 3 L initial, 2 L actual remaining, 2 L ECU-estimated - agreement at the reported resolution. One observation, one condition, 1 L of resolution | flight 2026-11-19 |
+| Conditions for every 2026-11-19 row above: FC **V5.1.29**, development GCS **V1.0.1 Pre-release**, `CAN_Dn_PNU_OPTS = 1`, **1 Mbps**, dataflash BIN logs saved and reviewed | 2026-11-19 |
 | PMU telemetry, KGCS and FC command paths, prearm with the PMU absent | bench 2026-10-19 |
-| **In-flight PMU failsafe** - CAN connector pulled while armed, RTL taken immediately, clean recovery on reconnect | bench 2026-10-19 |
+| **In-flight PMU failsafe** - CAN connector pulled while armed, RTL taken immediately, clean recovery on reconnect. **Legacy PMU**, not an ECU; not retested on 2026-11-19 | bench 2026-10-19 |
 | `ARMING_SKIPCHK` bit 13 bypass and the one-shot startup report, both after the 5.1.16 fixes | bench 2026-10-19 |
-| Engine interlock duration, ~1 to 1.5 s against an expected ~1.2 s | bench 2026-10-19 |
+| Engine interlock duration, ~1 to 1.5 s against an expected ~1.2 s. **Legacy PMU**, not an ECU, and a permitted Start | bench 2026-10-19 |
 | `MNT0.Roll` / `MNT0.Pitch` move opposite vehicle roll and pitch (step 1b) | bench 2026-10-16 |
 | Gremsy VIO identity, zoom through Mission Planner, gimbal slew / neutral / point-down | bench 2026-10-13 |
 | Viewpro TC2 function matrix; pitch limits; the old-vs-new camera rate difference | bench 2026-09-29 |
@@ -339,6 +368,10 @@ evidence.**
 
 - **No CubeMars motor has ever turned.** No SAR hardware has ever been connected. No KGCS has
   driven TC50. The shared bus has never run on real CAN.
+- **No production KGCS has driven anything.** The 2026-11-19 ECU validation used a development
+  ground station, V1.0.1 Pre-release, built to exercise the `pnu_kal.xml` interface. That an
+  independent implementation parsed and displayed every message is evidence about the interface
+  definition - `TM60`'s zero CRC_EXTRA included - and not about the production KGCS.
 
 ---
 
@@ -353,6 +386,7 @@ Full detail in `ISSUES.md`.
 | `GIMBAL-004` | Seven things the CubeMars manual does not specify | the bench session |
 | `SAR-001` | `0x404` carries no measured attitude | step 3f, and Lumir's integration |
 | `GCS-002` | KGCS must send TC50 from a permitted system id | SAR commanding from the GCS |
+| `GCS-004` | The ECU interface is validated against a **development** GCS, not the production KGCS | production KGCS integration |
 | `PMU-004` | The driver tick ran long. **Fixed in 5.1.26, SITL only** - the target was never measured | the bench session: CAN rates, step 2c timing, CPU, shared bus |
 | `PNUCAN-001` | The gimbal slew limiter divided by a nominal rate. **Fixed in 5.1.27, SITL only** | the bench session: realised rate at the motor, and whether 45 deg/s suits the payload |
 | `PNUSAR-003` | `SNAPSHOT_MAX_AGE_MS` was widened to 100 ms to absorb `PMU-004` | nothing - re-measure on the bench |
