@@ -285,7 +285,12 @@ void AP_PNUSAR::nav_snapshot(bool nav_failsafe)
     put_le_i16(&f[4][0], int16_t(AP_PNUSAR_INVALID_I16));
     put_le_i16(&f[4][2], int16_t(AP_PNUSAR_INVALID_I16));
     put_le16(&f[4][4], AP_PNUSAR_INVALID_U16);
-    f[4][6] = _att_seq++;
+    // _att_seq is the next value to use; _att_seq_tx is the one that actually goes out.
+    // SARN logs the latter.  Logging the counter itself recorded B6 plus one, because
+    // log_nav() runs after this post-increment - an off-by-one against the receiver's
+    // stream, in the one column a disagreement with Lumir would have to be settled on.
+    _att_seq_tx = _att_seq++;
+    f[4][6] = _att_seq_tx;
     // ATT_Flags stays empty until step 3f: no ROLL/PITCH/YAW_VALID and no ATT_FRESH.
     // SARN records the byte AS TRANSMITTED rather than an intent, because it is what the
     // receiver sees and what a disagreement with Lumir's log would have to be settled on.
@@ -497,11 +502,17 @@ void AP_PNUSAR::note_bundle_drop(uint8_t reason, const char *why)
 // never logged from a driver thread so there is no precedent here to lean on.
 //
 // The consequence is worth knowing when reading a log: TX, Drop and TxErr describe the
-// state BEFORE this snapshot was sent, so they lag Seq by one bundle.  Seq does not lag,
-// which is the column that matters - it is the ATT_Seq actually packed into 0x404 B6, so
-// a gap between consecutive rows and the receiver's stream is a bundle that never
-// reached the bus.  That is the question this record exists to answer: when Lumir says
-// "we did not receive it", this says whether the FC sent it.
+// state BEFORE this snapshot was sent, so they lag Seq by one bundle.  Seq does not lag -
+// it is _att_seq_tx, the byte actually packed into 0x404 B6, so it lines up directly with
+// the receiver's stream and needs no adjustment to compare.
+//
+// WHAT A ROW DOES NOT SAY.  It is written here, before the CAN thread has touched the
+// bundle, so the row proves only that one was built.  send_bundle() can still drop it as
+// stale or abandon it on a refused frame, and ATT_Seq is consumed either way - a sequence
+// number can exist in this log and never on the bus.  TX counts frames the interface
+// ACCEPTED, which is submission, not confirmed transmission, and nothing acknowledges a
+// nav bundle at all.  So when Lumir says "we did not receive it", Seq identifies which
+// bundle and the next row's TX and Drop say how far the FC got with it.
 //
 // TxErr is THIS backend's last refused frame, captured where the refusal happened - not
 // the driver's bus-wide value, which the PMU and the gimbal also write.  It reads 1
@@ -521,7 +532,7 @@ void AP_PNUSAR::log_nav(void)
                        (uint32_t)_bundle_ovr_cnt,
                        (uint32_t)_bundle_stale_cnt,
                        (uint32_t)_bundle_txfail_cnt,
-                       (uint8_t)_att_seq,
+                       (uint8_t)_att_seq_tx,
                        (uint8_t)_att_flags,
                        (int16_t)_last_tx_err);
 #endif

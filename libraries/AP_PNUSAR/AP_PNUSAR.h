@@ -359,7 +359,8 @@ private:
     bool     _auto_stop_request = false;
 
     PNUSAR_Bundle _bundle = {};         // the vehicle thread fills it, the CAN thread drains it
-    uint8_t  _att_seq = 0;              // 0x404 B6, wraps 0-255
+    uint8_t  _att_seq = 0;              // the NEXT 0x404 B6 to use, wraps 0-255
+    uint8_t  _att_seq_tx = 0;           // 0x404 B6 AS TRANSMITTED - what SARN.Seq logs
     uint8_t  _att_flags = 0;            // 0x404 B7 AS TRANSMITTED, not as intended
     uint32_t _bundle_tx_cnt = 0;        // bundles actually written to the bus
     uint32_t _bundle_drop_cnt = 0;      // the sum of the three below
