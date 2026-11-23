@@ -457,6 +457,9 @@ last month's upstream definitions. **The staging directory must never be committ
 
 ### Aircraft parameters
 
+The settings that have to be right for this aircraft. **Every parameter in every PNU group is
+enumerated below**, in "Complete parameter reference".
+
 | | |
 |---|---|
 | CAN bus | `CAN_D1_PROTOCOL = 15` (PMU, gimbal and SAR share it), `CAN_P1_DRIVER = 1`, `CAN_P1_BITRATE` default 1,000,000 |
@@ -476,6 +479,145 @@ likely to look like a bug when it is not.
 
 **`PNU_OPTS = 0` still allocates the driver.** It has to: otherwise the subgroup would vanish and
 the bitmask could never be set back.
+
+### Complete parameter reference
+
+**57 parameters in four groups.** Defaults are the firmware's, not this aircraft's - where the
+two differ it is called out. Set them in this order, because each step creates the next:
+
+1. `CAN_P1_DRIVER = 1` and `CAN_P1_BITRATE = 1000000` - the physical port feeds virtual driver 1
+2. `CAN_D1_PROTOCOL = 15` - that driver speaks PNU_CAN. **Reboot**
+3. `CAN_D1_PNU_*` now exist, 30 of them. Set `OPTS` for the devices fitted. **Reboot**
+4. `MNT1_TYPE = 15`, if a gimbal is fitted
+
+#### Physical CAN interface - `CAN_Pn_*`, 4 parameters
+
+| Parameter | Default | What it does |
+|---|---|---|
+| `CAN_P1_DRIVER` | **0 Disabled** on CubeOrangePlus | Which virtual driver this physical port feeds: `0:Disabled, 1:First, 2:Second, 3:Third`. Enable flag for the group - **must be 1** |
+| `CAN_P1_BITRATE` | **1000000** | Bus bit rate, 10,000 to 1,000,000. 1 Mbps is what every bench and flight test has run at. The ECU ICD also permits 500 kbps, which has never been tried here |
+| `CAN_P1_FDBITRATE` | HAL default | CANFD data-phase rate. **Not used** - PNU CAN is classic CAN |
+| `CAN_P1_OPTIONS` | 0 | Bitmask, `0:LogAllFrames`. Useful for diagnosis, expensive in log volume |
+
+#### Virtual CAN driver - `CAN_Dn_*`, 2 parameters
+
+| Parameter | Default | What it does |
+|---|---|---|
+| `CAN_D1_PROTOCOL` | **1 DroneCAN** | **Must be changed to `15:PNU_CAN`.** The default is not what this aircraft needs. Reboot required |
+| `CAN_D1_PROTOCOL2` | 0 Disabled | Secondary 11-bit slot. **Cannot carry PNU** - it is DroneCAN-hosted, takes one aux driver, and that driver must be a `CANSensor` with no thread. This is why one driver carries three backends; see `PMU-005` in `ISSUES.md` |
+
+#### PNU devices - `CAN_Dn_PNU_*`, 30 parameters
+
+All `@User: Advanced`. **28 of the 30 require a reboot** - only `MAINT` and `SCHK` take effect
+live. Twenty-eight of them are gimbal parameters.
+
+**Bus and devices**
+
+| Parameter | Default | What it does |
+|---|---|---|
+| `OPTS` | **1** | Which devices are on this bus: bit 0 PMU, bit 1 gimbal, bit 2 SAR. A device that is not selected is **not constructed at all** |
+| `SCHK` | **11** | Which SAR start-interlock checks (ICD 14.3.3) are enforced and which conditions (14.7) auto-terminate an observation: bit 0 RTK Fixed, bit 1 GPS fix age under 300 ms, bit 2 gimbal attitude age under 40 ms, bit 3 navigation health. **Bit 2 is clear by default** - that is the "ATT age check off, no source" boot warning |
+
+**Gimbal identity and protocol**
+
+| Parameter | Default | What it does |
+|---|---|---|
+| `TYPE` | 1 | Motor protocol, `1:CubeMars GLII`. Whether a gimbal is fitted is `OPTS` bit 1, not this |
+| `MODE` | 0 | Command format the motors are **already configured for**: `0:MIT, 1:Position-Velocity, 2:Velocity`. This does not configure the motor - the vendor PC utility does - and a mismatch is undefined behaviour |
+| `MSTID` | 0 | Arbitration ID the motors report feedback on. All three share it |
+| `ROLID` `PITID` `YAWID` | 1, 2, 3 | Per-axis motor CAN IDs. Range 1-15 and all three must differ: feedback carries only four bits of motor identity |
+
+**Encoding limits - these must match what is written in the motor, not the mount**
+
+| Parameter | Default | What it does |
+|---|---|---|
+| `PMAX` | 12.5 rad | Position encoding limit, used as plus and minus. **A mismatch does not fail - it silently rescales every command.** See the PMAX risk in `ISSUES.md` |
+| `VMAX` | 200 rad/s | Velocity encoding limit. **The manual is inconsistent about rad/s versus rev/s** - confirm with a measured low-speed rotation |
+| `KPMAX` | 500 | Stiffness encoding limit for MIT mode, 0 to this value |
+| `KDMAX` | 5.0 | Damping encoding limit for MIT mode, 0 to this value |
+| `TMAX` | 10 N m | Torque encoding limit. **An encoding range, not a permissible torque** for the fitted motor |
+
+**Travel and motion**
+
+| Parameter | Default | What it does |
+|---|---|---|
+| `MRLL` `MPIT` `MYAW` | 30, 30, 20 deg | Mechanical hard stops, plus and minus. Applied as the **last** clamp, so a conflict with `MNT1_*_MIN/MAX` shows up as the gimbal quietly refusing a commanded angle |
+| `MARG` | 5 deg | How far inside the hard stop the operating limit sits, per side |
+| `SLEW` | 45 deg/s | Maximum rate the gimbal angle command may change. Bounds how fast anything can tell a bulky payload to move, and is what makes the first target after startup safe |
+
+**Homing, ICD Appendix 1.** All provisional and unmeasured - `GIMBAL-002`.
+
+| Parameter | Default | What it does |
+|---|---|---|
+| `HOME` | **0, disabled** | Run the endpoint search at every boot to find the mechanical centre. The drives use a relative encoder whose zero is assumed not to persist |
+| `HVEL` | 10 deg/s | Approach speed toward a mechanical stop |
+| `HKD` | 0.5 | Damping throughout homing. **Stall torque is `HKD` multiplied by `HVEL` in rad/s** - the only thing bounding how hard the payload pushes into a hard stop |
+| `HKP` | 5.0 | Stiffness holding an axis in position during homing. Deliberately low |
+| `HSTL` | 1000 ms | How long an axis must move less than `HDLT`, while motion is still commanded, before it counts as having reached its stop |
+| `HDLT` | 0.1 deg | Movement below this over the `HSTL` window counts as stopped |
+| `HTOL` | 3.0 deg | How far measured stop-to-stop travel may differ from twice the mechanical limit before homing fails |
+| `HRTOL` | 0.5 deg | How closely two approaches to the same stop must agree. Answers "was that a real endpoint", where `HTOL` answers "is the axis obstructed" |
+
+**Direction and service**
+
+| Parameter | Default | What it does |
+|---|---|---|
+| `DRLL` `DPIT` `DYAW` | 0 | Per-axis rotation direction: 0 if a positive commanded angle increases the reported encoder position, 1 if it decreases it |
+| `MAINT` | 0 | `1` takes the FC completely off the CAN bus for the gimbal so a PC can reach a motor's UART for the vendor utility. Motors disabled, nothing transmitted. **Live, no reboot** |
+
+#### Mount - `MNTn_*`, 20 parameters per instance
+
+Sixteen group entries, but `_RETRACT` and `_NEUTRAL` are `Vector3f` and expand to `_X`/`_Y`/`_Z`.
+Only instance 1 is used on this aircraft.
+
+| Parameter | Default | What it does |
+|---|---|---|
+| `MNT1_TYPE` | 0 | Enable flag and backend. **15 PNUGimbal**, **11 Viewpro**, **6 MAVLink (Gremsy/AVT)**. `@User: Standard`, reboot required |
+| `MNT1_DEFLT_MODE` | 3 | `0:Retracted, 1:Neutral, 2:MAVLink Targeting, 3:RC Targeting, 4:GPS Point, 5:SysID Target, 6:Home Location` |
+| `MNT1_RC_RATE` | 0 | deg/s, 0 to 90. **0 means angle control**; non-zero switches RC to rate control |
+| `MNT1_OPTIONS` | 0 | Bitmask: `0:RC lock state from previous mode, 1:Return to neutral on RC failsafe, 2:Force FPV lock on roll and pitch` |
+| `MNT1_ROLL_MIN` `_MAX` | -30, +30 deg | **Operating** limits, which must sit inside `CAN_D1_PNU_MRLL` |
+| `MNT1_PITCH_MIN` `_MAX` | -90, **+20** deg | The default suits neither payload - see the pitch-limit row above |
+| `MNT1_YAW_MIN` `_MAX` | -180, +180 deg | **Set explicitly for Gremsy** - `GCS-003` |
+| `MNT1_RETRACT_X/Y/Z` | 0 | Roll, pitch and yaw in the retracted position |
+| `MNT1_NEUTRAL_X/Y/Z` | 0 | Roll, pitch and yaw in the neutral position |
+| `MNT1_LEAD_RLL` `_LEAD_PTCH` | 0.0 s | Stabilisation lead time |
+| `MNT1_SYSID_DFLT` | 0 | Target sysID for SysID Target mode |
+| `MNT1_DEVID` | 0 | **Internal use only** - written by the driver, not by an operator |
+
+**`MNT1_*_MIN/MAX` are operating limits; `CAN_D1_PNU_MRLL/MPIT/MYAW` are hard stops.** Keep the
+first inside the second with margin for stabilisation overshoot. The `MNT` dataflash record is
+constrained by `MNT1_*_MIN/MAX` again on the way out, so a too-tight limit narrows the log as
+well as the motion - see section 10.5.
+
+#### GCS link - `PNU_GCS_COMPAT`, 1 parameter
+
+The whole `PNU_` group, added in V5.1.31.
+
+| Parameter | Default | What it does |
+|---|---|---|
+| `PNU_GCS_COMPAT` | **0** | `0:Normal - all messages transmitted`, `1:Legacy GCS - suppress TM50 TM60 TM61`. `@User: Standard`, live, and **global across every MAVLink channel**. Values 2 and above are undefined and behave as 0, so a mis-set value cannot silently drop telemetry |
+
+Set `1` for a V5.1.0-era KGCS and `0` for PNU-GCS `V1.0.0-rc`. **Transmission only** - CAN
+polling, ECU decoding, engine commands, the step 2c interlock, the `ENERGYCFG` transaction and
+every dataflash record are identical at either setting. `GCS-005`.
+
+#### Known-good set for this aircraft
+
+```text
+CAN_P1_DRIVER      1
+CAN_P1_BITRATE     1000000
+CAN_D1_PROTOCOL    15          # PNU_CAN, NOT the default 1
+CAN_D1_PNU_OPTS    1           # PMU only; 3 adds the gimbal, 7 adds the SAR
+CAN_D1_PNU_SCHK    11
+MNT1_TYPE          15          # only if a gimbal is fitted
+PNU_GCS_COMPAT     0           # 1 for the legacy KGCS
+SERIALx_PROTOCOL   2           # MAVLink2 - never 1
+```
+
+`SERIALx_PROTOCOL` is outside these groups but belongs with them: every PNU-KAL ICD message is
+id 50001 or higher, which MAVLink1 cannot encode - `PNU-ISSUE D2`. `MAV_GCS_SYSID`, default 255,
+matters too: `TC50` and `TC60` are refused from any other system id - `GCS-002`.
 
 ### Architectural rules that must not be undone
 
