@@ -219,7 +219,7 @@ Reject wrong IDE/RTR/DLC, nonfinite command floats and invalid configured ranges
 ## Appendix 1. (For PNUGimbal Specific Application) Gimbal Payload Initialization Procedure Definition
 1. Purpose: Set the motor encoder position to zero to establish the initial neutral angular alignment of the gimbal payload.  
 2. Control mode: MIT mode.  
-3. Mechanical limits: Roll: -30 to +30 degrees; Tilt (Pitch): -30 to +30 degrees; Pan (Yaw): -20 to +20 degrees. All angles are defined in the gimbal frame coordinate system.  
+3. Mechanical limits: TILT (Roll): -30 to +30 degrees; BANK (Pitch): -30 to +30 degrees; PAN (Yaw): -20 to +20 degrees. All angles are defined in the gimbal joint coordinate system. TILT, BANK and PAN are the payload control-axis names for a right-facing payload; the values are unchanged and stay on the physical axes they were measured on. The configured restrictions for cable and structural clearance are preserved.  
 4. Feedback used for detection, as received by the flight controller (FC): Angle only. The Overcurrent, Undervoltage, and Overload status codes are emergency stop conditions, not endpoint detection criteria.  
 5. Zero-setting sequence:  
 - Find and reconfirm the CW endpoint, then record Theta_CW.
@@ -233,4 +233,6 @@ Reject wrong IDE/RTR/DLC, nonfinite command floats and invalid configured ranges
 - Apply the target position expressed in the new coordinate system.
 - Enter normal operation.
 6. Abort condition during initialization: Abort if the feedback Status/Error value is not 1.  
-7. Normal operating limits: Roll: -25 to +25 degrees; Tilt (Pitch): -25 to +25 degrees; Pan (Yaw): -15 to +15 degrees. All angles are defined in the gimbal frame coordinate system.  
+7. Normal operating limits: TILT (Roll): -25 to +25 degrees; BANK (Pitch): -25 to +25 degrees; PAN (Yaw): -15 to +15 degrees. All angles are defined in the gimbal joint coordinate system.
+
+Zero reference and installation geometry (PNUGimbal application, not manual content): the item 5 procedure establishes the encoder zero and the control zero together, and the FC targets TILT = 0, BANK = 0 and PAN = 0 against it. At that reference the installed mechanical TILT is -30 degrees. That figure is installation geometry: no offset for it is applied to FC targets or to joint-angle feedback, and antenna mechanical trim remains separate from the reported gimbal angles. The items 3 and 7 limits stay referenced to the gimbal joint coordinates, not to any payload or antenna frame.

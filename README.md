@@ -580,7 +580,7 @@ Only instance 1 is used on this aircraft.
 | `MNT1_PITCH_MIN` `_MAX` | -90, **+20** deg | The default suits neither payload - see the pitch-limit row above |
 | `MNT1_YAW_MIN` `_MAX` | -180, +180 deg | **Set explicitly for Gremsy** - `GCS-003` |
 | `MNT1_RETRACT_X/Y/Z` | 0 | Roll, pitch and yaw in the retracted position |
-| `MNT1_NEUTRAL_X/Y/Z` | 0 | Roll, pitch and yaw in the neutral position |
+| `MNT1_NEUTRAL_X/Y/Z` | 0 | Roll, pitch and yaw in the neutral position - `TILT`, `BANK`, `PAN` in that order, see the axis convention below |
 | `MNT1_LEAD_RLL` `_LEAD_PTCH` | 0.0 s | Stabilisation lead time |
 | `MNT1_SYSID_DFLT` | 0 | Target sysID for SysID Target mode |
 | `MNT1_DEVID` | 0 | **Internal use only** - written by the driver, not by an operator |
@@ -618,6 +618,69 @@ SERIALx_PROTOCOL   2           # MAVLink2 - never 1
 `SERIALx_PROTOCOL` is outside these groups but belongs with them: every PNU-KAL ICD message is
 id 50001 or higher, which MAVLink1 cannot encode - `PNU-ISSUE D2`. `MAV_GCS_SYSID`, default 255,
 matters too: `TC50` and `TC60` are refused from any other system id - `GCS-002`.
+
+### Payload axis and control convention
+
+The SAR payload is mounted **facing aircraft right**: in azimuth its boresight points along the
+airframe `+Y` axis at the nominal reference. Its functional control axes are **PAN** (azimuth),
+**TILT** (elevation) and **BANK**. That is payload-frame vocabulary only - **the implementation and
+every public parameter keep Roll, Pitch and Yaw**. `CAN_Dn_PNU_ROLID` `PITID` `YAWID`, `MRLL`
+`MPIT` `MYAW`, `DRLL` `DPIT` `DYAW`, every `MNT1_*` limit, `AP_PNUGIMBAL_AXIS_*` and the `MNT` log
+columns are gimbal-axis names and are not renamed.
+
+| Payload control axis | Existing gimbal axis | Positive rotation sense at the nominal axis reference |
+|---|---|---|
+| **PAN** | `Yaw` | **Same** |
+| **TILT** | `Roll` | **Opposite** |
+| **BANK** | `Pitch` | **Same** |
+
+The table defines **axis correspondence and the intended rotation senses at the nominal reference,
+and nothing more.**
+
+- **Actual motor command and encoder feedback signs still require hardware verification** against
+  `DRLL`, `DPIT` and `DYAW`. All three are `0` by default and none has been checked against a
+  motor. Do not carry a sign from this table into a command or a feedback interpretation until
+  they have been.
+- **General three-axis attitude reconstruction requires rotation composition.** Euler components
+  cannot be added or subtracted independently - `SAR_ICD_PNU.md` section 16.4 governs.
+
+**Zero targets and the homing reference**
+
+**The FC targets PAN = 0 deg, TILT = 0 deg and BANK = 0 deg.**
+
+At the homing reference, **control TILT is 0 deg and the installed mechanical TILT is -30 deg.**
+That -30 deg is **installation geometry** and is recorded here as such. **No offset for it is
+applied** to FC targets or to joint-angle feedback. Antenna mechanical trim is a separate quantity
+from the reported gimbal angles and is not folded into them.
+
+**`MNT1_NEUTRAL_X/Y/Z`**
+
+Optional **Neutral-mode** setpoints - roll, pitch and yaw in that order, which under the table
+above are **TILT, BANK and PAN**. All three default to `0`, and **zero setpoints need no sign
+conversion**, which is why this convention changes nothing on the aircraft as configured today. A
+future non-zero setpoint must follow the documented axis convention and the verified motor
+directions.
+
+**Neutral mode is not a zero attitude target in a stabilised mode.** Neutral holds a fixed joint
+setpoint. A zero attitude target in a stabilised mode is an earth-referenced demand, and the FC
+can and will issue non-zero motor commands to hold it while the aircraft moves.
+
+**Euler sequence and interface scope**
+
+The zero-target convention **does not depend on an Euler rotation sequence** - all three targets
+are zero, so no ordering question arises. It arises for three-axis reconstruction, which is step 3f
+work and is not implemented.
+
+- `Quaternion::from_euler(roll, pitch, yaw)` in `AP_Math` is the **aerospace 3-2-1 sequence**, yaw
+  then pitch then roll. `from_euler312()` / `from_vector312()` in the same library is the 3-1-2
+  alternative and is **not** interchangeable with it.
+- **Reconstruction from joint feedback follows the physical nesting order of the gimbal axes.**
+  That is a different question from the convention above, and the order is **pending confirmation
+  from hardware or the mechanical drawings** - section 5 step 3f item 3.
+- **`0x404` is preserved.** Its name, id, DLC, field layout, types and multiplication of 100 are
+  fixed by `SAR_ICD_PNU.md` section 16.1. **Gimbal angles are not antenna pointing**: the fixed
+  transform between the SAR reference axes and the antenna electrical pointing axis is still to be
+  agreed - section 5 step 3f item 4. `0x404` remains unpopulated, `SAR-001`.
 
 ### Architectural rules that must not be undone
 

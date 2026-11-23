@@ -21,6 +21,75 @@ A feature exercised only in SITL is **not** hardware-verified. Entries say so ex
 
 ---
 
+## Documents, 2026-11-23 - PAN, TILT and BANK for the right-facing payload (no version bump)
+
+**No firmware change.** No code, parameter, default, MAVLink message or log format is
+touched; the aircraft behaves exactly as it did. This entry records a naming and sign
+convention and the decisions taken while writing it. `SAR_ICD_PNU.md` was read for interface
+context and **not edited** - it is jointly owned under section 1.1 and cannot be revised
+unilaterally.
+
+**Changes**
+
+- `README.md` section 8 gains **`### Payload axis and control convention`**, placed directly
+  under the Mount and PNUGimbal parameter tables. It names PAN, TILT and BANK as the payload's
+  functional control axes for a payload facing aircraft right (`+Y`) in azimuth, maps them onto
+  the existing gimbal axes, fixes the zero targets, describes `MNT1_NEUTRAL_X/Y/Z` in the new
+  vocabulary, and bounds what the mapping does and does not assert.
+- `README.md` section 8: the `MNT1_NEUTRAL_X/Y/Z` row now names TILT, BANK and PAN in order and
+  points at that subsection, so the quick row and the convention cannot drift apart.
+- `PNUGimbal_CAN_Protocol_Type_CubeMars.md` **Appendix 1 items 3 and 7**: `Tilt (Pitch)` is
+  gone. The items now read **TILT (Roll)**, **BANK (Pitch)** and **PAN (Yaw)**, "gimbal frame"
+  is tightened to "gimbal joint coordinate system", and the cable and structural clearance
+  restrictions are stated as preserved. A closing paragraph records the zero reference.
+
+**Decisions recorded 2026-11-23**
+
+| Decision | What it means |
+|---|---|
+| **PAN maps to `Yaw`, same sense; TILT maps to `Roll`, opposite sense; BANK maps to `Pitch`, same sense** | Axis correspondence and intended rotation sense **at the nominal reference only** |
+| **The implementation and every public parameter keep Roll, Pitch and Yaw** | `ROLID` `PITID` `YAWID`, `MRLL` `MPIT` `MYAW`, `DRLL` `DPIT` `DYAW`, every `MNT1_*` limit, `AP_PNUGIMBAL_AXIS_*` and the `MNT` log columns are unchanged. Pan/Tilt/Bank is interface vocabulary and stops at the interface |
+| **The FC targets PAN = 0 deg, TILT = 0 deg, BANK = 0 deg** | No Euler ordering question arises: all three targets are zero |
+| At the homing reference, control TILT is 0 deg and **installed mechanical TILT is -30 deg** | Installation geometry, recorded as such. **No offset for it is applied** to FC targets or to joint-angle feedback. Antenna mechanical trim stays separate from the reported gimbal angles |
+| `MNT1_NEUTRAL_X/Y/Z` are Neutral-mode roll, pitch and yaw setpoints - **TILT, BANK, PAN in that order** | All three default to 0 and **zero needs no sign conversion**, which is why this convention changes nothing today. A future non-zero setpoint follows the convention and the verified motor directions |
+| Neutral mode is **not** a zero attitude target in a stabilised mode | Neutral holds a fixed joint setpoint. A zero attitude target is earth-referenced and the FC will issue non-zero motor commands to hold it while the aircraft moves |
+| Appendix 1's values **stay on the physical axes they were measured on** | Mechanical 30 / 30 / 20 and operating 25 / 25 / 15 are unchanged. Only the functional label moved, so elevation is the `MRLL` axis and azimuth the `MYAW` axis |
+| `0x404` is preserved | Name, id, DLC, layout, types and multiplication of 100 are fixed by ICD section 16.1. Earth-referenced payload attitude is produced by rotation composition, never by renaming or re-signing the three gimbal angles |
+
+**Verification**
+
+- Document only. No build, no test, and nothing here was executed.
+- The two API statements were read out of the tree before being written down, not recalled:
+  `Quaternion::from_euler(roll, pitch, yaw)` at `libraries/AP_Math/quaternion.cpp:421` is the
+  standard 3-2-1 half-angle form, and `from_euler312()` / `from_vector312()` is the separate
+  3-1-2 path; `MNT_NEUTRAL_X/Y/Z` are roll, pitch and yaw in that order per the `@Param` blocks
+  in `AP_Mount_Params.cpp`.
+- `README.md` is ASCII-only, no tabs, no CRLF, the new table column-consistent, section 8
+  heading order intact. The 31 non-ASCII lines in the CubeMars document are all pre-existing
+  and all above Appendix 1; the edited items and the new paragraph are ASCII.
+- The trailing two spaces on Appendix 1 item 3 are kept deliberately - every numbered item in
+  that appendix ends with a Markdown hard break.
+
+**Known Limitations**
+
+- **The mapping is a convention, not a measurement.** It follows from the stated payload-to-
+  airframe frame mapping and from the assumption, stated in the subsection, that the two down
+  axes coincide at neutral. Neither has been checked against hardware or a drawing.
+- **No sign here may be carried into a motor command or a feedback interpretation yet.**
+  `DRLL`, `DPIT` and `DYAW` are 0 by default and none has ever been checked against a motor.
+- **Appendix 1 previously read `Tilt (Pitch)`**, the opposite reading, and those two items are
+  where the `MRLL` / `MPIT` / `MYAW` defaults came from. The values were kept on their existing
+  physical axes as instructed, but **which physical axis each limit was measured on is still a
+  mechanical fact owed by PNU** - section 5 step 3f item 3.
+- The -30 deg mechanical TILT was supplied for the record. This project has not measured it.
+- The gimbal axis **nesting order** is still unknown, so no reconstruction from joint feedback
+  can be written - section 5 step 3f item 3. The fixed transform from the SAR reference axes to
+  the antenna electrical pointing axis is still to be agreed with Lumir - item 4.
+- `0x404` remains unpopulated (`SAR-001`) and no gimbal backend is constructed on this aircraft
+  at all: `CAN_D1_PNU_OPTS` is 1. `GIMBAL-001` and `GIMBAL-002` stay open.
+
+---
+
 ## Firmware, 2026-11-23 - the gimbal motor id defaults become yaw 1, pitch 2, roll 3 (no version bump)
 
 `CAN_Dn_PNU_ROLID` 1 -> **3** and `CAN_Dn_PNU_YAWID` 3 -> **1**. `PITID` stays 2. Defaults
