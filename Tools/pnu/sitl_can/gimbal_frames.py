@@ -3,7 +3,7 @@
 PNU : the CubeMars GLII CAN wire format, as a gimbal motor speaks it.
 
 Wire format only - no sockets, no state, no motion.  Every id, bit layout, DLC and
-encoding here comes from libraries/PNUGimbal_CAN_Protocol_Type_CubeMars.md, which is
+encoding here comes from PNUGimbal_CAN_Protocol_Type_CubeMars.md, which is
 itself a reading of gl-ii-gimbal-motor-drive-user-manual.pdf V1.0.0, and is cross-checked
 against AP_PNUGimbal_CubeMars.h by test_fake_gimbal.py.
 

@@ -35,8 +35,7 @@ REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file_
                                          '..', '..', '..'))
 CUBEMARS_HEADER = os.path.join(REPO_ROOT, 'libraries', 'AP_PNUGimbal',
                                'AP_PNUGimbal_CubeMars.h')
-PROTOCOL_DOC = os.path.join(REPO_ROOT, 'libraries',
-                            'PNUGimbal_CAN_Protocol_Type_CubeMars.md')
+PROTOCOL_DOC = os.path.join(REPO_ROOT, 'PNUGimbal_CAN_Protocol_Type_CubeMars.md')
 
 LIMITS = icd.Limits()
 

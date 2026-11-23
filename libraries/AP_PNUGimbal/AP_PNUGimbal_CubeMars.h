@@ -7,7 +7,7 @@
 #include "AP_PNUGimbal_Backend.h"
 
 // PNU : CubeMars GLII driver-family CAN protocol, as specified in
-// libraries/PNUGimbal_CAN_Protocol_Type_CubeMars.md.  Section references below are to
+// PNUGimbal_CAN_Protocol_Type_CubeMars.md.  Section references below are to
 // that file, which is itself a reading of gl-ii-gimbal-motor-drive-user-manual.pdf
 // V1.0.0.  Target hardware is three GL60 II KV28, one per axis.
 //

@@ -9,7 +9,7 @@
 #include <AP_PNU_CAN/AP_PNU_CAN.h>
 
 // PNU : the Appendix 1 gimbal payload initialisation procedure, from
-// libraries/PNUGimbal_CAN_Protocol_Type_CubeMars.md.
+// PNUGimbal_CAN_Protocol_Type_CubeMars.md.
 //
 // THIS IS THE MOST HAZARDOUS ROUTINE IN THIS DRIVER.  It deliberately drives a bulky SAR
 // payload into three sets of mechanical hard stops, and it does so with the mechanical

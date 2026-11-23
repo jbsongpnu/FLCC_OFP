@@ -1448,7 +1448,7 @@ came to list them.
 ## The CubeMars manual's own errors, pinned deliberately
 
 Five protocol facts worth not rediscovering, all from
-`libraries/PNUGimbal_CAN_Protocol_Type_CubeMars.md`:
+`PNUGimbal_CAN_Protocol_Type_CubeMars.md`:
 
 1. **The encoding limits are device configuration, not constants.** See the PMAX risk above.
 2. **MIT fields are unsigned offset integers**, not two's complement and not float32. Packed zero
