@@ -21,6 +21,59 @@ A feature exercised only in SITL is **not** hardware-verified. Entries say so ex
 
 ---
 
+## Firmware, 2026-11-23 - the gimbal motor id defaults become yaw 1, pitch 2, roll 3 (no version bump)
+
+`CAN_Dn_PNU_ROLID` 1 -> **3** and `CAN_Dn_PNU_YAWID` 3 -> **1**. `PITID` stays 2. Defaults
+only: the parameter indices (5, 6, 7), names, ranges and descriptions are untouched, so an
+FC that has already stored a value keeps it and only fresh parameter storage picks the new
+allocation up.
+
+The bus map does not move. Gimbal commands still occupy `0x001`-`0x00F`, `0x101`-`0x10F`
+and `0x201`-`0x20F` and still clear the SAR's `0x400`-`0x7FF`; only which axis answers to
+which id has changed.
+
+**Changes**
+
+- `AP_PNU_CAN.cpp`: two `AP_GROUPINFO` default literals.
+- `gimbal_model.py` gains `DEFAULT_MOTOR_IDS = (3, 2, 1)`, beside the `AXIS_NAMES` and
+  `DEFAULT_TRAVEL_DEG` it already owns. `GimbalModel`, `FakeGimbal` and the `--motor-ids`
+  argparse default all read from it instead of repeating the numbers.
+- **The fakes had to move with the firmware.** `GimbalModel` maps `motor_ids` positionally
+  onto `('roll', 'pitch', 'yaw')` and its default was `(1, 2, 3)`. Left alone it would have
+  taken the FC's roll command on `0x003` as a yaw command and answered with feedback that
+  looked entirely plausible. Nothing in the protocol would have reported the mismatch.
+- `test_fake_gimbal.py`: eight tests addressed motor id 1 and then asserted `axes[0]` had
+  moved. They now take the id from `DEFAULT_MOTOR_IDS[0]`. The five assertions that pin
+  `0x001` / `0x101` / `0x201` / `0x10F` / `0x203` keep their literals - those are the
+  manual's own worked arbitration-id rows, facts about the protocol rather than about this
+  airframe.
+- `README.md`: the `ROLID` `PITID` `YAWID` row in section 8 now reads 3, 2, 1.
+
+**Verification**
+
+| What | How |
+|---|---|
+| `./waf copter` for CubeOrangePlus: 1,743,528 B flash used, 222,544 B free | Build |
+| 23 tests in `test_fake_gimbal.py`, all passing | Unit test |
+| `GimbalModel()` reports roll id 3, pitch id 2, yaw id 1 | Unit test |
+| `param_parse.py` output: `ROLID`, `PITID`, `YAWID` and `MSTID` keep their names, display names, descriptions and ranges | Build |
+| `flake8` clean on the three changed Python files; `run_astyle.py --dry-run` clean | Build |
+
+**Known Limitations**
+
+- **This is an allocation, not a measurement.** The id a motor answers to is written into
+  it with the vendor PC utility, and the firmware has no way to ask. If the motors are
+  wired or configured to a different mapping, the FC drives the wrong axis and every layer
+  below reports success. Confirming the three ids against the parameters is already item 1
+  of the `GIMBAL-001` bench checklist.
+- No gimbal hardware has been run. `GIMBAL-001` stays open, and the gimbal backend is not
+  constructed on this aircraft at all: `CAN_D1_PNU_OPTS` is 1.
+- The driver still holds a single Master ID for all three motors. Nothing here addresses
+  the unresolved question in section 7 of the protocol document about whether three motors
+  sharing one feedback arbitration id collide on the bus.
+
+---
+
 ## V5.1.31 - one parameter, so the old ground station can fly
 
 `PNU_GCS_COMPAT`. No other behaviour changed, and at its default nothing changes at all.

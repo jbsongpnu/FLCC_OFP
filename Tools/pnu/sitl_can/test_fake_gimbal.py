@@ -29,7 +29,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import gimbal_frames as icd                                                 # noqa: E402
 from fake_gimbal import FakeGimbal, CAN_FRAME_FMT, CAN_RTR_FLAG             # noqa: E402
-from gimbal_model import GimbalModel                                        # noqa: E402
+from gimbal_model import GimbalModel, DEFAULT_MOTOR_IDS                     # noqa: E402
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                          '..', '..', '..'))
@@ -38,6 +38,10 @@ CUBEMARS_HEADER = os.path.join(REPO_ROOT, 'libraries', 'AP_PNUGimbal',
 PROTOCOL_DOC = os.path.join(REPO_ROOT, 'PNUGimbal_CAN_Protocol_Type_CubeMars.md')
 
 LIMITS = icd.Limits()
+
+# these tests drive 'the roll axis', which is model.axes[0]; its motor id is a
+# default, not a constant, so take it from the one place that owns it
+ROLL_ID = DEFAULT_MOTOR_IDS[0]
 
 
 def make_gimbal(**kwargs):
@@ -174,7 +178,7 @@ def test_a_mit_command_moves_the_axis_and_answers_once():
     gimbal = make_gimbal()
     # velocity-style MIT, exactly as the homing sweep sends it: kp 0, kd > 0
     payload = icd.encode_mit(0.0, math.radians(10.0), 0.0, 0.5, 0.0, LIMITS)
-    gimbal.handle_frame(frame(icd.command_id(icd.MODE_MIT, 1), payload))
+    gimbal.handle_frame(frame(icd.command_id(icd.MODE_MIT, ROLL_ID), payload))
     assert len(gimbal.sent) == 1, 'per-command feedback must answer exactly once'
     assert gimbal.sent[0][0] == gimbal.master_id, 'feedback goes to the Master ID'
 
@@ -187,7 +191,7 @@ def test_a_mit_command_moves_the_axis_and_answers_once():
 def test_a_command_in_the_wrong_mode_is_refused():
     '''sec 1 : the command's mode bits must match the configured mode'''
     gimbal = make_gimbal(mode=icd.MODE_MIT)
-    gimbal.handle_frame(frame(icd.command_id(icd.MODE_POSVEL, 1), bytes(8)))
+    gimbal.handle_frame(frame(icd.command_id(icd.MODE_POSVEL, ROLL_ID), bytes(8)))
     assert gimbal._bad_mode_seen == 1
     assert gimbal.sent == [], 'a refused command must not be acknowledged'
     assert gimbal.model.axes[0].cmd is None
@@ -196,10 +200,10 @@ def test_a_command_in_the_wrong_mode_is_refused():
 def test_a_velocity_command_with_the_wrong_dlc_is_refused():
     '''sec 6 : velocity mode is DLC 4, deliberately not 8'''
     gimbal = make_gimbal(mode=icd.MODE_VEL)
-    gimbal.handle_frame(frame(icd.command_id(icd.MODE_VEL, 1), bytes(8), dlc=8))
+    gimbal.handle_frame(frame(icd.command_id(icd.MODE_VEL, ROLL_ID), bytes(8), dlc=8))
     assert gimbal.model.axes[0].cmd is None
     assert gimbal.sent == []
-    gimbal.handle_frame(frame(icd.command_id(icd.MODE_VEL, 1),
+    gimbal.handle_frame(frame(icd.command_id(icd.MODE_VEL, ROLL_ID),
                               struct.pack('<f', 1.0), dlc=4))
     assert gimbal.model.axes[0].cmd == ('vel', 1.0)
 
@@ -214,7 +218,7 @@ def test_an_unknown_motor_id_is_counted_not_answered():
 def test_remote_frames_are_rejected():
     '''the PMU's RTR polls are extended and never arrive, so an RTR here is a fault'''
     gimbal = make_gimbal()
-    gimbal.handle_frame(frame(icd.command_id(icd.MODE_MIT, 1) | CAN_RTR_FLAG, bytes(8)))
+    gimbal.handle_frame(frame(icd.command_id(icd.MODE_MIT, ROLL_ID) | CAN_RTR_FLAG, bytes(8)))
     assert gimbal.sent == []
     assert gimbal.model.axes[0].cmd is None
 
@@ -222,11 +226,11 @@ def test_remote_frames_are_rejected():
 def test_feedback_modes():
     off = make_gimbal(fb_mode='off')
     payload = icd.encode_mit(0.0, 0.0, 0.0, 0.5, 0.0, LIMITS)
-    off.handle_frame(frame(icd.command_id(icd.MODE_MIT, 1), payload))
+    off.handle_frame(frame(icd.command_id(icd.MODE_MIT, ROLL_ID), payload))
     assert off.sent == [], '--fb-mode off must transmit nothing at all'
 
     periodic = make_gimbal(fb_mode='periodic', fb_rate=100.0)
-    periodic.handle_frame(frame(icd.command_id(icd.MODE_MIT, 1), payload))
+    periodic.handle_frame(frame(icd.command_id(icd.MODE_MIT, ROLL_ID), payload))
     assert periodic.sent == [], 'periodic mode must not answer the command'
     periodic._next_fb = 0.0
     periodic.tick(1.0)
@@ -236,7 +240,7 @@ def test_feedback_modes():
 def test_the_universal_commands_reach_the_model():
     gimbal = make_gimbal()
     roll = gimbal.model.axes[0]
-    can_id = icd.command_id(icd.MODE_MIT, 1)
+    can_id = icd.command_id(icd.MODE_MIT, ROLL_ID)
 
     gimbal.handle_frame(frame(can_id, icd.build_universal(icd.UNIVERSAL_DISABLE)))
     assert roll.enabled is False and roll.status == icd.STATUS_DISABLED

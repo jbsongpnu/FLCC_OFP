@@ -57,6 +57,11 @@ AXIS_NAMES = ('roll', 'pitch', 'yaw')
 # (25/25/15) are the driver's business, not the motor's, and are not modelled here.
 DEFAULT_TRAVEL_DEG = (30.0, 30.0, 20.0)
 
+# roll, pitch, yaw - the CAN_Dn_PNU_ROLID/PITID/YAWID defaults.  The FC addresses a
+# motor by the id written into it with the vendor PC utility, so a fake that assumed
+# a different allocation would drive the wrong axis and look plausible doing it.
+DEFAULT_MOTOR_IDS = (3, 2, 1)
+
 # N.m/rad.  See the header: a knob, not a measurement.  At the homing defaults
 # (HKD 0.5, HVEL 10 deg/s) the stall torque is about 0.087 N.m, so this gives roughly a
 # quarter of a degree of deflection - visible, and half of PNU_HRTOL's default.
@@ -235,7 +240,7 @@ class Axis(object):
 
 
 class GimbalModel(object):
-    def __init__(self, motor_ids=(1, 2, 3), travel_deg=DEFAULT_TRAVEL_DEG,
+    def __init__(self, motor_ids=DEFAULT_MOTOR_IDS, travel_deg=DEFAULT_TRAVEL_DEG,
                  limits=None, stop_stiffness=DEFAULT_STOP_STIFFNESS):
         self.limits = limits or icd.Limits()
         self.axes = []

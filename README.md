@@ -525,7 +525,7 @@ live. Twenty-eight of them are gimbal parameters.
 | `TYPE` | 1 | Motor protocol, `1:CubeMars GLII`. Whether a gimbal is fitted is `OPTS` bit 1, not this |
 | `MODE` | 0 | Command format the motors are **already configured for**: `0:MIT, 1:Position-Velocity, 2:Velocity`. This does not configure the motor - the vendor PC utility does - and a mismatch is undefined behaviour |
 | `MSTID` | 0 | Arbitration ID the motors report feedback on. All three share it |
-| `ROLID` `PITID` `YAWID` | 1, 2, 3 | Per-axis motor CAN IDs. Range 1-15 and all three must differ: feedback carries only four bits of motor identity |
+| `ROLID` `PITID` `YAWID` | 3, 2, 1 | Per-axis motor CAN IDs. Range 1-15 and all three must differ: feedback carries only four bits of motor identity |
 
 **Encoding limits - these must match what is written in the motor, not the mount**
 

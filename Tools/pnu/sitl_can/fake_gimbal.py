@@ -49,7 +49,8 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import gimbal_frames as icd                                     # noqa: E402
-from gimbal_model import GimbalModel, DEFAULT_TRAVEL_DEG, DEFAULT_STOP_STIFFNESS  # noqa: E402
+from gimbal_model import (GimbalModel, DEFAULT_MOTOR_IDS, DEFAULT_TRAVEL_DEG,     # noqa: E402
+                          DEFAULT_STOP_STIFFNESS)
 
 CAN_EFF_FLAG = 0x80000000
 CAN_RTR_FLAG = 0x40000000
@@ -63,7 +64,8 @@ TICK_HZ = 200.0         # finer than the driver's 100 Hz so a command is never m
 
 class FakeGimbal(object):
 
-    def __init__(self, interface, mode=icd.MODE_MIT, master_id=0, motor_ids=(1, 2, 3),
+    def __init__(self, interface, mode=icd.MODE_MIT, master_id=0,
+                 motor_ids=DEFAULT_MOTOR_IDS,
                  travel_deg=DEFAULT_TRAVEL_DEG, limits=None,
                  stop_stiffness=DEFAULT_STOP_STIFFNESS,
                  fb_mode='per-command', fb_rate=0.0, verbose=False):
@@ -458,7 +460,8 @@ def main():
                         help='the mode the motors were configured for with the PC utility')
     parser.add_argument('--master-id', type=lambda s: int(s, 0), default=0,
                         help='feedback arbitration id, must match CAN_Dn_PNU_MSTID')
-    parser.add_argument('--motor-ids', default='1,2,3',
+    parser.add_argument('--motor-ids',
+                        default=','.join(str(i) for i in DEFAULT_MOTOR_IDS),
                         help='roll,pitch,yaw CAN ids; keep them 1-15, see sec 7 ID conflict')
     parser.add_argument('--travel', type=parse_travel, default=DEFAULT_TRAVEL_DEG,
                         help='mechanical stops in degrees, "30,30,20" or "-30:30,..."')

@@ -70,7 +70,7 @@ const AP_Param::GroupInfo AP_PNU_CAN::var_info[] = {
     // @Range: 1 15
     // @User: Advanced
     // @RebootRequired: True
-    AP_GROUPINFO("ROLID", 5, AP_PNU_CAN, _motor_id[AP_PNUGIMBAL_AXIS_ROLL], 1),
+    AP_GROUPINFO("ROLID", 5, AP_PNU_CAN, _motor_id[AP_PNUGIMBAL_AXIS_ROLL], 3),
 
     // @Param: PITID
     // @DisplayName: PNU gimbal pitch motor CAN ID
@@ -86,7 +86,7 @@ const AP_Param::GroupInfo AP_PNU_CAN::var_info[] = {
     // @Range: 1 15
     // @User: Advanced
     // @RebootRequired: True
-    AP_GROUPINFO("YAWID", 7, AP_PNU_CAN, _motor_id[AP_PNUGIMBAL_AXIS_YAW], 3),
+    AP_GROUPINFO("YAWID", 7, AP_PNU_CAN, _motor_id[AP_PNUGIMBAL_AXIS_YAW], 1),
 
     // @Param: PMAX
     // @DisplayName: PNU gimbal position encoding limit
